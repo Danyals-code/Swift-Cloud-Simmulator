@@ -66,7 +66,7 @@ describe('the problems an AI answer brings to the preview', () => {
   })
 
   it('does not count warnings, or views the preview cannot draw, which Xcode still builds', async () => {
-    const after = counter('            Text("Count: \\(count)").glassEffect()\n            Image(systemName: "figure.run.circle.fill.badge.questionmark")\n            HeartRateMonitor()')
+    const after = counter('            Text("Count: \\(count)").drawingGroup()\n            Image(systemName: "figure.run.circle.fill.badge.questionmark")\n            HeartRateMonitor()')
     const result = await compileHere(after)
     expect(result.diagnostics.filter(d => d.severity === 'warning').length).toBeGreaterThanOrEqual(3)
     expect(result.renderTree?.nodes.some(node => node.kind === 'placeholder')).toBe(true)

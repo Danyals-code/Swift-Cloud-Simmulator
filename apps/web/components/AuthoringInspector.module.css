@@ -90,6 +90,10 @@ details.settingsSection[open] > summary + * { margin-top: 12px; }
 .spacing > button:hover:not(:disabled) { background: var(--color-xc-fill-strong); }
 .spacing > button[aria-pressed='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
 .spacing > button:disabled { opacity: .4; }
+/* A number's unit, at the end of its field, as the layer sections' fields show one. */
+.unit { position: relative; display: flex; flex: 1; min-width: 0; }
+.unit > input { flex: 1; padding-right: 26px; }
+.unit > span { position: absolute; inset: 0 8px 0 auto; display: flex; align-items: center; font-size: var(--text-caption); color: var(--color-xc-text-3); pointer-events: none; }
 
 /* How a stack lays its views out, drawn small. */
 .layoutGuide { display: grid; gap: 8px; padding: 12px; border-radius: var(--radius-lg); background: var(--color-xc-bar-raised); }
@@ -196,6 +200,7 @@ details.settingsSection[open] > summary + * { margin-top: 12px; }
 .modifierToggle { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; min-height: 36px; padding: 0 4px 0 0; color: var(--color-xc-text); text-align: left; }
 .modifierToggle > span:last-child { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .modifierToggle strong { flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-body); font-weight: 500; }
+.claimedTag { flex-shrink: 0; padding: 0 5px; border-radius: var(--radius-sm); background: var(--color-xc-fill); font-size: var(--text-caption); font-style: normal; line-height: 16px; color: var(--color-xc-text-2); }
 .modifierToggle small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-xc-text-3); }
 /* The disclosure chevron, drawn rather than typed, turning as the card opens. */
 .chevron { flex-shrink: 0; width: 12px; height: 12px; font-size: 0; background-color: var(--color-xc-text-3); -webkit-mask: var(--chevron-right-mask) center / 10px 10px no-repeat; mask: var(--chevron-right-mask) center / 10px 10px no-repeat; transition: transform var(--duration-fast) var(--ease-in-out); }

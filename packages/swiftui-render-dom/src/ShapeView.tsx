@@ -4,7 +4,7 @@ import { cssColor, cssFill, shapePath, type Fill, type InnerShadow, type ShapePa
 /** SVG preserves centered strokes, inset strokes, circles and true capsules. */
 export function ShapeView({ shape, width, height }: { shape: ShapePayload; width: number; height: number }) {
   const inset = shape.stroke?.placement === 'inside' ? shape.stroke.width / 2 : 0
-  return <VectorPathView path={{ d: shapePath(shape.shape, width, height, shape.cornerRadius, shape.cornerStyle, inset), fill: shape.fill, stroke: shape.stroke }} width={width} height={height} trim={shape.trim} />
+  return <VectorPathView path={{ d: shapePath(shape.shape, width, height, shape.cornerRadii ?? shape.cornerRadius, shape.cornerStyle, inset), fill: shape.fill, stroke: shape.stroke }} width={width} height={height} trim={shape.trim} />
 }
 
 /**

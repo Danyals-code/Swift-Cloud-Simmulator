@@ -171,6 +171,17 @@ export type ShapeKind =
   | 'spinner'
 
 export type CornerStyle = 'circular' | 'continuous'
+
+/**
+ * A radius per corner, as `UnevenRoundedRectangle` and `RectangleCornerRadii` name them.
+ * The preview lays out left to right, so leading is the left side and trailing the right.
+ */
+export interface CornerRadii {
+  readonly topLeading: number
+  readonly bottomLeading: number
+  readonly bottomTrailing: number
+  readonly topTrailing: number
+}
 export interface StrokeOptions { readonly lineCap?: 'butt' | 'round' | 'square'; readonly lineJoin?: 'miter' | 'round' | 'bevel'; readonly miterLimit?: number; readonly dash?: readonly number[]; readonly dashPhase?: number }
 export interface ShapeStroke extends StrokeOptions {
   readonly color: RGBA
@@ -192,10 +203,18 @@ export interface SliderPayload {
   readonly ticks?: readonly number[]
 }
 
+export interface ClipShape {
+  readonly kind: ShapeKind
+  readonly cornerStyle?: CornerStyle
+  readonly cornerRadii?: CornerRadii
+}
+
 export interface ShapePayload {
   readonly cornerStyle?: CornerStyle
   readonly shape: ShapeKind
   readonly cornerRadius?: number
+  /** A rounded rectangle's own radius at each corner, in place of `cornerRadius`. */
+  readonly cornerRadii?: CornerRadii
   readonly fill?: Fill
   readonly stroke?: ShapeStroke
   readonly trim?: ShapeTrim
@@ -418,7 +437,8 @@ export interface RenderNode {
   readonly anchorId?: string
   readonly slider?: SliderPayload
   readonly cornerStyle?: CornerStyle
-  readonly clipShape?: { readonly kind: ShapeKind; readonly cornerStyle?: CornerStyle }
+  /** The outline children are clipped to; `cornerRadii` gives each corner its own radius. */
+  readonly clipShape?: ClipShape
   /**
    * ViewIdentity - stable across re-renders for the same logical view. Drives DOM
    * reuse, `@State` box lookup, and FLIP animation. See docs/02-ARCHITECTURE.md §6.2.

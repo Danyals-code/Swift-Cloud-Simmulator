@@ -9,9 +9,18 @@ export interface DesignControl {
   readonly source: SourceSpan
   readonly label: string
   readonly group?: string
-  readonly kind: 'text' | 'number' | 'select'
+  /** A toggle is a switch for a Swift `true` or `false`, which are its values. */
+  readonly kind: 'text' | 'number' | 'select' | 'toggle'
   readonly integer?: boolean
   readonly value: string
+  /**
+   * What a number is measured in, shown beside it. A `%` value is a share of one, as
+   * `.opacity(0.5)` takes it: the field shows and takes it times 100, and the value, min
+   * and max stay as Swift writes them.
+   */
+  readonly unit?: 'pt' | '%' | '°'
+  /** How much one step changes a number, in the value's own terms as min and max are: 0.01 is 1%. */
+  readonly step?: number
   /** A select's choices; for a number, the words it takes besides numbers, such as a stack's Spacing `auto` (D4). */
   readonly options?: readonly string[]
   /** A visible control that cannot currently be changed safely. */

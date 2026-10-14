@@ -26,6 +26,7 @@ const STROKE = {
   'chevron-right': 'M6.25 4 10.25 8l-4 4',
   'chevron-up-down': 'M5 6.75 8 3.75l3 3M5 9.25l3 3 3-3',
   plus: 'M8 3.5v9M3.5 8h9',
+  minus: 'M3.5 8h9',
   search: 'M7.25 2.5a4.75 4.75 0 1 0 0 9.5 4.75 4.75 0 0 0 0-9.5ZM10.75 10.75 13.5 13.5',
   xmark: 'M4 4l8 8M12 4l-8 8',
   check: 'M3.5 8.5 6.5 11.5 12.5 4.5',
@@ -104,6 +105,22 @@ const STROKE = {
   /** Settings: a gear, as SF Symbols' gearshape. */
   settings:
     'M12.69 6.57 14.18 6.8v2.4l-1.49.23-.36.87.89 1.22-1.7 1.7-1.22-.89-.87.36-.23 1.49H6.8l-.23-1.49-.87-.36-1.22.89-1.7-1.7.89-1.22-.36-.87-1.49-.23V6.8l1.49-.23.36-.87-.89-1.22 1.7-1.7 1.22.89.87-.36.23-1.49h2.4l.23 1.49.87.36 1.22-.89 1.7 1.7-.89 1.22.36.87ZM8 5.9a2.1 2.1 0 1 0 0 4.2 2.1 2.1 0 0 0 0-4.2Z',
+  // The layer sections' field captions and buttons, as Figma's panel draws them.
+  /** Four sides as one box: a field for each side. */
+  sides: 'M3 5.5v5M13 5.5v5M5.5 3h5M5.5 13h5',
+  /** Four rounded corners: a radius for each corner. */
+  corners: 'M2.5 6V4.5a2 2 0 0 1 2-2H6M10 2.5h1.5a2 2 0 0 1 2 2V6M13.5 10v1.5a2 2 0 0 1-2 2H10M6 13.5H4.5a2 2 0 0 1-2-2V10',
+  /** One rounded corner, the top start. */
+  corner: 'M3.5 12.5V8a4.5 4.5 0 0 1 4.5-4.5h4.5',
+  /** A disc half solid, with its filled half in FILL. */
+  opacity: 'M8 2.25a5.75 5.75 0 1 0 0 11.5 5.75 5.75 0 0 0 0-11.5Z',
+  /** A soft, broken edge: a circle of short dashes. */
+  blur: 'M13.7 8.75l-.09.49M11.52 12.55l-.41.29M7.28 13.71l-.49-.08M3.47 11.54l-.29-.41M2.29 7.32l.08-.49M4.43 3.49l.41-.29M8.65 2.29l.49.08M12.49 4.41l.29.4',
+  /** A linear gradient's angle. */
+  angle: 'M3 13h10M3 13 11 4',
+  /** A gradient stop's marker on its bar. */
+  'gradient-stop': 'M8 2.5 11.5 6v7h-7V6L8 2.5Z',
+  eyedropper: 'M9.5 3.5 12.5 6.5M11 2l3 3-1.5 1.5-3-3L11 2ZM10 5 4 11l-.5 2.5L6 13l6-6',
 }
 
 /** Solid paths, filled rather than stroked. */
@@ -115,6 +132,7 @@ const FILL = {
   'stack-h': 'M3.25 3v10h3.25V3H3.25ZM9.5 3v10h3.25V3H9.5Z',
   section: 'M2.5 3.5h11v3h-11v-3ZM2.5 8.5h11v4h-11v-4Z',
   shape: 'M8 2.5 13.5 13H2.5L8 2.5Z',
+  opacity: 'M8 2.25a5.75 5.75 0 0 1 0 11.5Z',
 }
 
 export type IconName = keyof typeof STROKE | keyof typeof FILL

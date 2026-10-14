@@ -3,6 +3,8 @@ import { symbolMetrics, textLineHeight } from '@studio/shared'
 import type {
   PlaceholderPayload,
   TransformSpec,
+  ClipShape,
+  CornerRadii,
   CornerStyle,
   ShapeStroke,
   ShapeTrim,
@@ -13,6 +15,7 @@ import type {
   ResolvedFont,
   RGBA,
   ShapeKind,
+  ShapeOutline,
   Size,
   SourceSpan,
 } from '@studio/shared'
@@ -88,6 +91,7 @@ export type PaintSpec =
       readonly kind: 'shape'
       readonly shape: ShapeKind
       readonly cornerStyle?: CornerStyle
+      readonly cornerRadii?: CornerRadii
       readonly fill?: Fill
       readonly stroke?: ShapeStroke
       readonly trim?: ShapeTrim
@@ -123,7 +127,7 @@ export type PaintSpec =
 
 export interface PlacedNode {
   readonly cornerStyle?: CornerStyle
-  readonly clipShape?: { readonly kind: ShapeKind; readonly cornerStyle?: CornerStyle }
+  readonly clipShape?: ClipShape
   readonly id: string
   readonly frame: Rect
   readonly z: number
@@ -879,6 +883,7 @@ export class LayoutEngine {
             kind: 'shape',
             shape: element.shape,
             cornerStyle: element.cornerStyle,
+            ...(element.cornerRadii ? { cornerRadii: element.cornerRadii } : {}),
             // A stroked shape with no fill is an outline, which is what
             // `.stroke(…)` alone means.
             ...(element.fill
@@ -1455,12 +1460,8 @@ export class LayoutEngine {
           frame: bounds,
           z,
           opacity: env.opacity,
-          cornerRadius: modifier.kind === 'cornerRadius' ? modifier.radius :
-            modifier.shape === 'circle' || modifier.shape === 'capsule'
-              ? Math.min(bounds.width, bounds.height) / 2
-              : modifier.cornerRadius,
+          ...cutTo(modifier.kind === 'cornerRadius' ? { kind: 'roundedRectangle', cornerRadius: modifier.radius, style: modifier.style } : { ...modifier, kind: modifier.shape }, bounds),
           clip: true,
-          clipShape: { kind: modifier.kind === 'cornerRadius' ? 'roundedRectangle' : modifier.shape, cornerStyle: modifier.style },
           paint: { kind: 'hit' },
           ...(parent ? { parent } : {}),
         })
@@ -1546,6 +1547,7 @@ export class LayoutEngine {
                   blur: modifier.blur,
                   light: modifier.light,
                 },
+                ...(modifier.shape ? cutTo(modifier.shape, bounds) : {}),
               }
             : {}),
           ...(modifier.kind === 'a11y'
@@ -1735,6 +1737,14 @@ export class LayoutEngine {
 // -------------------------------------------------------------------- helpers
 
 /** Inspector metadata, omitted entirely when an element carries none. */
+/** A box cut to a shape: the radius its corners take in `bounds`, a capsule's or circle's half its short side, and the outline it is clipped to. */
+function cutTo(shape: ShapeOutline, bounds: Rect): Pick<PlacedNode, 'cornerRadius' | 'clipShape'> {
+  return {
+    cornerRadius: shape.kind === 'circle' || shape.kind === 'capsule' ? Math.min(bounds.width, bounds.height) / 2 : shape.cornerRadius,
+    clipShape: { kind: shape.kind, cornerStyle: shape.style, ...(shape.cornerRadii ? { cornerRadii: shape.cornerRadii } : {}) },
+  }
+}
+
 function debugInfo(element: LayoutElement): {
   debugName?: string
   debugModifiers?: readonly string[]

@@ -3,7 +3,7 @@ import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
 import { colorForName, compile, resetPipelineState } from '@studio/swiftui-runtime'
 import type { DesignEditRequest } from '@studio/shared'
 import { modifierGuidance } from '../apps/web/lib/modifierGuidance'
-import { SYSTEM_COLOR_SWATCHES } from '../apps/web/lib/tokens'
+import { SYSTEM_COLOR_SWATCHES } from '../apps/web/lib/colorValue'
 
 const wrap = (body: string) => `import SwiftUI\n@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }\nstruct ContentView: View { var body: some View { ${body} } }`
 const files = (text: string) => [{ id: 'App.swift', text }]

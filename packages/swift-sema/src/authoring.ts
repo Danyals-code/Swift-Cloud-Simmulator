@@ -1,4 +1,5 @@
 import { modifierModel } from './authoring-modifiers'
+import { layerContext, layerProject, readLayer } from './layer'
 import { borderOf, cornersOf } from './authoring-border'
 import { enrichAuthoring } from './authoring-features'
 import type { ComponentDescription, PreviewColorAsset } from '@studio/shared'
@@ -94,6 +95,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   })
   const texts = new Map(input.files.map(f => [f.id, f.text]))
   const source = (span: SourceSpan) => texts.get(span.file)?.slice(span.start, span.end) ?? ''
+  const layers = layerProject(parsed, input.deploymentTarget)
   const nodes: MutableNode[] = []
   const byId = new Map<string, MutableNode>()
   const roots: string[] = []
@@ -228,6 +230,11 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }
     Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget, !!node.controls))
+    // The same chain read as a layer: one value per Figma property (Wave 2).
+    if (node.controls) {
+      const layer = readLayer(expr, layerContext(layers, node, parent, texts.get(node.source.file) ?? ''))
+      if (layer) Object.assign(node, { layer })
+    }
     const explicitLabel = builtin && ['NavigationLink', 'Button'].includes(name) ? chain.base.args.find(argument => argument.label === 'label' && argument.value.kind === 'closure')?.value : undefined
     const closure = explicitLabel?.kind === 'closure' ? explicitLabel : chain.base.trailingClosure
     if (closure && (capability?.content || builtin && (CONTENT_VIEWS.has(name) || name === 'Button' && (!!explicitLabel || chain.base.args.some(arg => arg.label === 'action'))))) {

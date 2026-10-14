@@ -17,9 +17,12 @@ import {
   ROUNDED_FAMILY,
   SERIF_FAMILY,
   UI_FONT_FAMILY,
+  type CornerRadii,
+  type CornerStyle,
   type Fill,
   type RGBA,
   type ShapeKind,
+  type ShapeOutline,
   type Size,
 } from '@studio/shared'
 import {
@@ -67,7 +70,7 @@ import {
   type ResolvedUI,
   type SearchField,
 } from './presentation'
-import { largestCorner } from './corners'
+import { asCornerRadii, cornerRadiiOf } from './corners'
 import { applyTrim, asCanvasContext, asPath, toSVGPath } from './paths'
 import { resolveSymbol } from './sf-symbols'
 import {
@@ -1628,17 +1631,15 @@ class Converter {
 
     const shape = SHAPES[view.name]
     if (shape) {
-      const radius = hasCornerRadii(view.args.map((a) => a.label)) ? largestCorner(view.args) : numberArg(labelled(view.args, 'cornerRadius'))
+      const corners = shapeCorners(view)
       const fill = resolveFillArg(modifierArg(view, 'fill', 0), this.scheme, this.styles.tint)
       // `.fill(.ultraThinMaterial)` is a material panel cut to the shape; it drew black.
       const fillValue = modifierArg(view, 'fill', 0)
       const material = MATERIALS[tokenName(fillValue) ?? '']
       if (material) {
         const opacity = fillValue?.kind === 'opaque' ? (fillValue.payload as TokenPayload).opacity : undefined
-        const panel: LayoutElement = { kind: 'modified', id: `${path}mat`, modifier: { kind: 'material', ...material, light: this.scheme === 'light' }, child: { kind: 'fill', id: `${path}matbox`, fill: { kind: 'solid', color: rgba(0, 0, 0, 0) } } }
-        const style = tokenName(labelled(view.args, 'style')) === 'continuous' ? 'continuous' : 'circular'
-        const cut: LayoutElement = { kind: 'modified', id: `${path}cut`, modifier: { kind: 'clip', shape, cornerRadius: radius ?? 0, style }, child: panel }
-        return opacity === undefined ? { ...cut, ...origin } : { kind: 'modified', id: path, modifier: { kind: 'opacity', value: opacity }, child: cut, ...origin }
+        const panel: LayoutElement = { kind: 'modified', id: `${path}mat`, modifier: { kind: 'material', ...material, light: this.scheme === 'light', shape: { kind: shape, ...corners } }, child: { kind: 'fill', id: `${path}matbox`, fill: { kind: 'solid', color: rgba(0, 0, 0, 0) } } }
+        return opacity === undefined ? { ...panel, ...origin } : { kind: 'modified', id: path, modifier: { kind: 'opacity', value: opacity }, child: panel, ...origin }
       }
       const strokeName = view.modifiers.some((m) => m.name === 'strokeBorder') ? 'strokeBorder' : 'stroke'
       const hasStroke = view.modifiers.some((m) => m.name === strokeName)
@@ -1655,8 +1656,8 @@ class Converter {
         kind: 'shape',
         id: path,
         shape,
-        cornerStyle: tokenName(labelled(view.args, 'style')) === 'continuous' ? 'continuous' : 'circular',
-        ...(radius !== null ? { cornerRadius: radius } : {}),
+        cornerStyle: corners.style,
+        ...(corners.cornerRadii ? { cornerRadii: corners.cornerRadii } : numberArg(labelled(view.args, 'cornerRadius')) !== null ? { cornerRadius: corners.cornerRadius } : {}),
         ...(fill ? { fill } : {}),
         ...(trim ? { trim } : {}),
         ...(strokeColor ? { stroke: { ...strokeStyle(view), color: strokeColor, ...(strokePaint?.fill ? { fill: strokePaint.fill } : {}), width: Math.max(0, strokeWidth), usesForeground: !strokePaint, placement: strokeName === 'strokeBorder' ? 'inside' as const : 'center' as const } } : {}),
@@ -3551,6 +3552,11 @@ class Converter {
         } : null
       }
 
+      case 'glassEffect': {
+        const glass = this.liquidGlass(positional(args, 0), labelled(args, 'in'), `${id}glass`)
+        return glass ? { kind: 'background', content: glass } : null
+      }
+
       case 'overlay': {
         const content = this.backgroundContent(args, modifier, `${id}ov`)
         return content
@@ -3607,19 +3613,13 @@ class Converter {
       }
 
       case 'cornerRadius': {
+        // Continuous in iOS 27, measured in the simulator, like the shapes.
         const radius = numberArg(args[0]?.value)
-        return radius === null ? null : { kind: 'cornerRadius', radius }
+        return radius === null ? null : { kind: 'cornerRadius', radius, style: 'continuous' }
       }
 
-      case 'clipShape': {
-        const shape = shapeOf(args[0]?.value)
-        return {
-          kind: 'clip',
-          shape: shape.kind,
-          cornerRadius: shape.cornerRadius,
-          style: shape.style,
-        }
-      }
+      case 'clipShape':
+        return clipTo(shapeOf(args[0]?.value))
 
       case 'clipped':
         return { kind: 'clip', shape: 'rectangle', cornerRadius: 0 }
@@ -4057,6 +4057,32 @@ class Converter {
     }
   }
 
+  /**
+   * `.glassEffect(_:in:)`, approximated: a material cut to the shape, a capsule unless
+   * another is given, the tint over it, and a light rim inside a hairline. Null for
+   * `.identity`, which is glass switched off.
+   */
+  private liquidGlass(variant: SwiftValue | undefined, inShape: SwiftValue | undefined, id: string): LayoutElement | null {
+    // `.identity` arrives as the transition of that name: a contextual member has no type yet.
+    const token = payloadOf<TokenPayload>(variant, TOKEN_TYPE) ?? { name: payloadOf<TransitionPayload>(variant, TRANSITION_TYPE)?.kind === 'identity' ? 'identity' : 'regular' }
+    if (token.name === 'identity') return null
+    const glass = this.appearance.glass
+    const shape: ShapeOutline = inShape ? shapeOf(inShape) : { kind: 'capsule', cornerRadius: 0, style: 'continuous' }
+    const outline = { shape: shape.kind, cornerStyle: shape.style, ...(shape.cornerRadii ? { cornerRadii: shape.cornerRadii } : shape.cornerRadius ? { cornerRadius: shape.cornerRadius } : {}) }
+    const light = this.scheme === 'light'
+    const tint = resolveColorArg(token.args?.[0], this.scheme, this.styles.tint)
+    const rim = (part: string, color: RGBA, width: number): LayoutElement => ({ kind: 'shape', id: `${id}${part}`, ...outline, stroke: { color, width, placement: 'inside' } })
+    return {
+      kind: 'zstack', id, alignment: CENTER,
+      children: [
+        { kind: 'modified', id: `${id}pane`, modifier: { kind: 'material', ...(token.name === 'clear' ? glass.clear : glass.regular), light, shape }, child: { kind: 'fill', id: `${id}panebox`, fill: { kind: 'solid', color: rgba(0, 0, 0, 0) } } },
+        ...(tint ? [{ kind: 'shape', id: `${id}tint`, ...outline, fill: { kind: 'solid', color: { ...tint, a: tint.a * glass.tint } } } satisfies LayoutElement] : []),
+        rim('rim', rgba(255, 255, 255, light ? glass.rim.light : glass.rim.dark), glass.rim.width),
+        rim('hairline', { ...this.color('label'), a: glass.hairline.alpha }, glass.hairline.width),
+      ],
+    }
+  }
+
   /** The drop shadow a ShapeStyle carries, as the `.shadow` modifier draws one, or null. */
   private dropShadow(value: SwiftValue | undefined): LayoutModifier | null {
     const shadow = paintShadow(value, this.scheme, this.styles.tint)
@@ -4082,7 +4108,7 @@ class Converter {
     if (inShape) {
       const content = this.backgroundContent(args.filter((a) => a.label !== 'in'), modifier, `${id}fill`)
       const shape = shapeOf(inShape)
-      return content ? { kind: 'modified', id, child: content, modifier: { kind: 'clip', shape: shape.kind, cornerRadius: shape.cornerRadius, style: shape.style } } : null
+      return content ? cutMaterial(content, shape) ?? { kind: 'modified', id, child: content, modifier: clipTo(shape) } : null
     }
 
     if (value) {
@@ -4415,25 +4441,58 @@ function angleDegrees(value: SwiftValue | undefined): number | null {
   return numberArg(value)
 }
 
-function shapeOf(value: SwiftValue | undefined): { kind: ShapeKind; cornerRadius: number; style?: 'continuous' | 'circular' } {
+/** A shape's corners, without its kind. */
+type ShapeCorners = Omit<ShapeOutline, 'kind'>
+
+/** Corners with a radius each; `cornerRadius` is the largest, for what draws one radius. */
+const eachCorner = (cornerRadii: CornerRadii, style: CornerStyle): ShapeCorners => ({ cornerRadius: Math.max(...Object.values(cornerRadii)), cornerRadii, style })
+
+/**
+ * A rounded shape's corners: `.continuous` unless `.circular` is written, the default
+ * of every rounded shape and of `.cornerRadius(_:)` in the Xcode 27 SDK, and a radius
+ * per corner for `UnevenRoundedRectangle` and `.rect(topLeadingRadius:…)`.
+ */
+function cornerStyleOf(written: readonly (SwiftValue | undefined)[]): CornerStyle {
+  return written.some((value) => tokenName(value) === 'circular') ? 'circular' : 'continuous'
+}
+
+/** The corners a shape view was written with. */
+function shapeCorners(view: ViewValue): ShapeCorners {
+  const style = cornerStyleOf([labelled(view.args, 'style')])
+  return hasCornerRadii(view.args.map((a) => a.label)) ? eachCorner(cornerRadiiOf(view.args), style) : { cornerRadius: numberArg(labelled(view.args, 'cornerRadius')) ?? 0, style }
+}
+
+function shapeOf(value: SwiftValue | undefined): ShapeOutline {
   if (value?.kind === 'opaque' && value.typeName === TOKEN_TYPE) {
     const { name, args = [] } = value.payload as TokenPayload
-    const style = args.some(argument => tokenName(argument) === 'continuous') ? 'continuous' : 'circular'
+    const style = cornerStyleOf(args)
+    const cornerRadii = asCornerRadii(args[0])
+    if (name === 'rect' && cornerRadii) return { kind: 'roundedRectangle', ...eachCorner(cornerRadii, style) }
     if (name === 'rect') return { kind: args.length ? 'roundedRectangle' : 'rectangle', cornerRadius: numberArg(args[0]) ?? 0, style }
     if (name === 'circle' || name === 'capsule' || name === 'ellipse') return { kind: name, cornerRadius: 0, style }
   }
   if (value?.kind === 'opaque' && value.typeName === 'View') {
     const view = value.payload as ViewValue
     const shape = SHAPES[view.name]
-    if (shape) {
-      return {
-        kind: shape,
-        style: tokenName(labelled(view.args, 'style')) === 'continuous' ? 'continuous' : 'circular',
-        cornerRadius: hasCornerRadii(view.args.map((a) => a.label)) ? largestCorner(view.args) : numberArg(labelled(view.args, 'cornerRadius')) ?? 0,
-      }
-    }
+    if (shape) return { kind: shape, ...shapeCorners(view) }
   }
-  return { kind: 'rectangle', cornerRadius: 0 }
+  return { kind: 'rectangle', cornerRadius: 0, style: 'continuous' }
+}
+
+/**
+ * A material panel cut to a shape itself rather than clipped by a parent, which would
+ * leave it nothing to blur in a browser. Null for anything that is not a material.
+ */
+function cutMaterial(content: LayoutElement, shape: ShapeOutline): LayoutElement | null {
+  if (content.kind !== 'modified') return null
+  if (content.modifier.kind === 'material') return { ...content, modifier: { ...content.modifier, shape } }
+  const inner = content.modifier.kind === 'opacity' ? cutMaterial(content.child, shape) : null
+  return inner && { ...content, child: inner }
+}
+
+/** The clip that cuts a view to a shape, as `.clipShape` and `.background(_:in:)` do. */
+function clipTo(shape: ShapeOutline): LayoutModifier {
+  return { ...shape, kind: 'clip', shape: shape.kind }
 }
 
 /** `GridItem` values, as `LazyVGrid(columns:)` takes them. */

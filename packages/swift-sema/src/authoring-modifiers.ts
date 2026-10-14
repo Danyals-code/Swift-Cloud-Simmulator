@@ -15,6 +15,13 @@ import { SUPPORTED_MODIFIERS } from './builtins'
  * text back byte for byte.
  */
 
+/**
+ * Where each kind of modifier sits in a chain, in the order a SwiftUI developer writes
+ * them: a new one goes after the last of the same or an earlier slot. Margin and the
+ * outer frame are paddings and frames after the surface, so no modifier name has them.
+ */
+export const SLOT = { text: 1, padding: 2, size: 3, fill: 4, clip: 5, stroke: 6, shadow: 7, margin: 7.5, outerFrame: 7.6, offset: 8, effects: 9, behaviour: 10 } as const
+
 interface CatalogEntry {
   readonly name: string
   readonly label: string
@@ -30,78 +37,78 @@ interface CatalogEntry {
 }
 
 const CATALOG: readonly CatalogEntry[] = [
-  { name: 'font', label: 'Font', category: 'text', slot: 1, description: 'Text style and size', source: () => '.font(.body)' },
-  { name: 'foregroundStyle', label: 'Text color', category: 'text', slot: 1, description: 'Color of text and symbols', minimumIOS: 15, source: () => '.foregroundStyle(Color.primary)' },
-  { name: 'foregroundColor', label: 'Text color', category: 'text', slot: 1, description: 'Color of text and symbols', hidden: true, source: () => '.foregroundColor(Color.primary)' },
-  { name: 'bold', label: 'Bold', category: 'text', slot: 1, description: 'Heavier text', source: () => '.bold()' },
-  { name: 'italic', label: 'Italic', category: 'text', slot: 1, description: 'Slanted text', source: () => '.italic()' },
-  { name: 'underline', label: 'Underline', category: 'text', slot: 1, description: 'A line under the text', source: () => '.underline()' },
-  { name: 'strikethrough', label: 'Strikethrough', category: 'text', slot: 1, description: 'A line through the text', source: () => '.strikethrough()' },
-  { name: 'multilineTextAlignment', label: 'Text alignment', category: 'text', slot: 1, description: 'Left, center or right', source: () => '.multilineTextAlignment(.center)' },
-  { name: 'lineLimit', label: 'Max lines', category: 'text', slot: 1, description: 'Cut long text after some lines', source: () => '.lineLimit(3)' },
-  { name: 'tracking', label: 'Letter spacing', category: 'text', slot: 1, description: 'Space between letters', minimumIOS: 16, source: () => '.tracking(1)' },
-  { name: 'lineSpacing', label: 'Line spacing', category: 'text', slot: 1, description: 'Space between lines', source: () => '.lineSpacing(4)' },
+  { name: 'font', label: 'Font', category: 'text', slot: SLOT.text, description: 'Text style and size', source: () => '.font(.body)' },
+  { name: 'foregroundStyle', label: 'Text color', category: 'text', slot: SLOT.text, description: 'Color of text and symbols', minimumIOS: 15, source: () => '.foregroundStyle(Color.primary)' },
+  { name: 'foregroundColor', label: 'Text color', category: 'text', slot: SLOT.text, description: 'Color of text and symbols', hidden: true, source: () => '.foregroundColor(Color.primary)' },
+  { name: 'bold', label: 'Bold', category: 'text', slot: SLOT.text, description: 'Heavier text', source: () => '.bold()' },
+  { name: 'italic', label: 'Italic', category: 'text', slot: SLOT.text, description: 'Slanted text', source: () => '.italic()' },
+  { name: 'underline', label: 'Underline', category: 'text', slot: SLOT.text, description: 'A line under the text', source: () => '.underline()' },
+  { name: 'strikethrough', label: 'Strikethrough', category: 'text', slot: SLOT.text, description: 'A line through the text', source: () => '.strikethrough()' },
+  { name: 'multilineTextAlignment', label: 'Text alignment', category: 'text', slot: SLOT.text, description: 'Left, center or right', source: () => '.multilineTextAlignment(.center)' },
+  { name: 'lineLimit', label: 'Max lines', category: 'text', slot: SLOT.text, description: 'Cut long text after some lines', source: () => '.lineLimit(3)' },
+  { name: 'tracking', label: 'Letter spacing', category: 'text', slot: SLOT.text, description: 'Space between letters', minimumIOS: 16, source: () => '.tracking(1)' },
+  { name: 'lineSpacing', label: 'Line spacing', category: 'text', slot: SLOT.text, description: 'Space between lines', source: () => '.lineSpacing(4)' },
   // Width and Height sizing say Hug, Fill or Fixed (D2); these two were a second way to say it,
   // and read as the same thing. A frame or fixedSize already in the code keeps its card.
-  { name: 'frameFlexible', label: 'Flexible size', category: 'layout', slot: 3, description: 'Grows to fill the space', minimumIOS: 13, hidden: true, source: () => '.frame(minWidth: 0, idealWidth: 160, maxWidth: .infinity, minHeight: 0, idealHeight: 80, maxHeight: .infinity)' },
-  { name: 'fixedSize', label: 'Ideal size', category: 'layout', slot: 3, description: 'Only as big as its content', minimumIOS: 13, hidden: true, source: () => '.fixedSize(horizontal: true, vertical: true)' },
-  { name: 'aspectRatio', label: 'Aspect ratio', category: 'layout', slot: 3, description: 'Keep width and height in proportion', minimumIOS: 13, source: () => '.aspectRatio(1, contentMode: .fit)' },
-  { name: 'clipped', label: 'Clip to bounds', category: 'appearance', slot: 5, description: 'Hide what spills outside it', minimumIOS: 13, source: () => '.clipped()' },
-  { name: 'rotation3DEffect', label: '3D rotation', category: 'layout', slot: 8, description: 'Tilt it in depth', minimumIOS: 13, source: () => '.rotation3DEffect(.degrees(30), axis: (x: 0, y: 1, z: 0), anchor: .center, anchorZ: 0, perspective: 1)' },
-  { name: 'saturation', label: 'Saturation', category: 'appearance', slot: 9, description: 'How vivid its colors are', minimumIOS: 13, source: () => '.saturation(1)' },
-  { name: 'brightness', label: 'Brightness', category: 'appearance', slot: 9, description: 'Lighten or darken it', minimumIOS: 13, source: () => '.brightness(0)' },
-  { name: 'contrast', label: 'Contrast', category: 'appearance', slot: 9, description: 'Gap between lights and darks', minimumIOS: 13, source: () => '.contrast(1)' },
-  { name: 'grayscale', label: 'Grayscale', category: 'appearance', slot: 9, description: 'Drain its color', minimumIOS: 13, source: () => '.grayscale(0.5)' },
-  { name: 'colorMultiply', label: 'Multiply color', category: 'appearance', slot: 9, description: 'Tint it by mixing in a color', minimumIOS: 13, source: () => '.colorMultiply(Color.white)' },
-  { name: 'hueRotation', label: 'Hue rotation', category: 'appearance', slot: 9, description: 'Shift all its colors', minimumIOS: 13, source: () => '.hueRotation(.degrees(30))' },
-  { name: 'blendMode', label: 'Blend mode', category: 'appearance', slot: 9, description: 'How it mixes with what is behind', minimumIOS: 13, source: () => '.blendMode(.normal)' },
-  { name: 'layoutPriority', label: 'Layout priority', category: 'layout', slot: 3, description: 'Gets space first in a stack', minimumIOS: 13, source: () => '.layoutPriority(1)' },
-  { name: 'fontWeight', label: 'Font weight', category: 'text', slot: 1, description: 'Thin to heavy', minimumIOS: 13, source: () => '.fontWeight(.semibold)' },
-  { name: 'fontDesign', label: 'Font design', category: 'text', slot: 1, description: 'Rounded, serif or monospaced', minimumIOS: 16, source: () => '.fontDesign(.default)' },
-  { name: 'kerning', label: 'Kerning', category: 'text', slot: 1, description: 'Space between letter pairs', minimumIOS: 16, source: () => '.kerning(1)' },
-  { name: 'baselineOffset', label: 'Baseline offset', category: 'text', slot: 1, description: 'Raise or lower the text', minimumIOS: 16, source: () => '.baselineOffset(2)' },
-  { name: 'textCase', label: 'Text case', category: 'text', slot: 1, description: 'Uppercase or lowercase', minimumIOS: 13, source: () => '.textCase(.uppercase)' },
-  { name: 'minimumScaleFactor', label: 'Minimum text scale', category: 'text', slot: 1, description: 'How far text shrinks to fit', minimumIOS: 13, source: () => '.minimumScaleFactor(0.5)' },
-  { name: 'truncationMode', label: 'Truncation', category: 'text', slot: 1, description: 'Cut long text at the start, middle or end', minimumIOS: 13, source: () => '.truncationMode(.tail)' },
-  { name: 'allowsTightening', label: 'Tighten text', category: 'text', slot: 1, description: 'Squeeze letters closer to fit', minimumIOS: 13, source: () => '.allowsTightening(true)' },
-  { name: 'allowsHitTesting', label: 'Allow interaction', category: 'behavior', slot: 10, description: 'Whether taps reach it', minimumIOS: 13, source: () => '.allowsHitTesting(true)' },
-  { name: 'accessibilityHidden', label: 'Hide from accessibility', category: 'behavior', slot: 10, description: 'VoiceOver skips it', minimumIOS: 13, source: () => '.accessibilityHidden(true)' },
-  { name: 'accessibilityValue', label: 'Accessibility value', category: 'behavior', slot: 10, description: 'The value VoiceOver reads', minimumIOS: 13, source: () => '.accessibilityValue("Value")' },
-  { name: 'accessibilityHint', label: 'Accessibility hint', category: 'behavior', slot: 10, description: 'What VoiceOver says a tap does', minimumIOS: 13, source: () => '.accessibilityHint("Hint")' },
-  { name: 'toggleStyle', label: 'Toggle style', category: 'appearance', slot: 10, description: 'Switch or button', minimumIOS: 13, only: ['Toggle'], source: () => '.toggleStyle(.switch)' },
-  { name: 'pickerStyle', label: 'Picker style', category: 'appearance', slot: 10, description: 'Menu, wheel or segmented', minimumIOS: 14, only: ['Picker'], source: () => '.pickerStyle(.menu)' },
-  { name: 'progressViewStyle', label: 'Progress style', category: 'appearance', slot: 10, description: 'Bar or spinner', minimumIOS: 14, only: ['ProgressView'], source: () => '.progressViewStyle(.linear)' },
-  { name: 'gaugeStyle', label: 'Gauge style', category: 'appearance', slot: 10, description: 'Bar or ring', minimumIOS: 16, only: ['Gauge'], source: () => '.gaugeStyle(.linearCapacity)' },
-  { name: 'labelStyle', label: 'Label style', category: 'appearance', slot: 10, description: 'Title, icon or both', minimumIOS: 14, only: ['Label'], source: () => '.labelStyle(.titleAndIcon)' },
-  { name: 'textFieldStyle', label: 'Input style', category: 'appearance', slot: 10, description: 'Rounded border or plain', minimumIOS: 13, only: ['TextField', 'SecureField'], source: () => '.textFieldStyle(.roundedBorder)' },
-  { name: 'listStyle', label: 'List style', category: 'appearance', slot: 10, description: 'Inset, grouped or plain', minimumIOS: 14, only: ['List', 'Form'], source: () => '.listStyle(.insetGrouped)' },
-  { name: 'scrollIndicators', label: 'Scroll indicators', category: 'appearance', slot: 10, description: 'Show or hide the scroll bars', minimumIOS: 16, only: ['ScrollView', 'List', 'Form'], source: () => '.scrollIndicators(.visible)' },
-  { name: 'scrollContentBackground', label: 'Scroll background', category: 'appearance', slot: 10, description: 'Show or hide the list background', minimumIOS: 16, only: ['ScrollView', 'List', 'Form'], source: () => '.scrollContentBackground(.hidden)' },
-  { name: 'imageScale', label: 'Symbol size', category: 'appearance', slot: 10, description: 'Small, medium or large', minimumIOS: 13, only: ['Image', 'Label'], source: () => '.imageScale(.large)' },
-  { name: 'listRowSeparator', label: 'Row separator', category: 'appearance', slot: 10, description: 'Show or hide the line under a row', minimumIOS: 15, source: () => '.listRowSeparator(.hidden)' },
-  { name: 'listRowSpacing', label: 'Row spacing', category: 'appearance', slot: 10, description: 'Space between rows', minimumIOS: 17, only: ['List', 'Form'], source: () => '.listRowSpacing(8)' },
-  { name: 'listSectionSpacing', label: 'Section spacing', category: 'appearance', slot: 10, description: 'Space between sections', minimumIOS: 17, only: ['List', 'Form'], source: () => '.listSectionSpacing(24)' },
-  { name: 'padding', label: 'Padding', category: 'layout', slot: 2, description: 'Space around it', source: () => '.padding(16)' },
-  { name: 'frame', label: 'Size', category: 'layout', slot: 3, description: 'Width and height', source: () => '.frame(width: 100, height: 100)' },
-  { name: 'background', label: 'Background', category: 'appearance', slot: 4, description: 'A color behind it', source: () => '.background(Color.blue)' },
-  { name: 'clipShape', label: 'Corner radius', category: 'appearance', slot: 5, description: 'Round the corners', source: ({ target }) => roundedCorners(12, target) },
-  { name: 'cornerRadius', label: 'Corner radius', category: 'appearance', slot: 5, description: 'Round the corners', hidden: true, source: () => '.cornerRadius(8)' },
+  { name: 'frameFlexible', label: 'Flexible size', category: 'layout', slot: SLOT.size, description: 'Grows to fill the space', minimumIOS: 13, hidden: true, source: () => '.frame(minWidth: 0, idealWidth: 160, maxWidth: .infinity, minHeight: 0, idealHeight: 80, maxHeight: .infinity)' },
+  { name: 'fixedSize', label: 'Ideal size', category: 'layout', slot: SLOT.size, description: 'Only as big as its content', minimumIOS: 13, hidden: true, source: () => '.fixedSize(horizontal: true, vertical: true)' },
+  { name: 'aspectRatio', label: 'Aspect ratio', category: 'layout', slot: SLOT.size, description: 'Keep width and height in proportion', minimumIOS: 13, source: () => '.aspectRatio(1, contentMode: .fit)' },
+  { name: 'clipped', label: 'Clip to bounds', category: 'appearance', slot: SLOT.clip, description: 'Hide what spills outside it', minimumIOS: 13, source: () => '.clipped()' },
+  { name: 'rotation3DEffect', label: '3D rotation', category: 'layout', slot: SLOT.offset, description: 'Tilt it in depth', minimumIOS: 13, source: () => '.rotation3DEffect(.degrees(30), axis: (x: 0, y: 1, z: 0), anchor: .center, anchorZ: 0, perspective: 1)' },
+  { name: 'saturation', label: 'Saturation', category: 'appearance', slot: SLOT.effects, description: 'How vivid its colors are', minimumIOS: 13, source: () => '.saturation(1)' },
+  { name: 'brightness', label: 'Brightness', category: 'appearance', slot: SLOT.effects, description: 'Lighten or darken it', minimumIOS: 13, source: () => '.brightness(0)' },
+  { name: 'contrast', label: 'Contrast', category: 'appearance', slot: SLOT.effects, description: 'Gap between lights and darks', minimumIOS: 13, source: () => '.contrast(1)' },
+  { name: 'grayscale', label: 'Grayscale', category: 'appearance', slot: SLOT.effects, description: 'Drain its color', minimumIOS: 13, source: () => '.grayscale(0.5)' },
+  { name: 'colorMultiply', label: 'Multiply color', category: 'appearance', slot: SLOT.effects, description: 'Tint it by mixing in a color', minimumIOS: 13, source: () => '.colorMultiply(Color.white)' },
+  { name: 'hueRotation', label: 'Hue rotation', category: 'appearance', slot: SLOT.effects, description: 'Shift all its colors', minimumIOS: 13, source: () => '.hueRotation(.degrees(30))' },
+  { name: 'blendMode', label: 'Blend mode', category: 'appearance', slot: SLOT.effects, description: 'How it mixes with what is behind', minimumIOS: 13, source: () => '.blendMode(.normal)' },
+  { name: 'layoutPriority', label: 'Layout priority', category: 'layout', slot: SLOT.size, description: 'Gets space first in a stack', minimumIOS: 13, source: () => '.layoutPriority(1)' },
+  { name: 'fontWeight', label: 'Font weight', category: 'text', slot: SLOT.text, description: 'Thin to heavy', minimumIOS: 13, source: () => '.fontWeight(.semibold)' },
+  { name: 'fontDesign', label: 'Font design', category: 'text', slot: SLOT.text, description: 'Rounded, serif or monospaced', minimumIOS: 16, source: () => '.fontDesign(.default)' },
+  { name: 'kerning', label: 'Kerning', category: 'text', slot: SLOT.text, description: 'Space between letter pairs', minimumIOS: 16, source: () => '.kerning(1)' },
+  { name: 'baselineOffset', label: 'Baseline offset', category: 'text', slot: SLOT.text, description: 'Raise or lower the text', minimumIOS: 16, source: () => '.baselineOffset(2)' },
+  { name: 'textCase', label: 'Text case', category: 'text', slot: SLOT.text, description: 'Uppercase or lowercase', minimumIOS: 13, source: () => '.textCase(.uppercase)' },
+  { name: 'minimumScaleFactor', label: 'Minimum text scale', category: 'text', slot: SLOT.text, description: 'How far text shrinks to fit', minimumIOS: 13, source: () => '.minimumScaleFactor(0.5)' },
+  { name: 'truncationMode', label: 'Truncation', category: 'text', slot: SLOT.text, description: 'Cut long text at the start, middle or end', minimumIOS: 13, source: () => '.truncationMode(.tail)' },
+  { name: 'allowsTightening', label: 'Tighten text', category: 'text', slot: SLOT.text, description: 'Squeeze letters closer to fit', minimumIOS: 13, source: () => '.allowsTightening(true)' },
+  { name: 'allowsHitTesting', label: 'Allow interaction', category: 'behavior', slot: SLOT.behaviour, description: 'Whether taps reach it', minimumIOS: 13, source: () => '.allowsHitTesting(true)' },
+  { name: 'accessibilityHidden', label: 'Hide from accessibility', category: 'behavior', slot: SLOT.behaviour, description: 'VoiceOver skips it', minimumIOS: 13, source: () => '.accessibilityHidden(true)' },
+  { name: 'accessibilityValue', label: 'Accessibility value', category: 'behavior', slot: SLOT.behaviour, description: 'The value VoiceOver reads', minimumIOS: 13, source: () => '.accessibilityValue("Value")' },
+  { name: 'accessibilityHint', label: 'Accessibility hint', category: 'behavior', slot: SLOT.behaviour, description: 'What VoiceOver says a tap does', minimumIOS: 13, source: () => '.accessibilityHint("Hint")' },
+  { name: 'toggleStyle', label: 'Toggle style', category: 'appearance', slot: SLOT.behaviour, description: 'Switch or button', minimumIOS: 13, only: ['Toggle'], source: () => '.toggleStyle(.switch)' },
+  { name: 'pickerStyle', label: 'Picker style', category: 'appearance', slot: SLOT.behaviour, description: 'Menu, wheel or segmented', minimumIOS: 14, only: ['Picker'], source: () => '.pickerStyle(.menu)' },
+  { name: 'progressViewStyle', label: 'Progress style', category: 'appearance', slot: SLOT.behaviour, description: 'Bar or spinner', minimumIOS: 14, only: ['ProgressView'], source: () => '.progressViewStyle(.linear)' },
+  { name: 'gaugeStyle', label: 'Gauge style', category: 'appearance', slot: SLOT.behaviour, description: 'Bar or ring', minimumIOS: 16, only: ['Gauge'], source: () => '.gaugeStyle(.linearCapacity)' },
+  { name: 'labelStyle', label: 'Label style', category: 'appearance', slot: SLOT.behaviour, description: 'Title, icon or both', minimumIOS: 14, only: ['Label'], source: () => '.labelStyle(.titleAndIcon)' },
+  { name: 'textFieldStyle', label: 'Input style', category: 'appearance', slot: SLOT.behaviour, description: 'Rounded border or plain', minimumIOS: 13, only: ['TextField', 'SecureField'], source: () => '.textFieldStyle(.roundedBorder)' },
+  { name: 'listStyle', label: 'List style', category: 'appearance', slot: SLOT.behaviour, description: 'Inset, grouped or plain', minimumIOS: 14, only: ['List', 'Form'], source: () => '.listStyle(.insetGrouped)' },
+  { name: 'scrollIndicators', label: 'Scroll indicators', category: 'appearance', slot: SLOT.behaviour, description: 'Show or hide the scroll bars', minimumIOS: 16, only: ['ScrollView', 'List', 'Form'], source: () => '.scrollIndicators(.visible)' },
+  { name: 'scrollContentBackground', label: 'Scroll background', category: 'appearance', slot: SLOT.behaviour, description: 'Show or hide the list background', minimumIOS: 16, only: ['ScrollView', 'List', 'Form'], source: () => '.scrollContentBackground(.hidden)' },
+  { name: 'imageScale', label: 'Symbol size', category: 'appearance', slot: SLOT.behaviour, description: 'Small, medium or large', minimumIOS: 13, only: ['Image', 'Label'], source: () => '.imageScale(.large)' },
+  { name: 'listRowSeparator', label: 'Row separator', category: 'appearance', slot: SLOT.behaviour, description: 'Show or hide the line under a row', minimumIOS: 15, source: () => '.listRowSeparator(.hidden)' },
+  { name: 'listRowSpacing', label: 'Row spacing', category: 'appearance', slot: SLOT.behaviour, description: 'Space between rows', minimumIOS: 17, only: ['List', 'Form'], source: () => '.listRowSpacing(8)' },
+  { name: 'listSectionSpacing', label: 'Section spacing', category: 'appearance', slot: SLOT.behaviour, description: 'Space between sections', minimumIOS: 17, only: ['List', 'Form'], source: () => '.listSectionSpacing(24)' },
+  { name: 'padding', label: 'Padding', category: 'layout', slot: SLOT.padding, description: 'Space around it', source: () => '.padding(16)' },
+  { name: 'frame', label: 'Size', category: 'layout', slot: SLOT.size, description: 'Width and height', source: () => '.frame(width: 100, height: 100)' },
+  { name: 'background', label: 'Background', category: 'appearance', slot: SLOT.fill, description: 'A color behind it', source: () => '.background(Color.blue)' },
+  { name: 'clipShape', label: 'Corner radius', category: 'appearance', slot: SLOT.clip, description: 'Round the corners', source: ({ target }) => roundedCorners(12, target) },
+  { name: 'cornerRadius', label: 'Corner radius', category: 'appearance', slot: SLOT.clip, description: 'Round the corners', hidden: true, source: () => '.cornerRadius(8)' },
   // The overlay closure is iOS 15's; before it the border is the overlay's argument.
-  { name: 'border', label: 'Border', category: 'appearance', slot: 6, description: 'An outline that follows the corners', source: ({ corners, indent, target }) => borderSource(NEW_BORDER, corners, target >= 15 && indent !== null ? { indent } : 'argument') },
-  { name: 'shadow', label: 'Shadow', category: 'appearance', slot: 7, description: 'A drop shadow', source: ({ shadowToken }) => shadowToken ? `.shadow(.${shadowToken})` : '.shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)' },
-  { name: 'offset', label: 'Offset', category: 'layout', slot: 8, description: 'Nudge it without moving others', source: () => '.offset(x: 0, y: 0)' },
-  { name: 'rotationEffect', label: 'Rotation', category: 'layout', slot: 8, description: 'Turn it', source: () => '.rotationEffect(.degrees(15))' },
-  { name: 'scaleEffect', label: 'Scale', category: 'layout', slot: 8, description: 'Grow or shrink it', source: () => '.scaleEffect(1.1)' },
-  { name: 'opacity', label: 'Opacity', category: 'appearance', slot: 9, description: 'See-through', source: () => '.opacity(1)' },
-  { name: 'blur', label: 'Blur', category: 'appearance', slot: 9, description: 'Soften it', source: () => '.blur(radius: 4)' },
-  { name: 'buttonStyle', label: 'Button style', category: 'appearance', slot: 10, description: 'Filled, bordered or plain', minimumIOS: 15, only: ['Button'], source: () => '.buttonStyle(.borderedProminent)' },
-  { name: 'buttonBorderShape', label: 'Button shape', category: 'appearance', slot: 10, description: 'Capsule or rounded', minimumIOS: 15, only: ['Button'], source: () => '.buttonBorderShape(.capsule)' },
-  { name: 'controlSize', label: 'Control size', category: 'appearance', slot: 10, description: 'Small to large', minimumIOS: 15, source: () => '.controlSize(.regular)' },
-  { name: 'tint', label: 'Accent color', category: 'appearance', slot: 10, description: 'Color of buttons and controls inside', minimumIOS: 15, source: () => '.tint(Color.blue)' },
-  { name: 'disabled', label: 'Disabled', category: 'behavior', slot: 10, description: 'Cannot be tapped', source: () => '.disabled(true)' },
-  { name: 'accessibilityLabel', label: 'Accessibility label', category: 'behavior', slot: 10, description: 'What VoiceOver reads', source: () => '.accessibilityLabel("Label")' },
-  { name: 'navigationTitle', label: 'Screen title', category: 'behavior', slot: 10, description: 'The title in the navigation bar', minimumIOS: 14, source: () => '.navigationTitle("Title")' },
-  { name: 'navigationBarTitleDisplayMode', label: 'Title size', category: 'behavior', slot: 10, description: 'Large or inline title', minimumIOS: 14, source: () => '.navigationBarTitleDisplayMode(.inline)' },
+  { name: 'border', label: 'Border', category: 'appearance', slot: SLOT.stroke, description: 'An outline that follows the corners', source: ({ corners, indent, target }) => borderSource(NEW_BORDER, corners, target >= 15 && indent !== null ? { indent } : 'argument') },
+  { name: 'shadow', label: 'Shadow', category: 'appearance', slot: SLOT.shadow, description: 'A drop shadow', source: ({ shadowToken }) => shadowToken ? `.shadow(.${shadowToken})` : '.shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)' },
+  { name: 'offset', label: 'Offset', category: 'layout', slot: SLOT.offset, description: 'Nudge it without moving others', source: () => '.offset(x: 0, y: 0)' },
+  { name: 'rotationEffect', label: 'Rotation', category: 'layout', slot: SLOT.offset, description: 'Turn it', source: () => '.rotationEffect(.degrees(15))' },
+  { name: 'scaleEffect', label: 'Scale', category: 'layout', slot: SLOT.offset, description: 'Grow or shrink it', source: () => '.scaleEffect(1.1)' },
+  { name: 'opacity', label: 'Opacity', category: 'appearance', slot: SLOT.effects, description: 'See-through', source: () => '.opacity(1)' },
+  { name: 'blur', label: 'Blur', category: 'appearance', slot: SLOT.effects, description: 'Soften it', source: () => '.blur(radius: 4)' },
+  { name: 'buttonStyle', label: 'Button style', category: 'appearance', slot: SLOT.behaviour, description: 'Filled, bordered or plain', minimumIOS: 15, only: ['Button'], source: () => '.buttonStyle(.borderedProminent)' },
+  { name: 'buttonBorderShape', label: 'Button shape', category: 'appearance', slot: SLOT.behaviour, description: 'Capsule or rounded', minimumIOS: 15, only: ['Button'], source: () => '.buttonBorderShape(.capsule)' },
+  { name: 'controlSize', label: 'Control size', category: 'appearance', slot: SLOT.behaviour, description: 'Small to large', minimumIOS: 15, source: () => '.controlSize(.regular)' },
+  { name: 'tint', label: 'Accent color', category: 'appearance', slot: SLOT.behaviour, description: 'Color of buttons and controls inside', minimumIOS: 15, source: () => '.tint(Color.blue)' },
+  { name: 'disabled', label: 'Disabled', category: 'behavior', slot: SLOT.behaviour, description: 'Cannot be tapped', source: () => '.disabled(true)' },
+  { name: 'accessibilityLabel', label: 'Accessibility label', category: 'behavior', slot: SLOT.behaviour, description: 'What VoiceOver reads', source: () => '.accessibilityLabel("Label")' },
+  { name: 'navigationTitle', label: 'Screen title', category: 'behavior', slot: SLOT.behaviour, description: 'The title in the navigation bar', minimumIOS: 14, source: () => '.navigationTitle("Title")' },
+  { name: 'navigationBarTitleDisplayMode', label: 'Title size', category: 'behavior', slot: SLOT.behaviour, description: 'Large or inline title', minimumIOS: 14, source: () => '.navigationBarTitleDisplayMode(.inline)' },
 ]
 const BEHAVIOR = new Set(['task', 'onAppear', 'onDisappear', 'onChange', 'onReceive', 'onTapGesture', 'onLongPressGesture', 'onSubmit', 'onDelete', 'onMove', 'gesture', 'simultaneousGesture', 'highPriorityGesture', 'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'popover', 'navigationDestination', 'navigationTitle', 'navigationBarTitleDisplayMode', 'toolbar', 'tabItem', 'tag', 'id', 'environment', 'environmentObject', 'disabled', 'allowsHitTesting', 'animation', 'transition', 'searchable', 'contextMenu', 'accessibilityLabel', 'accessibilityIdentifier', 'accessibilityValue', 'accessibilityHint', 'accessibilityHidden'])
 const LAYOUT = new Set(['offset', 'position', 'fixedSize', 'alignmentGuide', 'safeAreaInset', 'containerRelativeFrame', 'layoutPriority', 'aspectRatio', 'scaledToFit', 'scaledToFill', 'ignoresSafeArea'])
@@ -111,7 +118,12 @@ const friendly = (name: string) => CATALOG.find(c => c.name === name)?.label ?? 
 const nameOf = (call: CallExpr) => call.callee.kind === 'memberAccess' ? call.callee.member : 'unknown'
 /** The shapes SwiftUI fills in with the foreground colour when nothing else paints them. */
 const SHAPES = new Set(['Rectangle', 'RoundedRectangle', 'UnevenRoundedRectangle', 'Circle', 'Ellipse', 'Capsule', 'Path'])
-const slotOf = (name: string) => CATALOG.find(c => c.name === name)?.slot ?? (TEXT.has(name) ? 1 : LAYOUT.has(name) ? 8 : BEHAVIOR.has(name) ? 10 : 99)
+/** Paints the catalogue does not add, in the slots of the fill and border they are. */
+const PAINT_SLOTS: Readonly<Record<string, number>> = { fill: SLOT.fill, glassEffect: SLOT.fill, stroke: SLOT.stroke, strokeBorder: SLOT.stroke }
+/** Where a modifier usually sits in a chain, from text styles to behaviour; 99 for one the studio does not place. */
+export function slotOf(name: string): number {
+  return CATALOG.find(c => c.name === name)?.slot ?? PAINT_SLOTS[name] ?? (TEXT.has(name) ? SLOT.text : LAYOUT.has(name) ? SLOT.offset : BEHAVIOR.has(name) ? SLOT.behaviour : 99)
+}
 
 function category(name: string): ModifierCategory {
   return CATALOG.find(c => c.name === name)?.category ?? (BEHAVIOR.has(name) ? 'behavior' : LAYOUT.has(name) ? 'layout' : TEXT.has(name) ? 'text' : SUPPORTED_MODIFIERS.has(name) ? 'appearance' : 'custom')
@@ -173,7 +185,7 @@ function segmentsOf(expr: Expr, text: string): { base: CallExpr; segments: Segme
   return { base: chain.base, segments, end }
 }
 /** Where a call's own text begins: its dot, after any comments or line breaks before it. */
-function dotOf(call: CallExpr, text: string): number {
+export function dotOf(call: CallExpr, text: string): number {
   if (call.callee.kind !== 'memberAccess') return call.span.start
   const dot = text.lastIndexOf('.', call.callee.memberSpan.start)
   return dot >= 0 && dot >= (call.callee.base?.span.end ?? 0) ? dot : call.callee.memberSpan.start

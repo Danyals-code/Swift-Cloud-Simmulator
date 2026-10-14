@@ -1,0 +1,15 @@
+/* The Fill section's own rows; what every section shares is in LayerSection.module.css. */
+
+/* The gradient: its settings, a preview of it, then a row per stop. */
+.gradient { display: grid; gap: 8px; min-width: 0; }
+.preview { display: block; height: 16px; border-radius: var(--radius-sm); background-color: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-xc-text) 14%, transparent); }
+/* A stop: its position and its remove button, then its colour on a row of its own. */
+.stop { display: grid; grid-template-columns: 96px minmax(0, 1fr) var(--control-height-sm); align-items: center; gap: 4px 6px; min-width: 0; }
+.stop + .stop { padding-top: 8px; border-top: 1px solid var(--color-xc-line-soft); }
+.stop > [data-testid='color-field'] { grid-column: 1 / -1; }
+.stopName { font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-xc-text-3); }
+
+/* Why a kind is off in the menu, shown while the menu has focus rather than under every fill. */
+.kind { display: grid; gap: 4px; min-width: 0; }
+.kind > p { display: none; }
+.kind:focus-within > p { display: block; }

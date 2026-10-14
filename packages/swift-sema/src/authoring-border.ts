@@ -40,6 +40,8 @@ export interface Border {
   readonly color: string
   readonly width: number
   readonly position: BorderPosition
+  /** Lengths of dash and gap, written in a `StrokeStyle`. */
+  readonly dash?: readonly number[]
 }
 
 /** A border found in a view's modifiers: what it looks like, and where its colour is written. */
@@ -52,12 +54,14 @@ export interface FoundBorder extends Border {
 /** A new border's look. */
 export const NEW_BORDER: Border = { color: 'Color.gray', width: 1, position: 'inside' }
 
-const modifierName = (call: CallExpr) => call.callee.kind === 'memberAccess' ? call.callee.member : ''
+/** A modifier call's name, `padding` in `.padding(8)`. */
+export const modifierName = (call: CallExpr) => call.callee.kind === 'memberAccess' ? call.callee.member : ''
 const source = (expr: Expr, text: string) => text.slice(expr.span.start, expr.span.end)
 
 /**
- * The corners a view has: the last of its clip, `.cornerRadius` and a rounded
- * background, else its own shape when it is one, else square.
+ * The corners a view has: the last of its clip, `.cornerRadius`, a rounded background
+ * and glass, which is a capsule unless drawn `in:` a shape, else its own shape when it is
+ * one, else square.
  */
 export function cornersOf(chain: { readonly base: CallExpr; readonly modifiers: readonly CallExpr[] } | null | undefined, text: string): Corners {
   // A Circle's outline is a circle before any modifier says otherwise.
@@ -69,6 +73,7 @@ export function cornersOf(chain: { readonly base: CallExpr; readonly modifiers: 
     const shape = name === 'clipShape' && only ? shapeCorners(only, text)
       : name === 'cornerRadius' && only ? { kind: 'rounded' as const, radius: source(only, text) }
       : name === 'background' ? shapeCorners(modifier.args.find(arg => arg.label === 'in')?.value ?? only ?? drawn, text)
+      : name === 'glassEffect' ? modifier.args.some(arg => arg.label === 'in') ? shapeCorners(modifier.args.find(arg => arg.label === 'in')!.value, text) : { kind: 'capsule' as const }
       : name === 'buttonBorderShape' && only ? shapeCorners(only, text)
       : undefined
     if (shape) corners = shape
@@ -77,7 +82,7 @@ export function cornersOf(chain: { readonly base: CallExpr; readonly modifiers: 
 }
 
 /** The corners of a shape: `.rect(cornerRadius: 12)`, `Capsule()`, `.circle`, or a shape view drawn in a background. */
-function shapeCorners(shape: Expr | undefined, text: string): Corners | undefined {
+export function shapeCorners(shape: Expr | undefined, text: string): Corners | undefined {
   if (!shape) return undefined
   if (shape.kind === 'memberAccess' && !shape.base) return { rect: { kind: 'rectangle' as const }, capsule: { kind: 'capsule' as const }, circle: { kind: 'circle' as const } }[shape.member]
   const call = shape.kind === 'call' ? viewCallChain(shape)?.base : undefined
@@ -120,12 +125,30 @@ function grown(radius: string, width: number): string {
   return /^\d+(?:\.\d+)?$/.test(radius) && Number.isFinite(value) ? String(value ? value + width : 0) : `${radius} + ${width}`
 }
 
+/**
+ * The stroke that draws a border, or a shape's own: `.strokeBorder` inside the edge,
+ * `.stroke` on it, with a dash in a `StrokeStyle`. `width` is written as given.
+ */
+export function strokeCall(color: string, width: number | string, position: BorderPosition, dash?: readonly number[]): string {
+  const line = dash?.length ? `style: StrokeStyle(lineWidth: ${width}, dash: [${dash.join(', ')}])` : `lineWidth: ${width}`
+  return `.${position === 'center' ? 'stroke' : 'strokeBorder'}(${color}, ${line})`
+}
+
+/** `StrokeStyle(lineWidth: 2, dash: [4, 2])` with literal numbers, as its width and dash; undefined for anything else. */
+export function strokeStyleOf(value: Expr, text: string): { width: number; dash?: number[] } | undefined {
+  if (value.kind !== 'call' || value.trailingClosure || source(value.callee, text) !== 'StrokeStyle' || !['', 'lineWidth', 'dash', 'lineWidth,dash'].includes(value.args.map(arg => arg.label).join())) return undefined
+  const number = (expr: Expr) => /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(source(expr, text)) ? Number(source(expr, text)) : NaN
+  const width = value.args.find(arg => arg.label === 'lineWidth'), dash = value.args.find(arg => arg.label === 'dash')?.value
+  const lengths = !dash ? [] : dash.kind === 'arrayLiteral' ? dash.elements.map(number) : [NaN]
+  const lineWidth = width ? number(width.value) : 1
+  return [lineWidth, ...lengths].some(Number.isNaN) ? undefined : { width: lineWidth, ...lengths.length ? { dash: lengths } : {} }
+}
+
 /** The border's own lines: its shape and the stroke that draws it. */
 function borderLines(border: Border, corners: Corners): string[] {
-  const stroke = border.position === 'center' ? 'stroke' : 'strokeBorder'
   return [
     borderShape(corners, border.position, border.width),
-    `.${stroke}(${border.color}, lineWidth: ${border.width})`,
+    strokeCall(border.color, border.width, border.position, border.dash),
     ...(border.position === 'outside' ? [`.padding(-${border.width})`] : []),
   ]
 }
@@ -167,16 +190,17 @@ export function borderOf(modifier: CallExpr, corners: Corners, text: string): Fo
   const [stroke, padding, ...rest] = chain.modifiers
   if (!stroke || rest.length || !['stroke', 'strokeBorder'].includes(modifierName(stroke))) return undefined
   const color = stroke.args[0]
-  const lineWidth = stroke.args.find(arg => arg.label === 'lineWidth')
-  if (!color || color.label !== null || stroke.trailingClosure || stroke.args.length !== (lineWidth ? 2 : 1)) return undefined
-  const width = lineWidth ? Number(source(lineWidth.value, text)) : 1
+  const lineWidth = stroke.args.find(arg => arg.label === 'lineWidth'), style = stroke.args.find(arg => arg.label === 'style')
+  const dashed = style && strokeStyleOf(style.value, text)
+  if (!color || color.label !== null || stroke.trailingClosure || stroke.args.length !== (lineWidth || style ? 2 : 1) || style && !dashed) return undefined
+  const width = dashed ? dashed.width : lineWidth ? Number(source(lineWidth.value, text)) : 1
   if (!Number.isFinite(width) || width < 0) return undefined
   const outside = !!padding && modifierName(padding) === 'padding' && padding.args.length === 1 && padding.args[0]!.label === null && Number(source(padding.args[0]!.value, text)) === -width
   if (padding && !outside || outside && modifierName(stroke) !== 'strokeBorder') return undefined
   const position: BorderPosition = outside ? 'outside' : modifierName(stroke) === 'stroke' ? 'center' : 'inside'
   // Only the view's own corners: a stroke of some other shape is an overlay of its own.
   if (source(chain.base, text).replace(/\s+/g, '') !== borderShape(corners, position, width).replace(/\s+/g, '')) return undefined
-  return { color: source(color.value, text), colorExpr: color.value, width, position, argument: !closure }
+  return { color: source(color.value, text), colorExpr: color.value, width, position, ...dashed?.dash ? { dash: dashed.dash } : {}, argument: !closure }
 }
 
 /**
@@ -199,11 +223,11 @@ function dotOf(modifier: CallExpr, text: string): number {
 /**
  * Fits a view's borders to its corners again after an edit changed them, in the same
  * step: a border that fitted the view before and is still written the same is written
- * for the new corners, switched off or not. `viewStart` is where the view's call begins,
- * before and after.
+ * for the new corners, switched off or not. `viewStart` is where the view's call begins
+ * before the edit, and `nextStart` after it, when a property declared above it moved it.
  */
-export function followCorners(before: string, after: string, file: string, viewStart: number): string {
-  const old = chainAt(before, file, viewStart), next = chainAt(after, file, viewStart)
+export function followCorners(before: string, after: string, file: string, viewStart: number, nextStart = viewStart): string {
+  const old = chainAt(before, file, viewStart), next = chainAt(after, file, nextStart)
   if (!old || !next) return after
   const oldCorners = cornersOf(old, before)
   // What the view's borders were, as written: the ones on, and the ones switched off.

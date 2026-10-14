@@ -42,7 +42,7 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   'ContentUnavailableView',
   // shapes and drawing
   'Rectangle', 'RoundedRectangle', 'Circle', 'Ellipse', 'Capsule', 'Path', 'Canvas',
-  // every corner drawn with the largest radius, and said so (D7a)
+  // each corner with its own radius
   'UnevenRoundedRectangle',
   // styles
   'LinearGradient', 'RadialGradient', 'AngularGradient', 'GridItem',
@@ -55,6 +55,8 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
 
 /** Modifiers the preview applies. */
 export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
+  // Liquid Glass, drawn as glass over what is behind it
+  'glassEffect',
   // composition
   'modifier',
   // layout
@@ -218,8 +220,8 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'safeAreaPadding', 'gridCellColumns', 'coordinateSpace',
   // painting and effects
   'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect', 'zIndex',
-  // Liquid Glass: the view draws without its glass
-  'glassEffect',
+  // a width of the system font, which the preview's text measurement cannot stretch
+  'fontWidth',
 
   // symbols and images
   'symbolRenderingMode', 'symbolVariant', 'symbolEffect', 'interpolation',
@@ -352,12 +354,10 @@ export const SWIFTUI_COLOR_NAMES: ReadonlySet<string> = new Set([
 ])
 
 /**
- * The colours `UIColor` has, which SwiftUI reaches through the bridge: `Color(.systemGray6)`,
- * `Color(uiColor: .label)`, `UIColor.darkGray`. Written as `Color.systemGray6` they don't
- * exist, and Xcode rejects them. UIKit's fixed colours are its own: `Color(.red)` is
- * `UIColor.red`, pure red, not `Color.red`.
+ * UIKit's system colours, which change with light and dark mode and have no `Color` of
+ * their own: `Color(.systemGray6)`, `Color(.label)`.
  */
-export const UIKIT_COLOR_NAMES: ReadonlySet<string> = new Set([
+export const UIKIT_SEMANTIC_COLOR_NAMES: ReadonlySet<string> = new Set([
   'systemRed', 'systemOrange', 'systemYellow', 'systemGreen', 'systemMint', 'systemTeal', 'systemCyan',
   'systemBlue', 'systemIndigo', 'systemPurple', 'systemPink', 'systemBrown',
   'systemGray', 'systemGray2', 'systemGray3', 'systemGray4', 'systemGray5', 'systemGray6',
@@ -366,6 +366,16 @@ export const UIKIT_COLOR_NAMES: ReadonlySet<string> = new Set([
   'systemBackground', 'secondarySystemBackground', 'tertiarySystemBackground',
   'systemGroupedBackground', 'secondarySystemGroupedBackground', 'tertiarySystemGroupedBackground',
   'systemFill', 'secondarySystemFill', 'tertiarySystemFill', 'quaternarySystemFill',
+])
+
+/**
+ * The colours `UIColor` has, which SwiftUI reaches through the bridge: `Color(.systemGray6)`,
+ * `Color(uiColor: .label)`, `UIColor.darkGray`. Written as `Color.systemGray6` they don't
+ * exist, and Xcode rejects them. UIKit's fixed colours are its own: `Color(.red)` is
+ * `UIColor.red`, pure red, not `Color.red`.
+ */
+export const UIKIT_COLOR_NAMES: ReadonlySet<string> = new Set([
+  ...UIKIT_SEMANTIC_COLOR_NAMES,
   'black', 'darkGray', 'lightGray', 'white', 'gray', 'red', 'green', 'blue', 'cyan', 'yellow',
   'magenta', 'orange', 'purple', 'brown', 'clear', 'tintColor',
 ])
@@ -438,6 +448,8 @@ export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean }> = ne
   // Storage the code reads and writes. Nothing focuses a field from outside the
   // program, because the preview has no keyboard - see the coverage matrix.
   ['FocusState', { supported: true }],
+  // A size that scales with the reader's text size, along the curve of the style it names.
+  ['ScaledMetric', { supported: true }],
   ['GestureState', { supported: true }],
 ])
 

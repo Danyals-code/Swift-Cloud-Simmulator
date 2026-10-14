@@ -81,6 +81,7 @@ const EVERY_KIND: { readonly [K in Operation['kind']]: Extract<Operation, { kind
   'layer-wrap': { kind: 'layer-wrap', ids: [S], layout: 'HStack' },
   'layer-reparent': { kind: 'layer-reparent', ids: [S], destination: S },
   'make-tappable': { kind: 'make-tappable' },
+  'layer-set': { kind: 'layer-set', changes: [{ section: 'layout', padding: { top: { token: S }, leading: 0, bottom: 0, trailing: 0 } }, { section: 'text', font: { style: S } }] },
   'guided-action': { kind: 'guided-action', action, replace: true, createValue: { name: S, value: S, activeTitle: S }, createScreen: { name: S, title: S } },
   'navigation-target': { kind: 'navigation-target', destination: S },
   'navigation-type': { kind: 'navigation-type', type: 'sheet' },

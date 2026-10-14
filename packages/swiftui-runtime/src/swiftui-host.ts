@@ -28,7 +28,7 @@ import {
 import { LEGACY_STYLE_TOKENS, SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS, isKnownGlobal } from '@studio/swift-sema'
 import { ZERO_INSETS } from '@studio/swiftui-layout'
 import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
-import { CORNER_NAMES, cornerRadii, largestCorner } from './corners'
+import { CORNER_NAMES, cornerRadii, cornerRadiiOf, radiiValue } from './corners'
 import { containable, toFailure } from './failures'
 import { customFont, fontTokenName, parseFontToken } from './font-token'
 import { colorForName, fontForToken, hasAssetColor, systemStyleLevel } from './style'
@@ -1279,9 +1279,13 @@ export class SwiftUIHost implements InterpreterHost {
     const shadowed = this.paintWithShadow(target, member, call)
     if (shadowed) return shadowed
 
-    // `.regular.tint(.blue).interactive()`: a Liquid Glass variant, refined. The glass is
-    // not drawn yet, which the checker says at `.glassEffect`, so refining keeps it as it is.
-    if (target.kind === 'opaque' && target.typeName === TOKEN_TYPE && GLASS_VARIANTS.has((target.payload as TokenPayload).name) && (member === 'tint' || member === 'interactive')) return target
+    // `.regular.tint(.blue).interactive()`: a Liquid Glass variant, refined. The tint rides
+    // as the token's argument, `nil` taking it off; being interactive changes nothing drawn.
+    if (target.kind === 'opaque' && target.typeName === TOKEN_TYPE && GLASS_VARIANTS.has((target.payload as TokenPayload).name) && (member === 'tint' || member === 'interactive')) {
+      if (member === 'interactive') return target
+      const tint = call.args[0]?.value
+      return opaque(TOKEN_TYPE, { name: (target.payload as TokenPayload).name, ...(tint && tint.kind !== 'nil' ? { args: [tint] } : {}) } satisfies TokenPayload)
+    }
 
     // `.red.opacity(0.5)` - a contextual colour asked for one of `Color`'s members.
     const promoted = this.colorFromToken(target, member)
@@ -1630,11 +1634,11 @@ export class SwiftUIHost implements InterpreterHost {
     if (member === 'height' || member === 'fraction') {
       return token(`detent:${member}:${numberOf(call.args[0]?.value) ?? 0}`)
     }
-    // `.rect(topLeadingRadius: 20, bottomTrailingRadius: 8)`, a radius per corner: drawn
-    // with the largest on every corner (D7a), which the checker says where it is written.
+    // `.rect(topLeadingRadius: 20, bottomTrailingRadius: 8)` and `.rect(cornerRadii:)`, a
+    // radius per corner, carried as the `RectangleCornerRadii` the shape is made of.
     if (member === 'rect' && hasCornerRadii(call.args.map((a) => a.label))) {
       const style = call.args.find((a) => a.label === 'style')?.value
-      return opaque(TOKEN_TYPE, { name: 'rect', args: [double(largestCorner(call.args)), ...(style ? [style] : [])] } satisfies TokenPayload)
+      return opaque(TOKEN_TYPE, { name: 'rect', args: [radiiValue(cornerRadiiOf(call.args)), ...(style ? [style] : [])] } satisfies TokenPayload)
     }
 
     /**

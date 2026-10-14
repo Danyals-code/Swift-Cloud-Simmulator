@@ -1,0 +1,38 @@
+/* One colour row: a swatch, the hex or token, and the opacity, 28px tall like every field. */
+.field { display: grid; grid-template-columns: var(--control-height) minmax(0, 1fr) 84px; align-items: center; gap: 6px; min-width: 0; }
+.field > .error { grid-column: 1 / -1; }
+
+/* A swatch over a checker, so a translucent colour shows as one. */
+.swatch, .swatches > button, .tokens i, .custom input[type='color'] { position: relative; overflow: hidden; border-radius: var(--radius-sm); background: repeating-conic-gradient(var(--color-xc-fill-strong) 0 25%, transparent 0 50%) 0 0 / 8px 8px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-xc-text) 14%, transparent); }
+.swatch { width: var(--control-height); height: var(--control-height); padding: 0; border-radius: var(--radius-md); }
+.swatch > i, .swatches > button > i { position: absolute; inset: 0; }
+/* The hairline sits over the colour, so a swatch as light as the panel still has an edge. */
+.swatch::after, .swatches > button::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-xc-text) 14%, transparent); pointer-events: none; }
+.swatch:disabled { opacity: .4; }
+.swatch[aria-expanded='true'] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-xc-text) 14%, transparent), 0 0 0 2px var(--color-xc-accent); }
+
+.hex { width: 100%; min-width: 0; height: var(--control-height); font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
+.hex[aria-invalid='true'] { box-shadow: 0 0 0 1px var(--color-xc-error); }
+.chip { justify-self: start; max-width: 100%; height: var(--control-height-sm); padding: 0 8px; overflow: hidden; border-radius: var(--radius-md); background: var(--color-xc-fill); color: var(--color-xc-text); font-size: var(--text-footnote); text-overflow: ellipsis; white-space: nowrap; transition: background-color var(--duration-fast); }
+.chip:hover:not(:disabled) { background: var(--color-xc-fill-strong); }
+.chip:disabled { opacity: .4; }
+
+.error { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-error); }
+
+/* The colours, floating over the panel. */
+.scrim { position: fixed; inset: 0; z-index: 900; }
+.popover { position: fixed; z-index: 901; display: grid; gap: 8px; width: 232px; max-height: min(420px, calc(100vh - 16px)); padding: 10px; overflow-y: auto; border-radius: var(--radius-lg); background: var(--color-xc-bar-raised); box-shadow: var(--shadow-popover); color: var(--color-xc-text); }
+.group { margin: 0; font-size: var(--text-caption); line-height: var(--text-caption--line-height); font-weight: 600; color: var(--color-xc-text-2); }
+.swatches { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+.swatches > button { aspect-ratio: 1; padding: 0; }
+.swatches > button[aria-pressed='true'], .swatches > button:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-xc-text) 14%, transparent), 0 0 0 2px var(--color-xc-accent); }
+.tokens { display: grid; gap: 2px; }
+.tokens > button { display: flex; align-items: center; gap: 8px; min-height: var(--control-height-sm); padding: 0 6px; border-radius: var(--radius-md); font-size: var(--text-footnote); text-align: left; color: var(--color-xc-text); }
+.tokens > button:hover, .tokens > button[aria-pressed='true'] { background: var(--color-xc-fill); }
+.tokens i { flex-shrink: 0; width: 14px; height: 14px; }
+.tokens span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.custom { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--color-xc-line-soft); font-size: var(--text-footnote); color: var(--color-xc-text-2); }
+.custom input[type='color'] { width: var(--control-height); height: var(--control-height-sm); padding: 0; border: 0; cursor: pointer; }
+.custom > .hex { flex: 1; height: var(--control-height-sm); }
+.dropper { display: grid; place-items: center; width: var(--control-height); height: var(--control-height-sm); border-radius: var(--radius-md); color: var(--color-xc-text-2); }
+.dropper:hover { background: var(--color-xc-fill); color: var(--color-xc-text); }

@@ -60,8 +60,7 @@ export function componentRecipes(ctx: FeatureContext, node: AuthoringNode): Comp
     const input = literal(ctx, expr)
     if (scalar && !scalar.optional && input !== undefined && input !== null) {
       value = String(input)
-      kind = scalar.type === 'String' ? 'text' : scalar.type === 'Bool' ? 'select' : 'number'
-      options = scalar.type === 'Bool' ? ['true', 'false'] : undefined
+      kind = scalar.type === 'String' ? 'text' : scalar.type === 'Bool' ? 'toggle' : 'number'
       format = v => scalar.type === 'String' ? swiftString(v) : scalar.type === 'Bool' ? v : String(Number(v))
     } else if (type?.kind === 'namedType') {
       options = type.name === 'Color' && !allDeclarations(ctx).some(d => 'name' in d && d.name === 'Color') ? AUTHORING_COLORS.filter(c => deploymentVersion(ctx.deploymentTarget) >= 15 || !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c)) : enumCases(ctx, type.name)

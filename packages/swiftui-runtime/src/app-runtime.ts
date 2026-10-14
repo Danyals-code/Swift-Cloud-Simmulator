@@ -1,4 +1,4 @@
-import type { ComponentSource, LogLevel, Size, SourceSpan, UIEvent } from '@studio/shared'
+import { isDynamicTypeSize, type ComponentSource, type LogLevel, type Size, type SourceSpan, type UIEvent } from '@studio/shared'
 import type { Block, Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
@@ -35,6 +35,7 @@ import {
   phaseOfEvent,
 } from './gestures'
 import { containable, toFailure } from './failures'
+import { scaledSize } from './appearance/typography'
 import { SwiftUIHost } from './swiftui-host'
 import {
   asSwiftValue,
@@ -1085,6 +1086,9 @@ export class AppRuntime {
     for (const member of this.interpreter.membersOf(decl.name)) {
       if (member.kind !== 'varDecl') continue
 
+      const metric = member.attributes.find((a) => a.name === 'ScaledMetric')
+      if (metric) { this.scaleMetric(instance, member, metric); continue }
+
       const environment = member.attributes.find((a) => a.name === 'Environment')
       if (environment) {
         // `@Environment(Model.self)`: the object an ancestor gave with `.environment(model)`.
@@ -1114,6 +1118,26 @@ export class AppRuntime {
       if (object !== undefined) instance.fields.set(member.name, object)
     }
   }
+
+  /**
+   * `@ScaledMetric`: the value the view was given, scaled for the Dynamic Type size in
+   * force there, on the curve of the text style it is relative to, `.body` unless
+   * `relativeTo:` names another. The curve is `.custom(_:size:relativeTo:)`'s, and the
+   * iOS 27 simulator printed the same values for both. Once per instance, so a view
+   * expanded twice is not scaled twice.
+   */
+  private scaleMetric(instance: StructValue, member: VarDecl, attribute: { args: readonly { label: string | null; value: unknown }[] }): void {
+    const value = instance.fields.get(member.name)
+    if (this.scaled.get(instance)?.has(member.name) || value?.kind !== 'double' && value?.kind !== 'int') return
+    const relativeTo = attribute.args.find((a) => a.label === 'relativeTo')?.value as { kind?: string; member?: string } | undefined
+    const size = this.host.environment.value('dynamicTypeSize')
+    const category = size?.kind === 'opaque' ? (size.payload as { name?: string }).name : undefined
+    instance.fields.set(member.name, double(scaledSize(relativeTo?.kind === 'memberAccess' && relativeTo.member ? relativeTo.member : 'body', isDynamicTypeSize(category) ? category : 'large', value.value)))
+    this.scaled.set(instance, (this.scaled.get(instance) ?? new Set()).add(member.name))
+  }
+
+  /** The `@ScaledMetric` properties already scaled, per view instance. */
+  private readonly scaled = new WeakMap<StructValue, Set<string>>()
 
   /** Copies `@State` values out of a pass's instances and back into their boxes. */
   private harvest(instances: ReadonlyMap<string, StructValue> = this.live): void {

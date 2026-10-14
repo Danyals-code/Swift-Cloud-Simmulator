@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import type { AuthoringNode, DesignControl, ResourceOperation, SharedStyle, StyleProperty } from '@studio/shared'
 import { PropertyControl, type PropertyChange } from '../PropertyControl'
-import { SYSTEM_COLOR_SWATCHES, isHexColor, nameHint, pickerColor, suggestedName, withPickedColor } from '../../lib/tokens'
+import { SYSTEM_COLOR_SWATCHES, isHexColor, pickerColor, withPickedColor } from '../../lib/colorValue'
+import { nameHint, suggestedName } from '../../lib/tokens'
 import styles from './Settings.module.css'
 
 const CUSTOM = '__custom'

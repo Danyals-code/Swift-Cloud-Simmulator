@@ -150,7 +150,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.foregroundStyle` / `.foregroundColor` | ✅ | 3 |
 | `.background` (colour, gradient, shape, view) | ✅ | 6 | materials, content builders, alignment, and built-in shape clipping via `in:`; `fillStyle:` warns as unsupported. A colour, gradient or material reaches into the safe area its view touches, as the ShapeStyle form does in iOS 27; a view given as the background stays inside |
 | `.overlay` | ✅ | 6 | view arguments and content builders, including interactive content and alignment |
-| `.font` (text styles and `.system(size:weight:design:)`) | ✅ | 6 | |
+| `.font` (text styles and `.system(size:weight:design:)`) | ✅ | 6 | a size from an `@ScaledMetric` property grows with Dynamic Type, as `.font(.system(size: iconSize, weight: .semibold))` does in the app |
 | `.bold` / `.italic` / `.fontWeight` | ✅ | 6 | compose with `.font` in either order |
 | `.opacity` | ✅ | 3 |
 | `.cornerRadius` | ✅ | 3 |
@@ -174,6 +174,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.lineLimit` / `.multilineTextAlignment` / `.textCase` | ✅ | 7 | inherited, so a stack can set them for its text. The `2...4` form reserves its floor as well as capping at its ceiling |
 | `.monospaced` | ✅ | 7 |
 | `.fontDesign` | ✅ | 10 | inherited separately from size, as in SwiftUI |
+| `.fontWidth` / `Font.width(_:)` | ⬜ | - | drawn at the standard width, and warns. Both browsers stretch the system font, but the text measurer cannot: WebKit's canvas ignores a font's stretch and Chromium's takes only the named stretches, which miss `.expanded` by 5%. iOS 27 draws `.condensed` at 0.80 of the standard width, `.compressed` at 0.68 and `.expanded` at 1.28 |
 | `.underline` / `.strikethrough` | ✅ | - | inherited like the font, and each takes the `Bool` form so a binding can switch one off |
 | `.kerning` / `.tracking` | ✅ | - | measured, not painted: the extra advance is in the width the engine reports. The two are applied identically - see approximations |
 | `.baselineOffset` / `.lineSpacing` | ✅ | - | `lineSpacing` is a gap *between* lines, so a single line is unaffected |
@@ -187,8 +188,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | Item | Status | Phase |
 | --- | --- | --- |
-| `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 | a `.continuous` corner is iOS 27's curve, measured in the simulator: it reaches 1.53 times the radius along each edge, squeezed into half a side that is too short. Grouped list and form cards and alerts use it. A sheet's clip and the glass outlines are still circular |
-| `UnevenRoundedRectangle`, `.rect(topLeadingRadius:…)`, `RectangleCornerRadii` | 🟡 | - | drawn, clipped and filled with the largest radius on every corner; the checker says so where uneven corners are written (D7a) |
+| `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 | a rounded shape's corners are continuous unless `style: .circular` is written, as the Xcode 27 SDK defaults `RoundedRectangle`, `.rect(cornerRadius:)`, `Capsule` and `.cornerRadius(_:)`. The continuous curve is fitted to the iOS 27 simulator, within 0.07 pt for corners of 8 to 30 pt: a cubic easing off the edge into a circular arc, its depth showing about 1.5 times the radius along each edge. A side with less room makes that half of the corner rounder, and with exactly one radius circular, so a capsule's ends are half circles and its long sides still ease in. A circular corner is a plain arc. A sheet's clip and the toolbar's glass outlines are still circular |
+| `UnevenRoundedRectangle`, `.rect(topLeadingRadius:…)`, `.rect(cornerRadii:)`, `RectangleCornerRadii` | ✅ | - | each corner with its own radius, as a shape, a clip and a background's shape. Leading is the left, as the preview lays out left to right. As in the simulator, corners too big for a side all shrink by one factor, and each side is shared by its two corners in proportion to their radii |
 | `Path` (custom) | ✅ | 7 | lines, curves, arcs, rects and ellipses, serialised to SVG |
 | `.fill` / `.stroke` | 🟡 | 7 | takes a colour, a gradient or a `StrokeStyle`: line width, dash pattern, cap and join |
 | `.trim` | 🟡 | 7 | on shapes and paths, from where iOS 27 starts each shape (3 o'clock; a rectangle's top-left corner) and in an arc's own direction. On the built-in shapes, strokes only: a trimmed fill, or a trimmed stroke with a dash pattern, is drawn whole and warns. A path's arcs are trimmed whether filled or stroked |
@@ -198,7 +199,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Dark-mode colour resolution | ✅ | 4 |
 | `LinearGradient` | ✅ | 6 | named unit points |
 | `RadialGradient` / `AngularGradient` | ✅ | 6 | drawn as radial and conic gradients |
-| `Material` (`.ultraThinMaterial` etc.) | ✅ | 7 | a real translucent, blurred panel via `backdrop-filter`. `Material.ultraThin` and `.ultraThinMaterial` are the same value |
+| `Material` (`.ultraThinMaterial` etc.) | ✅ | 7 | a real translucent, blurred panel via `backdrop-filter`. `Material.ultraThin` and `.ultraThinMaterial` are the same value. Cut to a shape, as `.background(.regularMaterial, in: .capsule)` and `.fill(.regularMaterial)` are, the panel is cut itself, because a browser blurs nothing behind a box whose parent is cut |
+| `.glassEffect(_:in:)`, `Glass` | 🟡 | - | approximated as a material cut to the shape (a capsule unless `in:` gives another), with a light rim inside a hairline, measured over colour in the iOS 27 simulator: `.regular` lightens what is behind it by about 40% and blurs it over about 6 pt, `.clear` by about 12% with almost no blur, and `.tint(_:)` covers it at about 90%. `.interactive()` draws as the glass does at rest, and `.identity` draws nothing. The lens refraction, the highlights and the shadow are not drawn, and neither is `GlassEffectContainer`'s merging |
 | `ShapeStyle` conformances generally | 🟡 | 6 | colours, tokens and gradients anywhere a style is taken |
 
 ## Interaction and lifecycle
@@ -258,6 +260,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `@StateObject` / `@ObservedObject` / `ObservableObject` / `@Published` | ✅ | 7 | a class is a reference, so a change is seen everywhere. `$store.property` projects a `Binding` into the model, so `Slider(value: $ledger.monthlyBudget)` writes where it reads - the dynamic member lookup SwiftUI puts on the wrapper |
 | `@AppStorage` / `@SceneStorage` | 🟡 | - | keyed by the string, so views sharing a key share a value and it outlives the view that wrote it. Held for the session rather than on disk - see approximations |
 | `@FocusState` | 🟡 | - | storage the code reads and writes |
+| `@ScaledMetric` | ✅ | - | the value it is given, scaled for the Dynamic Type size in force where the view is, on the curve of the text style it is `relativeTo:` (`.body` unless another is named), to a third of a point. The same curve as `.custom(_:size:relativeTo:)`; the iOS 27 simulator printed the same values for both |
 | `Binding(get:set:)` / `.constant` | ✅ | - | a projection built from the user's closures, or one that reads a value and swallows writes; a control cannot tell either from `$value` |
 | `.environmentObject` / `@EnvironmentObject` | ✅ | 11 | reaches views expanded while the modifier is in scope, *and* the deferred ones - a pushed `navigationDestination`, a presented `.sheet`, a `.toolbar` - which capture the frame they were written in and restore it when they run. Before that, a detail screen reading an `@EnvironmentObject` trapped |
 | `.environment(\.key, …)` | ✅ | 7 | same scoping rule |
