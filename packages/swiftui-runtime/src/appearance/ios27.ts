@@ -186,6 +186,20 @@ export const IOS_27 = {
     ultraThickMaterial: { opacity: 0.92, blur: 36 },
     bar: { opacity: 0.72, blur: 20 },
   } as Readonly<Record<string, { readonly opacity: number; readonly blur: number }>>,
+  /**
+   * `.glassEffect`, approximated as a material, measured over coloured stripes in the
+   * iOS 27 simulator: `.regular` lightens what is behind it by about 40% and blurs it over
+   * about 6 pt, `.clear` lightens it by about 12% and hardly blurs it, and a tint covers it
+   * at about 90%. The rim is a light line inside a hairline, which reads over colour and
+   * over white, as the glass's own edge does. Its refraction and highlights are not drawn.
+   */
+  glass: {
+    regular: { opacity: 0.4, blur: 6 },
+    clear: { opacity: 0.12, blur: 1 },
+    tint: 0.9,
+    rim: { width: 1, light: 0.5, dark: 0.15 },
+    hairline: { width: 0.5, alpha: 0.12 },
+  },
 } as const
 
 export function appearanceFor(target?: PreviewTarget): typeof IOS_27 {

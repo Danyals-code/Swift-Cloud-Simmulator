@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import type { AuthoringNode, AuthoringSnapshot, FontTokenValue, ResourceOperation, ShadowTokenValue, SharedStyle, StyleKind, TokenDefinition } from '@studio/shared'
-import { FONT_WEIGHTS, SYSTEM_COLOR_SWATCHES, TEXT_STYLES, TOKEN_KINDS, impactSentence, nameHint, suggestedName, swatchFor, tokenImpact } from '../../lib/tokens'
+import { FONT_WEIGHTS, TEXT_STYLES, TOKEN_KINDS, impactSentence, nameHint, suggestedName, swatchFor, tokenImpact } from '../../lib/tokens'
+import { SYSTEM_COLOR_SWATCHES } from '../../lib/colorValue'
 import { propertyOptionLabel } from '../PropertyControl'
 import { sourceLayerLabel } from '../../lib/sourceLayers'
 import { Icon } from '../ui/Icon'

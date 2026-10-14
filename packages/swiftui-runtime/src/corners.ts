@@ -1,11 +1,10 @@
-import { CORNER_RADIUS_LABELS } from '@studio/shared'
+import { CORNER_RADIUS_LABELS, type CornerRadii } from '@studio/shared'
 import { opaque, type SwiftValue } from '@studio/swift-runtime'
 import { numberArg } from './style'
 
 /**
- * A rectangle's corners as the preview draws them: one radius on every corner, the
- * largest of those written (D7a). `UnevenRoundedRectangle`, `.rect(topLeadingRadius:…)`
- * and `.rect(cornerRadii:)` all come here, and the checker says so where they are written.
+ * A rectangle's corners as the preview draws them: each with its own radius, from
+ * `UnevenRoundedRectangle(…)`, `.rect(topLeadingRadius:…)` or `.rect(cornerRadii:)`.
  */
 
 interface Argument {
@@ -19,12 +18,26 @@ const CORNER_RADII_TYPE = 'RectangleCornerRadii'
 
 /** `RectangleCornerRadii(topLeading: 8, bottomTrailing: 8)`: the four radii, a corner left out being square. */
 export function cornerRadii(args: readonly Argument[]): SwiftValue {
-  return opaque(CORNER_RADII_TYPE, CORNER_NAMES.map((name) => numberArg(args.find((a) => a.label === name)?.value) ?? 0))
+  return radiiValue(radiiFrom(CORNER_NAMES.map((name) => numberArg(args.find((a) => a.label === name)?.value) ?? 0)))
 }
 
-/** The largest of a rectangle's corner radii, written one by one or as `cornerRadii:`. */
-export function largestCorner(args: readonly Argument[]): number {
-  const given = args.find((a) => a.label === 'cornerRadii')?.value
-  const radii = given?.kind === 'opaque' && given.typeName === CORNER_RADII_TYPE ? given.payload as readonly number[] : []
-  return Math.max(0, ...radii, ...args.filter((a) => CORNER_RADIUS_LABELS.includes(a.label ?? '')).map((a) => numberArg(a.value) ?? 0))
+/** The `RectangleCornerRadii` value with these radii. */
+export function radiiValue(radii: CornerRadii): SwiftValue {
+  return opaque(CORNER_RADII_TYPE, radii)
+}
+
+/** A `RectangleCornerRadii` value, or null for anything else. */
+export function asCornerRadii(value: SwiftValue | undefined): CornerRadii | null {
+  return value?.kind === 'opaque' && value.typeName === CORNER_RADII_TYPE ? value.payload as CornerRadii : null
+}
+
+/** A rectangle's corner radii, written one by one or as `cornerRadii:`. */
+export function cornerRadiiOf(args: readonly Argument[]): CornerRadii {
+  return asCornerRadii(args.find((a) => a.label === 'cornerRadii')?.value)
+    ?? radiiFrom(CORNER_RADIUS_LABELS.map((label) => numberArg(args.find((a) => a.label === label)?.value) ?? 0))
+}
+
+/** The four radii in `CORNER_RADIUS_LABELS` order, none below zero. */
+function radiiFrom([topLeading = 0, bottomLeading = 0, bottomTrailing = 0, topTrailing = 0]: readonly number[]): CornerRadii {
+  return { topLeading: Math.max(0, topLeading), bottomLeading: Math.max(0, bottomLeading), bottomTrailing: Math.max(0, bottomTrailing), topTrailing: Math.max(0, topTrailing) }
 }

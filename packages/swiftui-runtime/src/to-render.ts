@@ -213,6 +213,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
         shape: {
           shape: node.paint.shape,
           cornerStyle: node.paint.cornerStyle,
+          ...(node.paint.cornerRadii ? { cornerRadii: node.paint.cornerRadii } : {}),
           ...(node.paint.fill ? { fill: node.paint.fill } : {}),
           ...(node.paint.stroke ? { stroke: node.paint.stroke } : {}),
           ...(node.paint.trim ? { trim: node.paint.trim } : {}),

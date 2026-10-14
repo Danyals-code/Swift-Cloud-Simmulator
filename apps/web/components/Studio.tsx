@@ -20,6 +20,7 @@ import { canvasDrop, canvasParent, canvasPick, type CanvasScene, type CanvasSele
 import { navigationDestinationForPage } from '../lib/navigationPicker'
 import { useNavigationPicker } from '../lib/useNavigationPicker'
 import { authoringRenderGroups, hoveredSourceIds, resolveAuthoringRuntimeSelection } from '../lib/authoringHover'
+import { drawnSize } from '../lib/drawnSize'
 import { useCompiler } from '../lib/useCompiler'
 import { phoneView } from '../lib/phoneView'
 /**
@@ -608,6 +609,15 @@ export function Studio() {
       : authoringRenderGroups(authoringNode, result?.authoring, pageHierarchy ?? layers, tree))
   }, [mode, designPages, result?.renderTree, result?.authoring, sourceRuntimeSelection, layers, authoringNode, pageHierarchy])
   const selectedRenderIds = useMemo(() => new Set(selectedRenderGroups.flat()), [selectedRenderGroups])
+  /** The size the selected view is drawn at, which the Layout section's Fixed starts from. */
+  const selectedSize = useMemo(() => {
+    const runtimeId = selectedLayerId ?? authoringNode?.runtimeIds[0]
+    if (mode !== 'design' || !runtimeId) return undefined
+    for (const tree of designPages?.map(page => page.tree) ?? [result?.renderTree]) {
+      const size = tree && drawnSize(tree, layers, runtimeId, authoringNode?.name === 'Button')
+      if (size) return size
+    }
+  }, [mode, selectedLayerId, authoringNode, designPages, result?.renderTree, layers])
   const selectLayer = (layer: ViewLayer, page: ViewLayer) => {
     if (stale || !project) return
     setPendingSelect(null)
@@ -1466,7 +1476,7 @@ export function Studio() {
             onNodeChange={(node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }, undefined, undefined, undefined, true)}
             onNodeCommand={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation, undefined, undefined, undefined, true)} onSelect={selectAuthoring} onReveal={revealSpan} />
         : <p className="text-footnote text-xc-text-3" role={busy ? 'status' : undefined}>{busy ? 'Drawing screens…' : 'Select a screen, a view, or the App.'}</p>
-      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined} />}</PaneBoundary>
+      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined} measure={selectedSize} />}</PaneBoundary>
   const settingsTitle = <nav className={styles.levelPath} aria-label="Settings level" data-level={level}>
     <button type="button" aria-current={level === 'app' ? 'page' : undefined} onClick={selectApp} data-testid="level-app">App</button>
     {level !== 'app' && focusedScreen && <><span aria-hidden>›</span><button type="button" aria-current={level === 'screen' ? 'page' : undefined} onClick={() => openPage(focusedScreen.page)} data-testid="level-screen">{focusedScreen.name}</button></>}

@@ -1,0 +1,336 @@
+import { TEXT_STYLES, type ColorValue, type FontValue, type LayerChange, type LayerText, type LayerValue } from '@studio/shared'
+import type { CallExpr, Expr, VarDecl } from '@studio/swift-syntax'
+import { modifierName } from '../authoring-border'
+import { SLOT } from '../authoring-modifiers'
+import { STYLE_OPTIONS } from '../design-advanced-controls'
+import { insertCalls, insertionIndex, lineEnding, lineStart, replaceRun, type Patch } from './chain-edit'
+import { colorSource, readColor, sameColor } from './color'
+import { callsNamed, type ChainSlots, type SlotRun } from './slots'
+import type { LayerContext } from './context'
+import { numberOf } from './values'
+
+/**
+ * Text: the font, colour, alignment, spacing and case of a view that shows text.
+ *
+ * A font reads as one value however it is written: `.title2.bold()`, `.system(size:
+ * weight:design:)`, or a style with `.fontWeight` and `.fontDesign` beside it. A size that
+ * follows Dynamic Type is an `@ScaledMetric` property of the view, which is how SwiftUI
+ * scales a size in points as the reader's text size changes.
+ */
+
+/** Views that draw text themselves, which a text section sets. */
+export const TEXT_VIEWS: ReadonlySet<string> = new Set(['Text', 'Label', 'Button', 'TextField', 'SecureField', 'TextEditor', 'Link', 'Toggle', 'Menu', 'NavigationLink', 'Stepper', 'DatePicker', 'Picker', 'LabeledContent'])
+
+const WEIGHTS = STYLE_OPTIONS.fontWeight!
+const DESIGNS = STYLE_OPTIONS.fontDesign!
+
+const CODE = 'Change it in Code.'
+
+/** A contextual member's name, `.semibold` or `Font.Weight.semibold`, when it is one of `names`. */
+function memberIn(value: Expr | undefined, names: readonly string[]): string | undefined {
+  return value?.kind === 'memberAccess' && names.includes(value.member) ? value.member : undefined
+}
+
+/** An `@ScaledMetric` property of the view's struct: its size and the style whose curve it follows. */
+export interface ScaledSize {
+  readonly decl: VarDecl
+  readonly size: number
+  readonly relativeTo: string
+}
+
+export function scaledSize(name: string, ctx: LayerContext): ScaledSize | undefined {
+  const decl = ctx.owner?.members.find((member): member is VarDecl => member.kind === 'varDecl' && member.name === name)
+  const attribute = decl?.attributes.find(attribute => attribute.name === 'ScaledMetric')
+  if (!decl || !attribute || !decl.initializer) return undefined
+  const size = numberOf(decl.initializer, ctx)
+  if (size === undefined) return undefined
+  const relative = attribute.args.find(arg => arg.label === 'relativeTo')?.value
+  const relativeTo = relative ? memberIn(relative, TEXT_STYLES) : 'body'
+  return relativeTo ? { decl, size, relativeTo } : undefined
+}
+
+/** A `Font` expression as the parts the panel sets, or undefined for one it cannot rewrite. */
+function fontOf(value: Expr, ctx: LayerContext): FontValue | undefined {
+  // `.title2.bold()`, `.headline.weight(.semibold)`, `.body.italic()`, `.title.monospaced()`.
+  if (value.kind === 'call' && value.callee.kind === 'memberAccess' && value.callee.base && !value.trailingClosure) {
+    const base = fontOf(value.callee.base, ctx)
+    if (!base) return undefined
+    const member = value.callee.member, args = value.args
+    if (member === 'bold' && !args.length) return { ...base, weight: 'bold' }
+    if (member === 'italic' && !args.length) return { ...base, italic: true }
+    if (member === 'monospaced' && !args.length) return { ...base, design: 'monospaced' }
+    const weight = member === 'weight' && args.length === 1 && args[0]!.label === null ? memberIn(args[0]!.value, WEIGHTS) : undefined
+    if (weight) return { ...base, weight }
+    if (value.callee.base.kind !== 'memberAccess' || value.callee.base.base) return undefined
+  }
+  if (value.kind === 'memberAccess') {
+    const style = memberIn(value, TEXT_STYLES)
+    const onFont = !value.base || value.base.kind === 'identifier' && value.base.name === 'Font'
+    return style && onFont ? { style } : undefined
+  }
+  if (value.kind !== 'call' || value.trailingClosure || value.callee.kind !== 'memberAccess' || value.callee.member !== 'system') return undefined
+  const base = value.callee.base
+  if (base && !(base.kind === 'identifier' && base.name === 'Font')) return undefined
+  const labels = value.args.map(arg => arg.label)
+  const arg = (label: string | null) => value.args.find(item => item.label === label)?.value
+  const weight = arg('weight'), design = arg('design')
+  const parts: Partial<FontValue> = {
+    ...(weight ? { weight: memberIn(weight, WEIGHTS) ?? '?' } : {}),
+    ...(design ? { design: memberIn(design, DESIGNS) ?? '?' } : {}),
+  }
+  if (parts.weight === '?' || parts.design === '?') return undefined
+  // `.system(.title3, design: .serif, weight: .bold)`.
+  if (labels[0] === null) {
+    const style = memberIn(arg(null), TEXT_STYLES)
+    return style && labels.slice(1).every(label => label === 'design' || label === 'weight') ? { style, ...parts } : undefined
+  }
+  // `.system(size: 22, weight: .semibold, design: .rounded)`, the size a number or an `@ScaledMetric`.
+  const size = arg('size')
+  if (!size || labels.some(label => !['size', 'weight', 'design'].includes(label ?? ''))) return undefined
+  const fixed = numberOf(size, ctx)
+  if (fixed !== undefined) return { style: null, size: fixed, relativeTo: null, ...parts }
+  const scaled = size.kind === 'identifier' ? scaledSize(size.name, ctx) : undefined
+  return scaled ? { style: null, size: scaled.size, relativeTo: scaled.relativeTo, ...parts } : undefined
+}
+
+/** The font a text inherits from the views around it, when it is a plain style; Body otherwise. */
+function inheritedFont(ctx: LayerContext): FontValue {
+  const written = ctx.node.properties.find(property => property.id.endsWith(':inherited-font'))?.expression ?? ''
+  const style = /^(?:Font)?\.(\w+)$/.exec(written.trim())?.[1]
+  return { style: style && TEXT_STYLES.includes(style) ? style : 'body' }
+}
+
+function readFont(slots: ChainSlots, ctx: LayerContext): LayerValue<FontValue> {
+  const fonts = callsNamed(slots, ['font'])
+  const weights = callsNamed(slots, ['fontWeight', 'bold'])
+  const designs = callsNamed(slots, ['fontDesign'])
+  const italics = callsNamed(slots, ['italic'])
+  const from = [...fonts, ...weights, ...designs, ...italics].sort((a, b) => a.indices[0]! - b.indices[0]!).map(run => ctx.ids[run.indices[0]!]!)
+  const fallback = inheritedFont(ctx)
+  if (!from.length) return { value: fallback, state: 'absent' }
+  const code = (reason: string): LayerValue<FontValue> => ({ value: fallback, state: 'code', from, disabledReason: `${reason} ${CODE}` })
+  if (fonts.length > 1) return code('This text’s font is set in more than one place.')
+  const written = fonts[0]?.calls[0]
+  const font = !written ? { style: fallback.style } : written.args.length === 1 && written.args[0]!.label === null && !written.trailingClosure ? fontOf(written.args[0]!.value, ctx) : undefined
+  if (!font) return code('This text’s font is a custom font or worked out in Swift.')
+  const one = (runs: SlotRun[], read: (call: CallExpr) => string | boolean | undefined, field: 'weight' | 'design' | 'italic') => {
+    if (!runs.length) return undefined
+    if (runs.length > 1 || font[field] !== undefined) return null
+    const value = read(runs[0]!.calls[0]!)
+    return value === undefined ? null : value
+  }
+  const weight = one(weights, call => modifierName(call) === 'bold' ? (call.args.length ? undefined : 'bold') : call.args.length === 1 ? memberIn(call.args[0]!.value, WEIGHTS) : undefined, 'weight')
+  const design = one(designs, call => call.args.length === 1 ? memberIn(call.args[0]!.value, DESIGNS) : undefined, 'design')
+  const italic = one(italics, call => call.args.length ? undefined : true, 'italic')
+  if (weight === null || design === null || italic === null) return code('This text’s weight, design or italic is set in more than one place, or worked out in Swift.')
+  return {
+    value: { ...font, ...(weight !== undefined ? { weight: weight as string } : {}), ...(design !== undefined ? { design: design as string } : {}), ...(italic !== undefined ? { italic: true } : {}) },
+    state: 'literal', from,
+  }
+}
+
+/** A text modifier that takes one value: `.tracking(1)`, `.textCase(.uppercase)`. */
+function readOne<T>(slots: ChainSlots, names: readonly string[], ctx: LayerContext, read: (value: Expr) => T | undefined, word: string): LayerValue<T | null> {
+  const runs = callsNamed(slots, names)
+  if (!runs.length) return { value: null, state: 'absent' }
+  const from = runs.map(run => ctx.ids[run.indices[0]!]!)
+  const call = runs[0]!.calls[0]!
+  const value = runs.length === 1 && call.args.length === 1 && call.args[0]!.label === null && !call.trailingClosure && modifierName(call) === names[0] ? read(call.args[0]!.value) : undefined
+  if (value === undefined) return { value: null, state: 'code', from, disabledReason: `This text’s ${word} is set in more than one place or worked out in Swift. ${CODE}` }
+  return { value, state: 'literal', from }
+}
+
+const number = (ctx: LayerContext) => (value: Expr) => numberOf(value, ctx)
+
+/** The modifiers that colour text: `.foregroundStyle` from iOS 15, and the older `.foregroundColor`. */
+const COLOR_CALLS = ['foregroundStyle', 'foregroundColor']
+
+/** The text's colour, from its one foreground style or colour, however the colour is spelled. */
+function readTextColor(slots: ChainSlots, ctx: LayerContext): LayerValue<ColorValue | null> {
+  const runs = callsNamed(slots, COLOR_CALLS)
+  if (!runs.length) return { value: null, state: 'absent' }
+  const from = runs.map(run => ctx.ids[run.indices[0]!]!)
+  const call = runs[0]!.calls[0]!
+  if (runs.length > 1) return { value: null, state: 'code', from, disabledReason: `This text’s color is set in more than one place. ${CODE}` }
+  if (call.args.length !== 1 || call.args[0]!.label !== null || call.trailingClosure) return { value: null, state: 'code', from, disabledReason: `This text’s color has more than one level. ${CODE}` }
+  return { ...readColor(call.args[0]!.value, ctx), from }
+}
+
+export function readText(slots: ChainSlots, ctx: LayerContext): LayerText | undefined {
+  if (!TEXT_VIEWS.has(ctx.node.name)) return undefined
+  return {
+    font: readFont(slots, ctx),
+    color: readTextColor(slots, ctx),
+    alignment: readOne(slots, ['multilineTextAlignment'], ctx, value => memberIn(value, ['leading', 'center', 'trailing']) as 'leading' | 'center' | 'trailing' | undefined, 'alignment'),
+    tracking: readOne(slots, ['tracking', 'kerning'], ctx, number(ctx), 'letter spacing'),
+    lineSpacing: readOne(slots, ['lineSpacing'], ctx, number(ctx), 'line spacing'),
+    textCase: readOne(slots, ['textCase'], ctx, value => memberIn(value, STYLE_OPTIONS.textCase!) as 'uppercase' | 'lowercase' | undefined, 'case'),
+    ...(ctx.target < 14 ? { scalingUnavailable: 'Scaling with text size needs iOS 14. Raise the deployment target to use it.' } : {}),
+  }
+}
+
+// ---------------------------------------------------------------- writing
+
+/** Modifiers that keep a `Text` a `Text`, so the Text-only ones after them still apply below iOS 16. */
+const KEEPS_TEXT: ReadonlySet<string> = new Set(['font', 'fontWeight', 'bold', 'italic', 'tracking', 'kerning', 'baselineOffset', 'underline', 'strikethrough', 'foregroundColor', 'monospacedDigit'])
+
+/** The calls that write a font: the font itself, and on iOS 16 and later its weight, design and italic beside it. */
+export function fontCalls(font: FontValue, inherited: string, size: string | null, ctx: LayerContext): string[] {
+  const separate = ctx.target >= 16, separateDesign = ctx.target >= 16.1
+  // A weight is written unless it is the one the style already has: Headline's is semibold.
+  const weight = font.weight && font.weight !== (font.style === 'headline' ? 'semibold' : 'regular') ? font.weight : undefined
+  const design = font.design && font.design !== 'default' ? font.design : undefined
+  if (font.style !== null) {
+    const folded = !separate && (weight || font.italic) || !separateDesign && design
+    let base = design && !separateDesign ? `.system(.${font.style}, design: .${design})` : `.${font.style}`
+    if (!separate) base += `${weight ? `.weight(.${weight})` : ''}${font.italic ? '.italic()' : ''}`
+    const calls = font.style === inherited && !folded ? [] : [`.font(${base})`]
+    if (separate && weight) calls.push(`.fontWeight(.${weight})`)
+    if (separateDesign && design) calls.push(`.fontDesign(.${design})`)
+    if (separate && font.italic) calls.push('.italic()')
+    return calls
+  }
+  // A size in points takes its weight and design as the system font's own arguments, as old as the font.
+  const parts = [`size: ${size}`, ...weight ? [`weight: .${weight}`] : [], ...design ? [`design: .${design}`] : []]
+  return [`.font(.system(${parts.join(', ')})${!separate && font.italic ? '.italic()' : ''})`, ...separate && font.italic ? ['.italic()'] : []]
+}
+
+/** How often a name is read in the struct, besides where it is declared. */
+function readsOf(name: string, ctx: LayerContext): number {
+  const owner = ctx.owner
+  if (!owner) return 0
+  const body = ctx.text.slice(owner.span.start, owner.span.end)
+  return (body.match(new RegExp(`\\b${name}\\b`, 'g'))?.length ?? 0) - 1
+}
+
+/** A name for a new `@ScaledMetric` that nothing in the struct already uses. */
+function freshName(ctx: LayerContext): string {
+  const body = ctx.owner ? ctx.text.slice(ctx.owner.span.start, ctx.owner.span.end) : ''
+  for (let index = 1; ; index++) {
+    const name = index === 1 ? 'textSize' : `textSize${index}`
+    if (!new RegExp(`\\b${name}\\b`).test(body)) return name
+  }
+}
+
+/** The `@ScaledMetric` a font's size reads, when it reads one. */
+function scaledIn(slots: ChainSlots, ctx: LayerContext): (ScaledSize & { name: string }) | undefined {
+  const font = callsNamed(slots, ['font'])[0]?.calls[0]?.args[0]?.value
+  const size = font?.kind === 'call' ? font.args.find(arg => arg.label === 'size')?.value : undefined
+  const scaled = size?.kind === 'identifier' ? scaledSize(size.name, ctx) : undefined
+  return scaled && size?.kind === 'identifier' ? { ...scaled, name: size.name } : undefined
+}
+
+function writeFont(slots: ChainSlots, change: Partial<FontValue>, ctx: LayerContext): Patch[] {
+  const current = readFont(slots, ctx)
+  if (current.disabledReason) throw new Error(current.disabledReason)
+  const next: FontValue = { ...current.value, ...change }
+  if (next.style !== null && next.style !== undefined && !TEXT_STYLES.includes(next.style)) throw new Error('Choose one of the text styles.')
+  if (next.style === null && !(typeof next.size === 'number' && next.size > 0)) throw new Error('A font size is more than 0 points.')
+  const scaled = scaledIn(slots, ctx)
+  const shared = scaled && readsOf(scaled.name, ctx) > 1
+  const patches: Patch[] = []
+  let size: string | null = null
+  if (next.style === null && next.relativeTo) {
+    if (ctx.target < 14) throw new Error('A size that follows Dynamic Type needs iOS 14. Choose a text style, or a fixed size.')
+    if (!TEXT_STYLES.includes(next.relativeTo)) throw new Error('Choose the text style the size follows.')
+    const declaration = `@ScaledMetric(relativeTo: .${next.relativeTo}) private var `
+    if (scaled) {
+      if (shared && (scaled.size !== next.size || scaled.relativeTo !== next.relativeTo)) throw new Error('This size is shared with other text in this view. Change it in Code.')
+      size = scaled.name
+      const start = scaled.decl.attributes[0]?.span.start ?? scaled.decl.span.start
+      patches.push({ start, end: scaled.decl.span.end, text: `${declaration}${scaled.name}: CGFloat = ${next.size}`, declaration: true })
+    } else {
+      const owner = ctx.owner, body = owner?.members.find((member): member is VarDecl => member.kind === 'varDecl' && member.name === 'body')
+      if (!owner || !body) throw new Error('A size that follows Dynamic Type is a property of the view. Choose a fixed size, or a text style.')
+      size = freshName(ctx)
+      const at = lineStart(ctx.text, body.attributes[0]?.span.start ?? body.span.start)
+      const indent = /^[ \t]*/.exec(ctx.text.slice(at))![0], eol = lineEnding(ctx.text)
+      patches.push({ start: at, end: at, text: `${indent}${declaration}${size}: CGFloat = ${next.size}${eol}`, declaration: true })
+    }
+  } else {
+    if (next.style === null) size = String(next.size)
+    // The size no longer reads its @ScaledMetric: one nothing else reads goes with it.
+    if (scaled && !shared) {
+      const start = lineStart(ctx.text, scaled.decl.attributes[0]?.span.start ?? scaled.decl.span.start)
+      const end = ctx.text.indexOf('\n', scaled.decl.span.end) + 1
+      patches.push({ start, end: end || scaled.decl.span.end, text: '', declaration: true })
+    }
+  }
+  const calls = fontCalls(next, inheritedFont(ctx).style ?? 'body', size, ctx)
+  const runs = [...callsNamed(slots, ['font']), ...callsNamed(slots, ['fontWeight', 'bold']), ...callsNamed(slots, ['fontDesign']), ...callsNamed(slots, ['italic'])].sort((a, b) => a.indices[0]! - b.indices[0]!)
+  if (!runs.length) {
+    if (!calls.length) return patches
+    if (ctx.locked) throw new Error(ctx.locked)
+    return [...patches, insertCalls(slots, insertionIndex(slots, SLOT.text), calls, ctx.text)]
+  }
+  return [...patches, replaceRun(slots, runs[0]!, calls, ctx.text), ...runs.slice(1).map(run => replaceRun(slots, run, [], ctx.text))]
+}
+
+/** Where a new Text-only modifier goes below iOS 16: while the chain is still a `Text`. */
+function textOnlyIndex(slots: ChainSlots): number {
+  let index = 0
+  while (index < slots.names.length && KEEPS_TEXT.has(slots.names[index]!)) index++
+  return index
+}
+
+type TextChange = Extract<LayerChange, { section: 'text' }>
+const SIMPLE: readonly { readonly field: 'tracking' | 'alignment' | 'lineSpacing' | 'textCase'; readonly names: readonly string[]; readonly call: (value: string | number) => string; readonly textOnly?: true }[] = [
+  { field: 'tracking', names: ['tracking', 'kerning'], call: value => `.tracking(${value})`, textOnly: true },
+  { field: 'alignment', names: ['multilineTextAlignment'], call: value => `.multilineTextAlignment(.${value})` },
+  { field: 'lineSpacing', names: ['lineSpacing'], call: value => `.lineSpacing(${value})` },
+  { field: 'textCase', names: ['textCase'], call: value => `.textCase(.${value})` },
+]
+
+/**
+ * The call that colours the text: `.foregroundStyle(.red)` from iOS 15, and `.foregroundColor(Color.red)`
+ * before it. Below iOS 16 a `foregroundColor` in a Text's own run stays one: it keeps the
+ * Text a Text, for the Text-only modifiers after it and any written with it.
+ */
+function colorCall(slots: ChainSlots, color: ColorValue, ctx: LayerContext): string {
+  const at = callsNamed(slots, COLOR_CALLS)[0]?.indices[0]
+  const keepsText = ctx.target < 16 && ctx.node.name === 'Text' && at !== undefined && slots.names[at] === 'foregroundColor' && at < textOnlyIndex(slots)
+  return ctx.target >= 15 && !keepsText ? `.foregroundStyle(${colorSource(color, 'ShapeStyle', ctx)})` : `.foregroundColor(${colorSource(color, 'Color', ctx)})`
+}
+
+export function writeText(slots: ChainSlots, change: TextChange, ctx: LayerContext): Patch[] {
+  const current = readText(slots, ctx)
+  if (!current) throw new Error('This view shows no text of its own.')
+  const patches: Patch[] = change.font ? writeFont(slots, change.font, ctx) : []
+  const added: string[] = [], textOnly: string[] = []
+  if (change.color !== undefined) {
+    const now = current.color
+    if (now.disabledReason) throw new Error(now.disabledReason)
+    const same = change.color === null ? now.value === null : now.value !== null && sameColor(now.value, change.color)
+    const written = same ? undefined : change.color === null ? [] : [colorCall(slots, change.color, ctx)]
+    const run = callsNamed(slots, COLOR_CALLS)[0]
+    if (written && run) patches.push(replaceRun(slots, run, written, ctx.text))
+    else if (written) added.push(...written)
+  }
+  for (const { field, names, call, textOnly: onlyText } of SIMPLE) {
+    const value = change[field]
+    if (value === undefined) continue
+    const now = current[field]
+    if (now.disabledReason) throw new Error(now.disabledReason)
+    if (typeof value === 'number' && !Number.isFinite(value)) throw new Error('Enter a number.')
+    const written = value === null ? [] : [call(typeof value === 'number' ? Number(value.toFixed(2)) : value)]
+    const run = callsNamed(slots, names)[0]
+    if (run) patches.push(replaceRun(slots, run, written, ctx.text))
+    else if (written.length) (onlyText && ctx.target < 16 ? textOnly : added).push(...written)
+  }
+  if ((added.length || textOnly.length) && ctx.locked) throw new Error(ctx.locked)
+  if (textOnly.length && ctx.node.name !== 'Text') throw new Error('Letter spacing on this view needs iOS 16. Set it on its Text, or raise the deployment target.')
+  if (textOnly.length) patches.push(insertCalls(slots, textOnlyIndex(slots), textOnly, ctx.text))
+  if (added.length) patches.push(insertCalls(slots, insertionIndex(slots, SLOT.text), added, ctx.text))
+  return mergeInserts(patches)
+}
+
+/** Insertions at one place written as one, in the order they were made. */
+function mergeInserts(patches: readonly Patch[]): Patch[] {
+  const out: Patch[] = []
+  for (const patch of patches) {
+    const same = out.find(other => other.start === patch.start && other.end === patch.start && patch.start === patch.end && !other.declaration && !patch.declaration)
+    if (same) out[out.indexOf(same)] = { ...same, text: same.text + patch.text }
+    else out.push(patch)
+  }
+  return out
+}

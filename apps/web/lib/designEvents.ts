@@ -65,6 +65,8 @@ function details(operation: DesignEditRequest['operation'], node: AuthoringNode 
       const view = /^\s*([A-Z]\w*)/.exec(operation.snippet)?.[1]
       return view && LIBRARY_VIEWS.has(view) ? { view } : {}
     }
+    // Which sections changed, never their values: a token's name or a colour is the project's own.
+    case 'layer-set': return { control: `layer:${[...new Set(operation.changes.map(change => change.section))].join('+')}` }
     case 'modifier-add': return offered(node, operation.name)
     case 'modifier-remove':
     case 'modifier-duplicate':

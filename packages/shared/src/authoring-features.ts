@@ -1,3 +1,4 @@
+import type { LayerSetOperation } from './layer'
 import type { ModifierOperation } from './authoring-modifiers'
 import type { ResourceOperation } from './design-resources'
 import type { SourceSpan } from './source'
@@ -185,7 +186,7 @@ export type NavigationOperation =
   | { readonly kind: 'tab-remove'; readonly index: number }
   | { readonly kind: 'tab-move'; readonly index: number; readonly toIndex: number }
 
-export type AuthoringOperation = ResourceOperation | ModifierOperation | NavigationOperation
+export type AuthoringOperation = ResourceOperation | ModifierOperation | NavigationOperation | LayerSetOperation
   | { readonly kind: 'component-expose'; readonly control: string; readonly name: string }
   | { readonly kind: 'component-insert'; readonly component: string }
   | { readonly kind: 'component-variant'; readonly variant: ComponentVariant }

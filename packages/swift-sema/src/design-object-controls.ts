@@ -1,10 +1,10 @@
-import { authoringCapability, type AuthoringNode, type DesignControl } from '@studio/shared'
+import { authoringCapability, type AuthoringNode } from '@studio/shared'
 import type { CallExpr, Expr } from '@studio/swift-syntax'
-import { swiftString, type ControlRecipe } from './design-controls'
+import { swiftString, type ControlKind, type ControlRecipe } from './design-controls'
 import type { AddControl, ReplaceControl } from './design-advanced-controls'
 
 type Insert = (call: CallExpr, label: string | null, value: string, order?: readonly (string | null)[]) => ReturnType<ControlRecipe['patch']>
-type Param = (call: CallExpr, id: string, title: string, label: string | null, kind: DesignControl['kind'], fallback: string, options?: readonly string[], min?: number, max?: number, prefix?: string, order?: readonly (string | null)[]) => void
+type Param = (call: CallExpr, id: string, title: string, label: string | null, kind: ControlKind, fallback: string, options?: readonly string[], min?: number, max?: number, prefix?: string, order?: readonly (string | null)[]) => void
 const anchors = ['center', 'topLeading', 'top', 'topTrailing', 'leading', 'trailing', 'bottomLeading', 'bottom', 'bottomTrailing']
 const vertical = ['top', 'center', 'bottom', 'firstTextBaseline', 'lastTextBaseline']
 const gradients = ['LinearGradient', 'RadialGradient', 'AngularGradient']
@@ -15,7 +15,6 @@ export function objectControls(node: AuthoringNode, base: CallExpr, modifiers: r
   const named = (call: CallExpr, label: string | null) => call.args.find(a => a.label === label)?.value
   const uncommented = (expr: Expr) => !/\/\/|\/\*/.test(text.slice(expr.span.start, expr.span.end))
   const name = (call: CallExpr) => call.callee.kind === 'identifier' ? call.callee.name : call.callee.kind === 'memberAccess' ? call.callee.member : ''
-  const boolOptions = ['true', 'false']
   function bounds(call: CallExpr, id: string, fallbackMax = 1) {
     const range = named(call, 'in')
     if (range?.kind === 'binary' && range.operator === '...') {
@@ -48,10 +47,11 @@ export function objectControls(node: AuthoringNode, base: CallExpr, modifiers: r
           if (['x', 'y'].includes(dimension.label ?? '')) replace(`${id}:${arg.label}:${dimension.label}`, `${title} ${dimension.label}`, dimension.value, 'number')
         }
       }
-      if (all && ['startRadius', 'endRadius'].includes(arg.label ?? '')) replace(`${id}:${arg.label}`, arg.label === 'startRadius' ? 'Start radius' : 'End radius', arg.value, 'number', undefined, 0)
+      if (all && ['startRadius', 'endRadius'].includes(arg.label ?? '')) replace(`${id}:${arg.label}`, arg.label === 'startRadius' ? 'Start radius' : 'End radius', arg.value, 'pt', undefined, 0)
       if (['angle', 'startAngle', 'endAngle'].includes(arg.label ?? '') && arg.value.kind === 'call' && ['degrees', 'radians', 'Angle'].includes(name(arg.value))) {
         const angle = arg.value.args[0]
-        if (angle) replace(`${id}:${arg.label}`, `${arg.label === 'startAngle' ? 'Start angle' : arg.label === 'endAngle' ? 'End angle' : 'Angle'} (${angle.label ?? name(arg.value)})`, angle.value, 'number')
+        const unit = angle?.label ?? name(arg.value)
+        if (angle) replace(`${id}:${arg.label}`, `${arg.label === 'startAngle' ? 'Start angle' : arg.label === 'endAngle' ? 'End angle' : 'Angle'} (${unit})`, angle.value, unit === 'degrees' ? '°' : 'number')
       }
     }
   }
@@ -83,11 +83,11 @@ export function objectControls(node: AuthoringNode, base: CallExpr, modifiers: r
     if (node.name === 'Grid') {
       const order = ['alignment', 'horizontalSpacing', 'verticalSpacing']
       param(base, 'grid:alignment', 'Alignment', 'alignment', 'select', 'center', anchors, undefined, undefined, '.', order)
-      param(base, 'grid:horizontalSpacing', 'Horizontal spacing', 'horizontalSpacing', 'number', '', undefined, 0, undefined, '.', order)
-      param(base, 'grid:verticalSpacing', 'Vertical spacing', 'verticalSpacing', 'number', '', undefined, 0, undefined, '.', order)
+      param(base, 'grid:horizontalSpacing', 'Horizontal spacing', 'horizontalSpacing', 'pt', '', undefined, 0, undefined, '.', order)
+      param(base, 'grid:verticalSpacing', 'Vertical spacing', 'verticalSpacing', 'pt', '', undefined, 0, undefined, '.', order)
     }
     if (node.name === 'GridRow') param(base, 'gridrow:alignment', 'Vertical alignment', 'alignment', 'select', 'center', vertical)
-    if (node.name === 'ColorPicker') param(base, 'color:opacity', 'Supports opacity', 'supportsOpacity', 'select', 'true', boolOptions, undefined, undefined, '')
+    if (node.name === 'ColorPicker') param(base, 'color:opacity', 'Supports opacity', 'supportsOpacity', 'toggle', 'true')
     if (node.name === 'DatePicker') {
       const components = named(base, 'displayedComponents')
       const componentName = (e: Expr) => e.kind === 'memberAccess' && (!e.base || e.base.kind === 'identifier' && e.base.name === 'DatePickerComponents') ? e.member : ''
@@ -119,11 +119,11 @@ export function objectControls(node: AuthoringNode, base: CallExpr, modifiers: r
       const limit = named(m, null)
       if (limit && literalNumber(limit, text) !== undefined) {
         if (m.args.length > 1) replace(id + ':limit', 'Maximum lines', limit, 'number', undefined, 0)
-        if (target >= 16) param(m, id + ':reserve', 'Reserve line space', 'reservesSpace', 'select', 'false', boolOptions, undefined, undefined, '')
+        if (target >= 16) param(m, id + ':reserve', 'Reserve line space', 'reservesSpace', 'toggle', 'false')
       }
     }
     if (['underline', 'strikethrough'].includes(modifier)) {
-      param(m, id + ':active', 'Enabled', null, 'select', 'true', boolOptions, undefined, undefined, '', [null, 'color'])
+      param(m, id + ':active', 'Enabled', null, 'toggle', 'true', undefined, undefined, undefined, '', [null, 'color'])
       param(m, id + ':color', 'Decoration color', 'color', 'select', '', colors, undefined, undefined, 'Color.')
     }
     if (['stroke', 'strokeBorder'].includes(modifier)) {
@@ -131,17 +131,17 @@ export function objectControls(node: AuthoringNode, base: CallExpr, modifiers: r
       if (color) replace(id + ':color', 'Stroke color', color, 'select', colors, undefined, undefined, 'Color.')
       if (style?.kind === 'call' && name(style) === 'StrokeStyle') {
         const order = ['lineWidth', 'lineCap', 'lineJoin', 'miterLimit', 'dash', 'dashPhase']
-        param(style, id + ':width', 'Stroke width', 'lineWidth', 'number', '1', undefined, 0, undefined, '.', order)
+        param(style, id + ':width', 'Stroke width', 'lineWidth', 'pt', '1', undefined, 0, undefined, '.', order)
         param(style, id + ':cap', 'Line cap', 'lineCap', 'select', 'butt', ['butt', 'round', 'square'], undefined, undefined, '.', order)
         param(style, id + ':join', 'Line join', 'lineJoin', 'select', 'miter', ['miter', 'round', 'bevel'], undefined, undefined, '.', order)
         param(style, id + ':miter', 'Miter limit', 'miterLimit', 'number', '10', undefined, 0, undefined, '.', order)
-        param(style, id + ':phase', 'Dash phase', 'dashPhase', 'number', '0', undefined, undefined, undefined, '.', order)
+        param(style, id + ':phase', 'Dash phase', 'dashPhase', 'pt', '0', undefined, undefined, undefined, '.', order)
         const dash = named(style, 'dash')
         if (!dash || uncommented(dash) && dash.kind === 'arrayLiteral' && dash.elements.every(e => literalNumber(e, text) !== undefined)) add(id + ':dash', 'Dash lengths', 'text', dash?.kind === 'arrayLiteral' ? dash.elements.map(e => literalNumber(e, text)).join(', ') : '', v => {
           const array = '[' + v.split(',').map(x => x.trim()).filter(Boolean).join(', ') + ']'
           return dash ? { ...dash.span, text: array } : insert(style, 'dash', array, order)
         }, undefined, undefined, undefined, 'Alternating dash and gap lengths in points, separated by commas. Leave empty for a solid line.')
-      } else if (!style) param(m, id + ':width', 'Stroke width', 'lineWidth', 'number', '1', undefined, 0, undefined, '.', [null, 'lineWidth', 'antialiased'])
+      } else if (!style) param(m, id + ':width', 'Stroke width', 'lineWidth', 'pt', '1', undefined, 0, undefined, '.', [null, 'lineWidth', 'antialiased'])
     }
     for (const arg of m.args) if (arg.value.kind === 'call' && gradients.includes(name(arg.value))) gradientControls(arg.value, `${id}:gradient`, false)
   }

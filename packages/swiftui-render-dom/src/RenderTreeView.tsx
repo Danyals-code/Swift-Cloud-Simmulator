@@ -491,7 +491,7 @@ function RenderNodeView({
       background: `rgb(${node.background.color.r} ${node.background.color.g} ${node.background.color.b} / calc(1 - 0.28 * var(--chrome-progress, 0)))`,
       backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
     } : {}),
-    ...(node.clipShape ? { clipPath: `path("${shapePath(node.clipShape.kind, node.frame.width, node.frame.height, node.cornerRadius, node.clipShape.cornerStyle)}")` } : {}),
+    ...(node.clipShape ? { clipPath: `path("${shapePath(node.clipShape.kind, node.frame.width, node.frame.height, node.clipShape.cornerRadii ?? node.cornerRadius, node.clipShape.cornerStyle)}")` } : {}),
     ...(pressed && interactive ? { backgroundColor: 'rgb(128 128 128 / 0.16)', borderRadius: node.hitTarget?.cornerRadius ?? 8 } : {}),
     ...(node.cornerRadius && !node.clipShape ? { borderRadius: node.cornerRadius } : {}),
     ...(node.clip ? { overflow: scroll ? 'auto' : 'hidden' } : {}),

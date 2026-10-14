@@ -1,0 +1,13 @@
+/* The Layout section's own rows; what every section shares is in LayerSection.module.css. */
+
+/* Hug, Fill or Fixed, with the Fixed size beside it. */
+.sizing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; min-width: 0; }
+.sizing > select { width: 100%; min-width: 0; }
+.limits { display: grid; gap: 8px; min-width: 0; }
+.places { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+/* Small text buttons, quiet until pointed at. */
+.disclosure, .none { height: var(--control-height-sm); padding: 0 8px; border-radius: var(--radius-md); font-size: var(--text-footnote); color: var(--color-xc-text-2); transition: background-color var(--duration-fast), color var(--duration-fast); }
+.disclosure:hover:not(:disabled), .none:hover:not(:disabled) { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.disclosure[aria-expanded='true'], .none[aria-pressed='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.none:disabled:not([aria-pressed='true']) { opacity: .4; }

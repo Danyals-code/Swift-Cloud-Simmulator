@@ -269,10 +269,10 @@ it.each([
   'Text("Hi").padding().glassEffect(.regular.tint(.blue).interactive())',
   'Text("Hi").padding().glassEffect(Glass.regular.tint(.blue))',
   'Text("Hi").padding().glassEffect(.clear.interactive(), in: .capsule)',
-])('keeps the view drawn, with a warning, for the Liquid Glass of %s', (body) => {
+])('draws the view and its Liquid Glass for %s, with nothing to warn of', (body) => {
   const result = run(app(body))
   expect(result.renderTree!.nodes.flatMap((n) => n.text?.runs.map((r) => r.text) ?? [])).toEqual(['Hi'])
-  expect(result.diagnostics.some((d) => d.severity === 'warning' && d.message.includes('.glassEffect'))).toBe(true)
+  expect(result.diagnostics.filter((d) => d.severity === 'warning' && d.message.includes('.glassEffect'))).toEqual([])
 })
 
 it('draws AnyShapeStyle as the style it wraps, and a Gradient as a top-to-bottom ShapeStyle', () => {

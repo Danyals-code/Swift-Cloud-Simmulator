@@ -1,4 +1,4 @@
-import type { Point, CornerStyle, PlaceholderPayload, Rect, ShapeStroke, ShapeTrim, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
+import type { Point, CornerRadii, CornerStyle, PlaceholderPayload, Rect, ShapeOutline, ShapeStroke, ShapeTrim, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -150,6 +150,8 @@ export interface ShapeElement extends ElementBase {
   readonly kind: 'shape'
   readonly shape: ShapeKind
   readonly cornerRadius?: number
+  /** `UnevenRoundedRectangle`'s own radius at each corner, in place of `cornerRadius`. */
+  readonly cornerRadii?: CornerRadii
   /** `.fill(…)`; without one the shape takes the inherited foreground colour. */
   readonly fill?: Fill
   readonly stroke?: ShapeStroke
@@ -423,7 +425,7 @@ export type LayoutModifier =
   | { readonly kind: 'geometry'; readonly key: string }
   /** `.fixedSize()` - take the ideal size and ignore the proposal on that axis. */
   | { readonly kind: 'fixedSize'; readonly horizontal: boolean; readonly vertical: boolean }
-  | { readonly kind: 'clip'; readonly shape: ShapeKind; readonly cornerRadius: number; readonly style?: CornerStyle }
+  | ({ readonly kind: 'clip'; readonly shape: ShapeKind } & Omit<ShapeOutline, 'kind'>)
   | { readonly kind: 'scale'; readonly x: number; readonly y: number; readonly anchor?: Point }
   | { readonly kind: 'rotate'; readonly degrees: number; readonly anchor?: Point }
   /** `.rotation3DEffect(_:axis:)` - the same paint-time transform, about an axis. */
@@ -499,12 +501,17 @@ export type LayoutModifier =
   | { readonly kind: 'zIndex'; readonly value: number }
   /** `.blur`, `.saturation`, `.brightness`, `.contrast`, `.grayscale`. */
   | { readonly kind: 'filter'; readonly filter: FilterSpec }
-  /** `.background(.regularMaterial)` - a translucent, blurred backdrop. */
+  /**
+   * `.background(.regularMaterial)` - a translucent, blurred backdrop. `shape` cuts it to
+   * a shape, as `.background(.regularMaterial, in: .capsule)` and glass do: a browser blurs
+   * nothing behind a box whose parent is cut, so the blurred box is cut itself.
+   */
   | {
       readonly kind: 'material'
       readonly opacity: number
       readonly blur: number
       readonly light: boolean
+      readonly shape?: ShapeOutline
     }
   /** `.allowsHitTesting(false)` - the subtree stops receiving events. */
   | { readonly kind: 'hitTestable'; readonly enabled: boolean }

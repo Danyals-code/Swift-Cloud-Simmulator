@@ -1,12 +1,12 @@
 'use client'
 
 import { useLayoutEffect, useRef, useState } from 'react'
-import { isStructuralLayer, layoutParentOf, offersWhenTapped, stackLayoutOf, LAYOUT_WORDS, type AuthoringNode, type ResourceOperation, type SourceSpan } from '@studio/shared'
+import { isStructuralLayer, layoutParentOf, offersWhenTapped, stackLayoutOf, LAYOUT_WORDS, type AuthoringNode, type ResourceOperation, type Size, type SourceSpan } from '@studio/shared'
 import { AuthoringFeatures, type FeatureProps } from './AuthoringFeatures'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
 import { LayoutGuide } from './LayoutGuide'
 import { ModifierStack } from './ModifierStack'
-import { SurfaceFill } from './SurfaceFill'
+import { LayerSections } from './layer/LayerSections'
 import { NavigationDestinationEditor } from './NavigationDestinationEditor'
 import { TokenField, valueFields } from './settings/TokenField'
 import { sourceLayerIsVisual, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
@@ -35,7 +35,7 @@ const NAVIGATE_TYPES: readonly { type: 'push' | 'sheet' | 'cover'; label: string
  * `onCopy` and `onPaste` put Copy and Paste in the view menu, as ⌘C and ⌘V do (D6);
  * Paste is off while nothing is copied.
  */
-export function AuthoringInspector({ node, stale, onReveal, onChange, features, onCopy, onPaste }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange; onCopy?: (node: AuthoringNode) => void; onPaste?: (node: AuthoringNode) => void }) {
+export function AuthoringInspector({ node, stale, onReveal, onChange, features, onCopy, onPaste, measure }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange; onCopy?: (node: AuthoringNode) => void; onPaste?: (node: AuthoringNode) => void; measure?: Size }) {
   const root = useRef<HTMLDivElement | null>(null)
   const focus = useRef<{ source: string; owner: string; control: string; label: string; caret: number | null; modifier?: string; button?: string } | null>(null)
   const [retained, setRetained] = useState(node)
@@ -61,7 +61,8 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features, 
   const [navigateError, setNavigateError] = useState<string | null>(null)
   if (!selected) return <p className={styles.empty} role={stale ? 'status' : undefined}>{stale ? 'Updating views…' : 'Select a view in the tree or on the canvas.'}</p>
   const modifierControlIds = new Set(selected.modifiers?.flatMap(modifier => modifier.controls.map(control => control.id)) ?? [])
-  const basics = selected.controls?.filter(control => !control.id.startsWith('modifier:') && !modifierControlIds.has(control.id) && (!control.id.startsWith('add:') || control.id === 'add:listStyle')) ?? []
+  // Width and Height sizing belong to the Layout section once the view is read as a layer (Wave 2).
+  const basics = selected.controls?.filter(control => !control.id.startsWith('modifier:') && !modifierControlIds.has(control.id) && (!control.id.startsWith('add:') || control.id === 'add:listStyle') && !(selected.layer && features?.onCommand && control.id.startsWith('fill:'))) ?? []
   // A value inside a modifier belongs to that modifier's card; the rest are the view's own.
   const modifierProperties = new Set(selected.modifiers?.flatMap(modifier => modifier.propertyIds) ?? [])
   const basicProperties = selected.properties.filter(property => !modifierProperties.has(property.id)).map(property => property.id)
@@ -133,7 +134,6 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features, 
         {onReveal && <button type="button" className={styles.linkButton} onClick={() => onReveal(selected.source)}>Open in Code</button>}
       </p>}
 
-      <SurfaceFill key={sourceKey} node={selected} onCommand={features?.onCommand} />
       <section className={styles.settingsSection} data-testid="settings-basics"><h3>Basics</h3>
         {['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack'].includes(selected.name) && <LayoutGuide node={selected} />}
         {valueFields(selected, basics, basicProperties).map(field => field.style
@@ -151,6 +151,8 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features, 
           return <div key={condition.id} className={styles.row}><span>Shown when</span><span><code>{summary}</code>{onReveal && <button type="button" className={styles.linkButton} onClick={() => onReveal(condition.source)}>Open in Code</button>}</span></div>
         })}</div>}
       </section>
+
+      {!['definition', 'template', 'branch'].includes(selected.kind) && <LayerSections key={`layer:${sourceKey}`} node={selected} onCommand={features?.onCommand} tokens={tokens} disabled={stale} measure={stale ? undefined : measure} />}
 
       {!['definition', 'template', 'branch'].includes(selected.kind) && <section className={styles.settingsSection}>
         <ModifierStack disabled={stale} snapshot={features?.snapshot} key={sourceKey} node={selected} onChange={onChange} onCommand={features?.onCommand} onReveal={onReveal} features={features}

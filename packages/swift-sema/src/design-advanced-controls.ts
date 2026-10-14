@@ -1,7 +1,7 @@
 import { objectControls } from './design-object-controls'
-import { authoringCapability, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
+import { authoringCapability, type AuthoringNode, type SourceSpan } from '@studio/shared'
 import { Lexer, type CallExpr, type Expr } from '@studio/swift-syntax'
-import type { ControlRecipe } from './design-controls'
+import { controlKind, type ControlKind, type ControlRecipe } from './design-controls'
 import { EDGE_SET_MEMBERS } from './structural-check'
 
 const anchors = ['center', 'topLeading', 'top', 'topTrailing', 'leading', 'trailing', 'bottomLeading', 'bottom', 'bottomTrailing']
@@ -17,15 +17,15 @@ export const STYLE_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   blendMode: ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'colorDodge', 'colorBurn', 'softLight', 'hardLight', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'],
 }
 /** Apple's five material thicknesses, thinnest first. */
-const MATERIALS = ['ultraThin', 'thin', 'regular', 'thick', 'ultraThick']
+export const MATERIALS: readonly string[] = ['ultraThin', 'thin', 'regular', 'thick', 'ultraThick']
 /** The thickness of `.ultraThinMaterial` or `Material.ultraThin`, which are the same value. */
 export function materialThickness(value: Expr): string | undefined {
   if (value.kind !== 'memberAccess') return undefined
   if (!value.base) return MATERIALS.find(thickness => value.member === thickness + 'Material')
   return value.base.kind === 'identifier' && value.base.name === 'Material' && MATERIALS.includes(value.member) ? value.member : undefined
 }
-export type AddControl = (id: string, label: string, kind: DesignControl['kind'], value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description?: string, origin?: SourceSpan) => void
-export type ReplaceControl = (id: string, label: string, value: Expr, kind: DesignControl['kind'], options?: readonly string[], min?: number, max?: number, prefix?: string) => void
+export type AddControl = (id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description?: string, origin?: SourceSpan) => void
+export type ReplaceControl = (id: string, label: string, value: Expr, kind: ControlKind, options?: readonly string[], min?: number, max?: number, prefix?: string) => void
 /** Literal-only editors. Existing expressions, comments, bindings and linked tokens remain owned by their source. */
 export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers: readonly CallExpr[], text: string, target: number, colors: readonly string[], add: AddControl, replace: ReplaceControl): void {
   const raw = (span: SourceSpan) => text.slice(span.start, span.end)
@@ -42,14 +42,14 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
     const at = close ? call.callee.span.end + close.span.start : call.callee.span.end
     return { start: at, end: at, text: close ? `${prefix}${value}` : `(${prefix}${value})` }
   }
-  function param(call: CallExpr, id: string, title: string, label: string | null, kind: DesignControl['kind'], fallback: string, options?: readonly string[], min?: number, max?: number, prefix = '.', order?: readonly (string | null)[]) {
+  function param(call: CallExpr, id: string, title: string, label: string | null, kind: ControlKind, fallback: string, options?: readonly string[], min?: number, max?: number, prefix = '.', order?: readonly (string | null)[]) {
     const arg = call.args.find(a => a.label === label)
-    if (arg?.value.kind === 'memberAccess' && !arg.value.base && arg.value.member === 'infinity' && kind === 'number') add(id, title, kind, '', v => ({ ...arg.value.span, text: v }), undefined, min, max)
+    if (arg?.value.kind === 'memberAccess' && !arg.value.base && arg.value.member === 'infinity' && controlKind(kind).kind === 'number') add(id, title, kind, '', v => ({ ...arg.value.span, text: v }), undefined, min, max)
     else if (arg) replace(id, title, arg.value, kind, options, min, max, prefix)
     else add(id, title, kind, fallback, v => insert(call, label, kind === 'select' ? prefix + v : v, order), options, min, max)
   }
   objectControls(node, base, modifiers, text, target, colors, add, replace, param, insert)
-  if (node.kind !== 'component' && node.name === 'ScrollView' && authoringCapability(node.name, 'view', base.args.map(a => a.label)) && !base.args.some(a => a.label === 'showsIndicators')) param(base, 'scroll:indicators', 'Show indicators', 'showsIndicators', 'select', 'true', ['true', 'false'], undefined, undefined, '')
+  if (node.kind !== 'component' && node.name === 'ScrollView' && authoringCapability(node.name, 'view', base.args.map(a => a.label)) && !base.args.some(a => a.label === 'showsIndicators')) param(base, 'scroll:indicators', 'Show indicators', 'showsIndicators', 'toggle', 'true')
   if (node.kind !== 'component' && node.name === 'Image') {
     // `.aspectRatio(contentMode: .fit)` is `.scaledToFit()` spelled out. One with a ratio of its own sets
     // something else, edited on its card: sizing written beside it would scale the image twice.
@@ -77,16 +77,16 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
         const mode = size.callee.member, prefix = `grid:${i}`, title = `${axis === 'columns' ? 'Column' : 'Row'} ${i + 1}`
         if (!['fixed', 'flexible', 'adaptive'].includes(mode)) return
         if (safe(size.span) && simple(size)) add(prefix + ':type', title + ' sizing', 'select', mode, v => ({ ...size.span, text: v === 'fixed' ? '.fixed(100)' : v === 'adaptive' ? '.adaptive(minimum: 80)' : '.flexible()' }), ['fixed', 'flexible', 'adaptive'])
-        if (mode === 'fixed' && size.args[0]) replace(prefix + ':size', title + ' size', size.args[0].value, 'number', undefined, 0)
+        if (mode === 'fixed' && size.args[0]) replace(prefix + ':size', title + ' size', size.args[0].value, 'pt', undefined, 0)
         else if (mode !== 'fixed') {
-          param(size, prefix + ':min', title + ' minimum', 'minimum', 'number', mode === 'adaptive' ? '80' : '10', undefined, 0, undefined, '.', ['minimum', 'maximum'])
-          param(size, prefix + ':max', title + ' maximum', 'maximum', 'number', '', undefined, 0)
+          param(size, prefix + ':min', title + ' minimum', 'minimum', 'pt', mode === 'adaptive' ? '80' : '10', undefined, 0, undefined, '.', ['minimum', 'maximum'])
+          param(size, prefix + ':max', title + ' maximum', 'maximum', 'pt', '', undefined, 0)
         }
-        param(track, prefix + ':spacing', title + ' spacing', 'spacing', 'number', '', undefined, 0, undefined, '.', [null, 'spacing', 'alignment'])
+        param(track, prefix + ':spacing', title + ' spacing', 'spacing', 'pt', '', undefined, 0, undefined, '.', [null, 'spacing', 'alignment'])
         param(track, prefix + ':alignment', title + ' alignment', 'alignment', 'select', 'center', anchors)
       })
     }
-    param(base, 'grid:spacing', 'Grid spacing', 'spacing', 'number', '', undefined, 0, undefined, '.', [axis, 'alignment', 'spacing', 'pinnedViews'])
+    param(base, 'grid:spacing', 'Grid spacing', 'spacing', 'pt', '', undefined, 0, undefined, '.', [axis, 'alignment', 'spacing', 'pinnedViews'])
     param(base, 'grid:alignment', 'Grid alignment', 'alignment', 'select', 'center', node.name === 'LazyVGrid' ? ['leading', 'center', 'trailing'] : ['top', 'center', 'bottom'], undefined, undefined, '.', [axis, 'alignment', 'spacing', 'pinnedViews'])
   }
   /** A fill's kind, and what that kind has to edit: a gradient's stops and points, a material's thickness. */
@@ -101,7 +101,7 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
     if (gradient) for (const field of gradient.args) {
       if (field.label === 'colors' && field.value.kind === 'arrayLiteral') field.value.elements.forEach((color, stop) => replace(key + ':stop:' + stop, `Color ${stop + 1}`, color, 'select', colors, undefined, undefined, 'Color.'))
       if (['startPoint', 'endPoint', 'center'].includes(field.label ?? '')) replace(key + ':' + field.label, field.label === 'startPoint' ? 'Start point' : field.label === 'endPoint' ? 'End point' : field.label === 'startRadius' ? 'Start radius' : field.label === 'endRadius' ? 'End radius' : 'Center', field.value, 'select', anchors)
-      if (['startRadius', 'endRadius'].includes(field.label ?? '')) replace(key + ':' + field.label, field.label === 'startPoint' ? 'Start point' : field.label === 'endPoint' ? 'End point' : field.label === 'startRadius' ? 'Start radius' : field.label === 'endRadius' ? 'End radius' : 'Center', field.value, 'number', undefined, 0)
+      if (['startRadius', 'endRadius'].includes(field.label ?? '')) replace(key + ':' + field.label, field.label === 'startPoint' ? 'Start point' : field.label === 'endPoint' ? 'End point' : field.label === 'startRadius' ? 'Start radius' : field.label === 'endRadius' ? 'End radius' : 'Center', field.value, 'pt', undefined, 0)
     }
   }
   for (const [i, m] of modifiers.entries()) {
@@ -122,18 +122,18 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
       if (edgeSet || first?.kind === 'arrayLiteral') {
         if (first.kind === 'memberAccess') replace(id + ':edges', 'Padding edges', first, 'select', edges)
         else if (safe(first.span) && first.elements.every(e => e.kind === 'memberAccess' && !e.base && edges.includes(e.member))) {
-          for (const edge of ['top', 'leading', 'bottom', 'trailing']) add(id + ':' + edge, `Pad ${edge}`, 'select', String(first.elements.some(e => e.kind === 'memberAccess' && (e.member === edge || e.member === 'all' || e.member === 'horizontal' && ['leading', 'trailing'].includes(edge) || e.member === 'vertical' && ['top', 'bottom'].includes(edge)))), value => {
+          for (const edge of ['top', 'leading', 'bottom', 'trailing']) add(id + ':' + edge, `Pad ${edge}`, 'toggle', String(first.elements.some(e => e.kind === 'memberAccess' && (e.member === edge || e.member === 'all' || e.member === 'horizontal' && ['leading', 'trailing'].includes(edge) || e.member === 'vertical' && ['top', 'bottom'].includes(edge)))), value => {
             const selected = new Set(first.elements.flatMap(e => e.kind !== 'memberAccess' ? [] : e.member === 'all' ? ['top', 'leading', 'bottom', 'trailing'] : e.member === 'horizontal' ? ['leading', 'trailing'] : e.member === 'vertical' ? ['top', 'bottom'] : [e.member]))
             if (value === 'true') selected.add(edge); else selected.delete(edge)
             return { ...first.span, text: '[' + [...selected].map(e => '.' + e).join(', ') + ']' }
-          }, ['true', 'false'])
+          })
         }
-        if (!m.args[1]) add(id + ':amount', 'Padding amount', 'number', '', v => ({ start: first.span.end, end: first.span.end, text: ', ' + v }))
+        if (!m.args[1]) add(id + ':amount', 'Padding amount', 'pt', '', v => ({ start: first.span.end, end: first.span.end, text: ', ' + v }))
       } else if (!first || ['integerLiteral', 'floatLiteral', 'unary'].includes(first.kind)) add(id + ':edges', 'Padding edges', 'select', 'all', v => first ? { start: first.span.start, end: first.span.start, text: `.${v}, ` } : insert(m, null, `.${v}, 16`), edges)
     }
     if (name === 'frame' && !m.args.some(a => a.label === 'width' || a.label === 'height')) {
       const order = ['minWidth', 'idealWidth', 'maxWidth', 'minHeight', 'idealHeight', 'maxHeight', 'alignment']
-      for (const field of order.slice(0, -1)) if (!m.args.some(a => a.label === field)) param(m, id + ':' + field, field.replace(/([A-Z])/g, ' $1'), field, 'number', '', undefined, 0, undefined, '.', order)
+      for (const field of order.slice(0, -1)) if (!m.args.some(a => a.label === field)) param(m, id + ':' + field, field.replace(/([A-Z])/g, ' $1'), field, 'pt', '', undefined, 0, undefined, '.', order)
     }
     if (['scaleEffect', 'rotationEffect', 'rotation3DEffect'].includes(name)) {
       param(m, id + ':anchor', 'Transform anchor', 'anchor', 'select', 'center', anchors, undefined, undefined, '.', [null, 'x', 'y', 'axis', 'anchor', 'anchorZ', 'perspective'])
@@ -150,18 +150,19 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
       const key = `${id}:${j}`, title = name.replace(/([A-Z])/g, ' $1') + (arg.label ? ' · ' + arg.label : '')
       if (STYLE_OPTIONS[name] && !arg.label) replace(key, title, arg.value, 'select', STYLE_OPTIONS[name])
       if (['saturation', 'contrast', 'grayscale', 'minimumScaleFactor'].includes(name)) replace(key, title, arg.value, 'number', undefined, 0, ['grayscale', 'minimumScaleFactor'].includes(name) ? 1 : undefined)
-      if (['brightness', 'kerning', 'baselineOffset', 'layoutPriority', 'listRowSpacing', 'listSectionSpacing', 'position'].includes(name)) replace(key, title, arg.value, 'number')
-      if (['allowsHitTesting', 'accessibilityHidden', 'allowsTightening', 'fixedSize'].includes(name)) replace(key, title, arg.value, 'select', ['true', 'false'], undefined, undefined, '')
+      if (['brightness', 'layoutPriority'].includes(name)) replace(key, title, arg.value, 'number')
+      if (['kerning', 'baselineOffset', 'listRowSpacing', 'listSectionSpacing', 'position'].includes(name)) replace(key, title, arg.value, 'pt')
+      if (['allowsHitTesting', 'accessibilityHidden', 'allowsTightening', 'fixedSize'].includes(name)) replace(key, title, arg.value, 'toggle')
       if (['accessibilityValue', 'accessibilityHint'].includes(name)) replace(key, title, arg.value, 'text')
-      if (name === 'frame' && ['maxWidth', 'maxHeight'].includes(arg.label ?? '') && arg.value.kind === 'memberAccess' && !arg.value.base && arg.value.member === 'infinity') add(key + ':bound', title, 'number', '', v => ({ ...arg.value.span, text: v }), undefined, 0)
+      if (name === 'frame' && ['maxWidth', 'maxHeight'].includes(arg.label ?? '') && arg.value.kind === 'memberAccess' && !arg.value.base && arg.value.member === 'infinity') add(key + ':bound', title, 'pt', '', v => ({ ...arg.value.span, text: v }), undefined, 0)
       if (name === 'colorMultiply') replace(key, 'Multiply color', arg.value, 'select', colors, undefined, undefined, 'Color.')
       if (name === 'scaleEffect') replace(key, arg.label ? `Scale ${arg.label}` : 'Scale', arg.value, 'number')
       if (name === 'aspectRatio') { if (arg.label === 'contentMode') replace(key, 'Content mode', arg.value, 'select', ['fit', 'fill']); else replace(key, 'Aspect ratio', arg.value, 'number', undefined, 0.001) }
       if (name === 'scaleEffect' && arg.value.kind === 'call' && arg.value.callee.kind === 'identifier' && arg.value.callee.name === 'CGSize') for (const dimension of arg.value.args) if (['width', 'height'].includes(dimension.label ?? '')) replace(key + ':' + dimension.label, dimension.label === 'width' ? 'Horizontal scale' : 'Vertical scale', dimension.value, 'number')
-      if (['rotation3DEffect', 'hueRotation', 'rotationEffect'].includes(name) && arg.value.kind === 'call' && arg.value.callee.kind === 'identifier' && arg.value.callee.name === 'Angle') for (const angle of arg.value.args) if (['degrees', 'radians'].includes(angle.label ?? '')) replace(key + ':angle', `Angle (${angle.label})`, angle.value, 'number')
-      if (['rotation3DEffect', 'hueRotation', 'rotationEffect'].includes(name) && arg.value.kind === 'call' && arg.value.callee.kind === 'memberAccess' && ['degrees', 'radians'].includes(arg.value.callee.member) && arg.value.args[0]) replace(key + ':angle', 'Angle (' + arg.value.callee.member + ')', arg.value.args[0].value, 'number')
+      if (['rotation3DEffect', 'hueRotation', 'rotationEffect'].includes(name) && arg.value.kind === 'call' && arg.value.callee.kind === 'identifier' && arg.value.callee.name === 'Angle') for (const angle of arg.value.args) if (['degrees', 'radians'].includes(angle.label ?? '')) replace(key + ':angle', `Angle (${angle.label})`, angle.value, angle.label === 'degrees' ? '°' : 'number')
+      if (['rotation3DEffect', 'hueRotation', 'rotationEffect'].includes(name) && arg.value.kind === 'call' && arg.value.callee.kind === 'memberAccess' && ['degrees', 'radians'].includes(arg.value.callee.member) && arg.value.args[0]) replace(key + ':angle', 'Angle (' + arg.value.callee.member + ')', arg.value.args[0].value, arg.value.callee.member === 'degrees' ? '°' : 'number')
       if (['foregroundStyle', 'background', 'fill'].includes(name) && !arg.label && m.args.length === 1 && !m.trailingClosure) fill(name, arg.value, key)
     }
-    if (name === 'fixedSize' && !m.args.length) for (const axis of ['horizontal', 'vertical']) add(id + ':' + axis, `Ideal ${axis} size`, 'select', 'true', v => ({ start: m.callee.span.end, end: m.span.end, text: `(horizontal: ${axis === 'horizontal' ? v : 'true'}, vertical: ${axis === 'vertical' ? v : 'true'})` }), ['true', 'false'])
+    if (name === 'fixedSize' && !m.args.length) for (const axis of ['horizontal', 'vertical']) add(id + ':' + axis, `Ideal ${axis} size`, 'toggle', 'true', v => ({ start: m.callee.span.end, end: m.span.end, text: `(horizontal: ${axis === 'horizontal' ? v : 'true'}, vertical: ${axis === 'vertical' ? v : 'true'})` }))
   }
 }

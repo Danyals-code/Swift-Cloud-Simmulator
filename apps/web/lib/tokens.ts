@@ -1,4 +1,5 @@
 import type { AuthoringNode, AuthoringSnapshot, SharedStyle, StyleKind } from '@studio/shared'
+import { SYSTEM_COLOR_SWATCHES, isHexColor } from './colorValue'
 import { sourceLayerAround } from './sourceLayers'
 
 /** The order and wording of the token kinds, everywhere they are listed. */
@@ -24,36 +25,6 @@ export const TEXT_STYLES: readonly { value: string; label: string; size: number;
   { value: 'caption2', label: 'Caption 2', size: 11, weight: 'regular' },
 ]
 export const FONT_WEIGHTS = ['ultraLight', 'thin', 'light', 'regular', 'medium', 'semibold', 'bold', 'heavy', 'black'] as const
-
-/**
- * The system colours a token or a raw field can name, with their light sRGB value for
- * swatches: the iOS 27 simulator's, as the preview draws them (a test keeps the two equal).
- */
-export const SYSTEM_COLOR_SWATCHES: Readonly<Record<string, string>> = {
-  primary: '#000000', secondary: '#3C3C4399', black: '#000000', white: '#FFFFFF', gray: '#8E8E93', red: '#FF383C', orange: '#FF8D28',
-  yellow: '#FFCC00', green: '#34C759', mint: '#00C8B3', teal: '#00C3D0', cyan: '#00C0E8', blue: '#0088FF', indigo: '#6155F5',
-  purple: '#CB30E0', pink: '#FF2D55', brown: '#AC7F5E', clear: '#00000000', accentColor: '#0088FF', systemBackground: '#FFFFFF',
-  secondarySystemBackground: '#F2F2F7', tertiarySystemBackground: '#FFFFFF', systemGroupedBackground: '#F2F2F7',
-  secondarySystemGroupedBackground: '#FFFFFF', tertiarySystemGroupedBackground: '#F2F2F7',
-  systemGray2: '#AEAEB2', systemGray3: '#C7C7CC', systemGray4: '#D1D1D6', systemGray5: '#E5E5EA', systemGray6: '#F2F2F7',
-}
-
-const HEX_COLOR = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i
-
-/** A hex colour as the colour fields take it: #RRGGBB, or #RRGGBBAA with its alpha. */
-export function isHexColor(text: string): boolean {
-  return HEX_COLOR.test(text)
-}
-
-/** The value for an `<input type="color">`, which has no alpha: the draft's colour, or `fallback`. */
-export function pickerColor(draft: string, fallback: string): string {
-  return isHexColor(draft) ? draft.slice(0, 7) : fallback
-}
-
-/** A colour chosen in the picker, keeping the alpha the draft already had. */
-export function withPickedColor(draft: string, picked: string): string {
-  return picked.toUpperCase() + (isHexColor(draft) ? draft.slice(7) : '')
-}
 
 /** A CSS colour for a swatch: a token's light value, a hex, or a system colour name. */
 export function swatchFor(value: string | undefined, dark = false, token?: SharedStyle): string {

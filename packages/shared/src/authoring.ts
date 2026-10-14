@@ -6,6 +6,7 @@ import type { SourceFile } from './protocol'
 import type { SourceSpan } from './source'
 import type { ViewLayer } from './view-layer'
 import type { DesignControl } from './design-edit'
+import type { LayerProperties } from './layer'
 
 export type PropertyValueKind = 'literal' | 'token' | 'data-binding' | 'component-argument' | 'inherited' | 'computed' | 'unsupported'
 
@@ -58,6 +59,8 @@ export interface AuthoringNode {
    * for yet, or a name it does not know, which only an Apple framework or the project can declare.
    */
   readonly undrawn?: 'unsupported' | 'unknown'
+  /** The view as a layer: its layout, fill, corners, stroke, text and effects, read from its modifiers. */
+  readonly layer?: LayerProperties
 }
 
 /** The app's accent, as the hex its colour set holds in light and dark. */

@@ -157,8 +157,10 @@ export function MenuPanel({
     return () => window.removeEventListener('keydown', onKey, true)
   }, [items, enabled, active, onChoose, onDismiss])
 
+  // Without preventScroll, focusing the panel can scroll the panel the trigger sits in,
+  // and any scroll dismisses the menu: one opened low in a long settings panel closed at once.
   useEffect(() => {
-    panelRef.current?.focus()
+    panelRef.current?.focus({ preventScroll: true })
   }, [])
 
   useEffect(() => {
@@ -170,9 +172,13 @@ export function MenuPanel({
       if (event.target instanceof Node && panelRef.current?.contains(event.target)) return
       onDismiss()
     }
-    window.addEventListener('resize', dismiss)
-    window.addEventListener('scroll', dismiss, true)
-    return () => { window.removeEventListener('resize', dismiss); window.removeEventListener('scroll', dismiss, true) }
+    // Scroll events arrive a frame late. One from a scroll that came before the menu opened,
+    // as when its trigger was scrolled into view to be clicked, is no reason to close it.
+    const frame = requestAnimationFrame(() => {
+      window.addEventListener('resize', dismiss)
+      window.addEventListener('scroll', dismiss, true)
+    })
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', dismiss); window.removeEventListener('scroll', dismiss, true) }
   }, [onDismiss])
 
   // Portals keep panel-specific button rules and clipping out of the menu.

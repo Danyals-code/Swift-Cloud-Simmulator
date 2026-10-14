@@ -3,9 +3,9 @@
 import { Children, useLayoutEffect, useRef, useState } from 'react'
 import { modifierGuidance } from '../lib/modifierGuidance'
 import { reconcileModifierRows, modifierDropIndex, type ModifierRows } from '../lib/modifierRows'
-import type { AuthoringModifier, AuthoringNode, AuthoringSnapshot, DesignControl, ModifierCatalogEntry, ResourceOperation, SourceSpan } from '@studio/shared'
+import type { AuthoringModifier, AuthoringNode, AuthoringSnapshot, DesignControl, LayerSectionId, ModifierCatalogEntry, ResourceOperation, SourceSpan } from '@studio/shared'
 import type { FeatureChange, FeatureProps } from './AuthoringFeatures'
-import { PropertyControl, propertyOptionLabel, type PropertyChange } from './PropertyControl'
+import { PropertyControl, propertyValueLabel, type PropertyChange } from './PropertyControl'
 import { NavigationDestinationEditor } from './NavigationDestinationEditor'
 import { TokenField, valueFields } from './settings/TokenField'
 import { MenuButton } from './ui/Menu'
@@ -41,6 +41,18 @@ function suggestions(node: AuthoringNode): readonly string[] {
 }
 const EMPTY_MODIFIERS: readonly AuthoringModifier[] = []
 const PRESENTATIONS: Readonly<Record<string, string>> = { sheet: 'Sheet', fullScreenCover: 'Full screen', navigationDestination: 'Push', popover: 'Popover' }
+/**
+ * A control a layer section above already shows: Width and Height sizing (Layout), and a
+ * fill's type, material, gradient and colour (Fill). Showing it twice would offer the
+ * same value in two places.
+ */
+function shownAbove(control: DesignControl, section: LayerSectionId | undefined): boolean {
+  if (control.id.startsWith('fill:')) return true
+  return section === 'fill' && /^modifier:\d+:advanced:\d+:(?:fillType|material|stop:\d+|startPoint|endPoint|center|startRadius|endRadius|color)$/.test(control.id)
+}
+
+/** The layer section that shows a modifier, as its heading reads. */
+const LAYER_SECTION_TITLES: Readonly<Record<LayerSectionId, string>> = { layout: 'Layout', fill: 'Fill', corners: 'Corners', stroke: 'Stroke', text: 'Text', effects: 'Effects' }
 
 export interface ModifierStackProps {
   node: AuthoringNode
@@ -175,8 +187,11 @@ export function ModifierStack({ node, snapshot, onChange, onCommand, onReveal, f
       const presentation = PRESENTATIONS[modifier.name]
       const label = presentation ? 'Navigate to' : modifier.label
       const color = node.styles?.find(style => style.kind === 'color' && modifier.propertyIds.includes(style.property))
-      const summary = !enabled ? 'Off' : presentation ? `${presentation}${slot?.navigation?.display ? ` · ${slot.navigation.display}` : ''}` : modifier.controls.length ? modifier.controls.filter(control => !control.id.startsWith('fill:')).map(control => control.kind === 'select' ? propertyOptionLabel(control.value) : control.value || 'Default').join(' · ') : color?.token ?? color?.value?.toUpperCase() ?? modifier.summary
+      const summary = !enabled ? 'Off' : presentation ? `${presentation}${slot?.navigation?.display ? ` · ${slot.navigation.display}` : ''}` : modifier.controls.length ? modifier.controls.filter(control => !control.id.startsWith('fill:')).map(propertyValueLabel).join(' · ') : color?.token ?? color?.value?.toUpperCase() ?? modifier.summary
       const open = expanded.has(key)
+      // The layer section above shows this modifier as one of its values (Wave 2).
+      const section = node.layer?.claimed[modifier.id]
+      const claimed = section ? LAYER_SECTION_TITLES[section] : undefined
       const guidance = modifierGuidance(modifiers, index)
       const actions = [
         { value: 'up', label: 'Move up', disabled: busy || !modifier.capabilities.moveUp },
@@ -204,7 +219,7 @@ export function ModifierStack({ node, snapshot, onChange, onCommand, onReveal, f
         <div className={styles.modifierHeader}>
           <span className={styles.dragHandle} aria-hidden="true" title="Drag to reorder" draggable={!busy && (modifier.capabilities.moveUp || modifier.capabilities.moveDown)} onDragStart={event => { drag.current = { id: modifier.id, index }; event.dataTransfer.setData('application/x-studio-modifier', modifier.id); event.dataTransfer.effectAllowed = 'move' }} onDragEnd={() => { drag.current = null; setDropIndex(null) }}>⠿</span>
           <button type="button" className={styles.modifierToggle} aria-expanded={open} title="Expand settings · Alt+↑/↓ to reorder" onKeyDown={event => { if (event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) { event.preventDefault(); event.stopPropagation(); move(index, index + (event.key === 'ArrowUp' ? -1 : 1)) } }} onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next })}>
-            <span className={styles.chevron}>{open ? '⌄' : '›'}</span><span><strong>{label}</strong><small>{summary}</small></span>
+            <span className={styles.chevron}>{open ? '⌄' : '›'}</span><span><strong>{label}</strong>{claimed && <em className={styles.claimedTag} title={`Also set in ${claimed} above`} aria-hidden="true">{claimed}</em>}<small>{summary}</small></span>
           </button>
           {modifier.capabilities.toggle && <button type="button" role="switch" className={styles.switch} aria-checked={enabled} aria-label={`${label} ${enabled ? 'on' : 'off'}`} title={enabled ? 'Switch off (keeps it in the code, commented out)' : 'Switch on'} disabled={busy} onClick={() => void run({ kind: 'modifier-toggle', modifier: modifier.id, enabled: !enabled })}><i /></button>}
           <span className={styles.modifierMenu}><MenuButton label={`${label} actions`} items={actions} onSelect={value => {
@@ -218,7 +233,7 @@ export function ModifierStack({ node, snapshot, onChange, onCommand, onReveal, f
         {open && <div className={styles.modifierBody}>
           {guidance && <div className={styles.modifierHint}><p>{guidance.message}</p>{guidance.moveAfter !== undefined && canMove(index, guidance.moveAfter) && <button type="button" disabled={busy} onClick={() => move(index, guidance.moveAfter!)}>Move after Background</button>}</div>}
           {!enabled ? <p className={styles.note}>Switched off. It stays in the code as a comment, and switching it on restores it exactly.</p> : <>
-            {valueFields(node, modifier.controls, modifier.propertyIds).map((field, fieldIndex) => field.style
+            {valueFields(node, node.layer ? modifier.controls.filter(control => !shownAbove(control, section)) : modifier.controls, modifier.propertyIds).map((field, fieldIndex) => field.style
               ? <TokenField key={`style:${field.style.property}:${field.style.token ?? field.style.value}`} field={field} label={field.control ? controlLabel(field.control, modifier) : modifier.label} tokens={tokens} busy={busy} onChange={onChange} onCommand={resource} />
               : field.control && onChange ? <PropertyControl key={`control:${field.control.id}:${field.control.value}`} control={field.control} label={controlLabel(field.control, modifier)} onChange={onChange} /> : <span key={fieldIndex} />)}
             {slot && <NavigationDestinationEditor key={`${slot.id}:${slot.navigation?.destination}`} owner={slot} features={features} onReveal={onReveal} />}

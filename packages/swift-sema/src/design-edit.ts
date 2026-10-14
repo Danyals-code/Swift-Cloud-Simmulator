@@ -3,7 +3,7 @@ import { followCorners } from './authoring-border'
 import { editModifier } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
 import { argumentLayerProblem, canvasDropProblem, deploymentVersion, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
-import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
+import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { modifierArgumentProblem, structuralEditProblem, type StructuralKind } from './structural-check'
 import { applyPatches, type FeatureContext } from './authoring-context'
@@ -14,6 +14,7 @@ import { TAPPABLE_WRAPPER, wrapperOf } from './authoring-structure'
 import { designControlRecipes, spreadRoomProblem, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
 import { retagDuplicate } from './authoring-picker-tags'
+import { callAt, layerContext, layerProject, writeLayer } from './layer'
 
 /** The operations that act on a view's whole statement - its place, its copies, whether it is there at all - as the structural check knows them. */
 const STRUCTURAL: Partial<Record<DesignEditRequest['operation']['kind'], StructuralKind>> = { delete: 'delete', move: 'move', moveTo: 'moveTo', insert: 'insert', paste: 'insert', hide: 'hide', show: 'show', 'layer-duplicate': 'duplicate', 'layer-wrap': 'wrap', 'layer-reparent': 'reparent', 'make-tappable': 'wrap' }
@@ -56,12 +57,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     return finishDesignPlan(request, files, selection, colors)
   }
   if (node && operation.kind.startsWith('modifier-')) {
-    let expression: Expr | undefined
-    function find(item: Node): void {
-      if (item.kind === 'call' && item.span.file === node!.source.file && item.span.start === node!.source.start && item.span.end === node!.source.end) expression = item
-      else forEachChild(item, find)
-    }
-    ast.forEach(find)
+    const expression = callAt(ast, node.source)
     if (!expression) return reject('This view no longer has an editable modifier chain.')
     try {
       const shadowToken = model.styles?.find(style => style.kind === 'shadow' && style.form === 'token')?.name
@@ -70,7 +66,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       return finish(request.files.map(f => f.id === file.id ? { ...f, text } : f), { file: file.id, offset: node.source.start })
     } catch (error) { return reject(error instanceof Error ? error.message : 'This modifier change could not be planned.') }
   }
-  if (node && (!['property', 'delete', 'move', 'moveTo', 'insert', 'paste', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && operation.control.startsWith('component:'))) {
+  if (node && (!['property', 'layer-set', 'delete', 'move', 'moveTo', 'insert', 'paste', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && operation.control.startsWith('component:'))) {
     try {
       const result = featureEdit(context, node, operation as Parameters<typeof featureEdit>[2])
       const after = result.files.find(f => f.id === file.id)?.text
@@ -102,13 +98,17 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   /** A paste that goes after the view even when it is a container. */
   const beside = operation.kind === 'paste' && !!operation.beside
   const offset = node?.kind === 'template' && adding ? model.nodes.find(n => n.id === node.parentId)?.source.start ?? request.target.start : request.target.start
-  if (operation.kind === 'property' && node) {
-    let expression: Expr | undefined
-    function visit(item: Node): void {
-      if (item.kind === 'call' && item.span.start === node!.source.start && item.span.end === node!.source.end && item.span.file === file!.id) expression = item
-      else forEachChild(item, visit)
-    }
-    ast.forEach(visit)
+  if (operation.kind === 'layer-set' && node) {
+    const expression = callAt(ast, node.source)
+    if (!expression || !node.layer) return reject('This view no longer has an editable modifier chain. Select it again.')
+    try {
+      const parent = model.nodes.find(n => n.id === node.parentId)
+      const written = writeLayer(expression, operation.changes, layerContext(layerProject(ast, request.deploymentTarget), node, parent, file.text))
+      // A border takes the view's new corners in the same step (D8).
+      changed = { text: followCorners(file.text, written.text, file.id, node.source.start, written.start), offset: written.start }
+    } catch (error) { return reject(error instanceof Error ? error.message : 'This layer change could not be planned.') }
+  } else if (operation.kind === 'property' && node) {
+    const expression = callAt(ast, node.source)
     if (!expression) return reject('This source expression cannot be edited safely.')
     const recipe = designControlRecipes(node, expression, file.text, request.deploymentTarget).find(r => r.control.id === operation.control)
     if (!recipe) return reject('This property is controlled by Swift or is outside the editable subset.')

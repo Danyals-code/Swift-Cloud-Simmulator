@@ -60,7 +60,6 @@ it.each([
   ['a view nobody declares', 'Sparkline()', 'xcode', "The preview doesn't know 'Sparkline' and shows a box for it. If it isn't SwiftUI's or the project's, the app won't build."],
   ['a modifier nobody declares', 'Text("A").glow()', 'xcode', "The preview doesn't know .glow and leaves it out. If it isn't SwiftUI's, the app won't build."],
   ['a view the preview runs only in part', 'TimelineView(.everyMinute) { context in Text("Now") }', 'preview', 'The timeline runs only once, for the moment it is drawn, and does not advance its schedule.'],
-  ['uneven corners', 'Color.blue.clipShape(.rect(topLeadingRadius: 20))', 'preview', 'Its corners are drawn equal in the preview, all with the largest radius. The app draws each corner as written.'],
   ['a blend the preview has no equivalent for', 'Text("A").blendMode(.destinationOut)', 'preview', "'.blendMode(.destinationOut)' has no equivalent the preview can draw, so it is ignored rather than approximated. The app uses it as written."],
   ['an argument the modifier does not take', 'Text("A").blur(radius: 4, amount: 2)', 'xcode', "'.blur' has no argument 'amount:', so the preview ignores it. The app won't build with it: change it in Code."],
 ])('says %s plainly (D11)', (_, body, kind, sentence) => {

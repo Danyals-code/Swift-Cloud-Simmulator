@@ -1,0 +1,27 @@
+/**
+ * A number field: one 28px field holding a caption that scrubs, the value, and its unit.
+ * The box is the field, so the caption and unit sit inside its fill and focus ring.
+ */
+.field {
+  position: relative; display: flex; align-items: center; min-width: 0; height: var(--control-height);
+  border: 1px solid transparent; border-radius: var(--radius-md); background: var(--color-xc-field);
+  transition: border-color var(--duration-fast) var(--ease-in-out), box-shadow var(--duration-fast) var(--ease-in-out), background-color var(--duration-fast) var(--ease-in-out);
+}
+.field:hover:not(:focus-within, [data-disabled]) { border-color: var(--color-xc-line); }
+.field:focus-within { border-color: var(--color-xc-accent); background: var(--color-xc-panel); box-shadow: var(--focus-ring); }
+.field[data-disabled] { opacity: .5; }
+.caption {
+  display: grid; place-items: center; flex-shrink: 0; min-width: 22px; height: 100%; padding: 0 2px 0 6px;
+  font-size: var(--text-caption); line-height: var(--text-caption--line-height); font-weight: 500; color: var(--color-xc-text-3);
+  cursor: ew-resize; user-select: none; touch-action: none;
+}
+.field[data-disabled] .caption { cursor: default; }
+.field input, .field input:focus-visible {
+  flex: 1; width: 100%; min-width: 0; height: 100%; min-height: 0; padding: 0 6px 0 2px;
+  border: 0; background: transparent; box-shadow: none; outline: none; font-variant-numeric: tabular-nums;
+}
+.field input:disabled { opacity: 1; }
+.unit { flex-shrink: 0; padding-right: 8px; font-size: var(--text-caption); color: var(--color-xc-text-3); pointer-events: none; }
+/* A linked token over the empty field, until the field is typed in. */
+.overlay { position: absolute; inset: 0 0 0 24px; display: flex; align-items: center; min-width: 0; padding-right: 6px; pointer-events: none; }
+.field:focus-within .overlay { display: none; }

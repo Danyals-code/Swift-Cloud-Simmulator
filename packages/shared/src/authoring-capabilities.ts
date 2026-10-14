@@ -81,6 +81,9 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('controlSize', 'modifier', [[null]], false, '15.0'),
   capability('tint', 'modifier', [[null]], false, '15.0'),
   capability('foregroundStyle', 'modifier', [[null]], false, '15.0'), capability('background', 'modifier', [[null], []], true),
+  // iOS 15's shape style backgrounds: `.background(.blue, in: .rect(cornerRadius: 12))`, and the material behind it on its own.
+  { ...capability('background', 'modifier', [[null, 'in'], ['in'], [null, 'in', 'fillStyle'], ['in', 'fillStyle'], [null, 'ignoresSafeAreaEdges'], ['ignoresSafeAreaEdges']], false, '15.0'), id: 'modifier.background.style' },
+  capability('glassEffect', 'modifier', [[], [null], ['in'], [null, 'in']], false, '26.0'),
   capability('fill', 'modifier', [[null]]),
   capability('overlay', 'modifier', [[null], []], true), capability('cornerRadius', 'modifier', [[null]]),
   capability('opacity', 'modifier', [[null]]), capability('bold', 'modifier', [[]]),
