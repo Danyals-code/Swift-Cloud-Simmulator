@@ -1,5 +1,5 @@
 import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, deploymentVersion, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
-import { Parser, afterOffMarkers, hasHumanComment, offMarker, offMarkerText, offMarkersIn, withoutOffMarkers, type CallExpr, type Expr, DIRECTIVE_LINE } from '@studio/swift-syntax'
+import { Parser, afterOffMarkers, commentFollows, hasHumanComment, offMarker, offMarkerText, offMarkersIn, type CallExpr, type Expr, DIRECTIVE_LINE } from '@studio/swift-syntax'
 import { roundedCorners, viewCallChain } from './design-controls'
 import { NEW_BORDER, borderOf, borderSource, cornersOf, type Corners } from './authoring-border'
 import { authoringViewMinimum } from './authoring-view'
@@ -113,10 +113,16 @@ const CATALOG: readonly CatalogEntry[] = [
   { name: 'navigationTitle', label: 'Screen title', category: 'behavior', slot: SLOT.behaviour, description: 'The title in the navigation bar', minimumIOS: 14, source: () => '.navigationTitle("Title")' },
   { name: 'navigationBarTitleDisplayMode', label: 'Title size', category: 'behavior', slot: SLOT.behaviour, description: 'Large or inline title', minimumIOS: 14, source: () => '.navigationBarTitleDisplayMode(.inline)' },
 ]
+/**
+ * Each entry by its name, the first of a name as `find` would give it, and the iOS it needs,
+ * its own or its capability's. Every view read looks these up, so they are worked out once.
+ */
+const CATALOG_BY_NAME: ReadonlyMap<string, CatalogEntry> = new Map([...CATALOG].reverse().map(entry => [entry.name, entry]))
+const CATALOG_MINIMUM: ReadonlyMap<CatalogEntry, number> = new Map(CATALOG.map(entry => [entry, Math.max(entry.minimumIOS ?? 13, Number.parseFloat(authoringCapability(entry.name, 'modifier', [null])?.minimumIOS ?? '13'))]))
 /** What a modifier SwiftUI has, and the preview does not draw, says on its card. */
 const NOT_DRAWN = 'Not drawn in the preview'
 const LABELS: Readonly<Record<string, string>> = { task: 'Task', onAppear: 'When shown', onDisappear: 'When hidden', onChange: 'When value changes', onTapGesture: 'When tapped', onLongPressGesture: 'When held', resizable: 'Resize image', scaledToFit: 'Fit', scaledToFill: 'Fill', fill: 'Shape fill', sheet: 'Opens a sheet', fullScreenCover: 'Opens full screen', navigationDestination: 'Push destination', popover: 'Opens a popover', alert: 'Alert', toolbar: 'Toolbar', overlay: 'Overlay', tabItem: 'Tab bar item' }
-const friendly = (name: string) => CATALOG.find(c => c.name === name)?.label ?? LABELS[name] ?? name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase())
+const friendly = (name: string) => CATALOG_BY_NAME.get(name)?.label ?? LABELS[name] ?? name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase())
 const nameOf = (call: CallExpr) => call.callee.kind === 'memberAccess' ? call.callee.member : 'unknown'
 /** The shapes SwiftUI fills in with the foreground colour when nothing else paints them. */
 const SHAPES = new Set(['Rectangle', 'RoundedRectangle', 'UnevenRoundedRectangle', 'Circle', 'Ellipse', 'Capsule', 'Path'])
@@ -124,13 +130,13 @@ const SHAPES = new Set(['Rectangle', 'RoundedRectangle', 'UnevenRoundedRectangle
 const PAINT_SLOTS: Readonly<Record<string, number>> = { fill: SLOT.fill, glassEffect: SLOT.fill, stroke: SLOT.stroke, strokeBorder: SLOT.stroke }
 /** Where a modifier usually sits in a chain, from text styles to behaviour; 99 for one the studio does not place. */
 export function slotOf(name: string): number {
-  return CATALOG.find(c => c.name === name)?.slot ?? PAINT_SLOTS[name] ?? (MODIFIER_CATEGORIES.text.has(name) ? SLOT.text : MODIFIER_CATEGORIES.layout.has(name) ? SLOT.offset : MODIFIER_CATEGORIES.behavior.has(name) ? SLOT.behaviour : 99)
+  return CATALOG_BY_NAME.get(name)?.slot ?? PAINT_SLOTS[name] ?? (MODIFIER_CATEGORIES.text.has(name) ? SLOT.text : MODIFIER_CATEGORIES.layout.has(name) ? SLOT.offset : MODIFIER_CATEGORIES.behavior.has(name) ? SLOT.behaviour : 99)
 }
 
 /** Where a modifier is listed: Apple's in what it does, whether or not the preview draws it, and a project's own as custom. */
 function category(name: string): ModifierCategory {
   const listed = (['behavior', 'layout', 'text'] as const).find(group => MODIFIER_CATEGORIES[group].has(name))
-  return CATALOG.find(c => c.name === name)?.category ?? listed ?? (isAppleCall(name) ? 'appearance' : 'custom')
+  return CATALOG_BY_NAME.get(name)?.category ?? listed ?? (isAppleCall(name) ? 'appearance' : 'custom')
 }
 
 // ---------------------------------------------------------------- the off marker
@@ -231,7 +237,7 @@ function offCall(original: string): { call: CallExpr; text: string } | undefined
 function heldInPlace(parsed: { base: CallExpr; end: number }, text: string, file: string): { commented: boolean; conditional: boolean } {
   return {
     // Only comments a person wrote pin the chain; the studio's own off markers never do.
-    commented: hasHumanComment(text.slice(parsed.base.span.end, parsed.end), file) || /^[^\S\r\n]*(?:\/\/|\/\*)/.test(withoutOffMarkers(text.slice(parsed.end))),
+    commented: hasHumanComment(text.slice(parsed.base.span.end, parsed.end), file) || commentFollows(text, parsed.end),
     // A `#if` line goes with the modifier after it, so moving, removing or switching off any of
     // them would change which builds apply which, or leave a clause unclosed.
     conditional: DIRECTIVE_LINE.test(text.slice(parsed.base.span.end, parsed.end)),
@@ -243,7 +249,7 @@ function heldInPlace(parsed: { base: CallExpr; end: number }, text: string, file
  * false while the view's source has a problem to resolve first, and a run of joined text
  * (`node.textRun`) takes only what keeps it a Text (`KEEPS_TEXT`).
  */
-export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, allowEdits = true }: { deploymentTarget?: string; allowEdits?: boolean } = {}): { modifiers: AuthoringModifier[]; modifierCatalog: ModifierCatalogEntry[] } {
+export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, allowEdits = true }: { deploymentTarget?: string; allowEdits?: boolean } = {}): { modifiers: AuthoringModifier[]; modifierCatalog: readonly ModifierCatalogEntry[] } {
   const run = !!node.textRun
   const parsed = segmentsOf(expr, text)
   if (!parsed) return { modifiers: [], modifierCatalog: [] }
@@ -298,13 +304,44 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { d
   // A project's own modifier may return anything, so nothing is added beside it; Apple's return `some View`.
   const unknown = segments.some(segment => segment.call && !isAppleCall(nameOf(segment.call)))
   const available = editable && !unknown
-  return { modifiers, modifierCatalog: CATALOG.filter(entry => !entry.only || entry.only.includes(node.name)).map(entry => {
-    const minimum = Math.max(entry.minimumIOS ?? 13, Number.parseFloat(authoringCapability(entry.name, 'modifier', [null])?.minimumIOS ?? '13'), run ? KEEPS_TEXT[entry.name] ?? 13 : 13)
+  return { modifiers, modifierCatalog: catalogOf({ name: OFFERED_TO.has(node.name) ? node.name : '', tab: node.name === 'Tab' && node.kind !== 'component', run, available, unknown, version, allowEdits, locked }) }
+}
+
+/** What decides the modifiers a view is offered, and why one is not. */
+interface CatalogFacts {
+  /** The view's name when an entry is `only` for it; any other view is offered what one named '' is. */
+  readonly name: string
+  readonly tab: boolean
+  readonly run: boolean
+  readonly available: boolean
+  readonly unknown: boolean
+  readonly version: number
+  readonly allowEdits: boolean
+  readonly locked: string
+}
+const OFFERED_TO: ReadonlySet<string> = new Set(CATALOG.flatMap(entry => entry.only ?? []))
+/**
+ * The catalogs built so far, by the facts they follow from: views alike share one list, as
+ * building one for each view of a large project was much of the time reading it took.
+ * Bounded, as the names in it come from projects.
+ */
+const catalogs = new Map<string, readonly ModifierCatalogEntry[]>()
+
+function catalogOf(facts: CatalogFacts): readonly ModifierCatalogEntry[] {
+  const { name, tab, run, available, unknown, version, allowEdits, locked } = facts
+  const key = [name, tab, run, available, unknown, version, allowEdits, locked].join('|')
+  const built = catalogs.get(key)
+  if (built) return built
+  const catalog = CATALOG.filter(entry => !entry.only || entry.only.includes(name)).map(entry => {
+    const minimum = Math.max(CATALOG_MINIMUM.get(entry)!, run ? KEEPS_TEXT[entry.name] ?? 13 : 13)
     const styleOnly = !run || entry.name in KEEPS_TEXT
     const supported = available && styleOnly && version >= minimum
-    const reason = !styleOnly ? runRefusal(`Put the joined text in parentheses in Code to give all of it ${entry.label.toLowerCase()}.`) : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : available ? `Needs iOS ${minimum} or newer. Change the deployment target to use it.` : node.name === 'Tab' && node.kind !== 'component' ? 'Select the view inside this tab to style its content.' : !allowEdits ? 'This view cannot be changed until its source is resolved.' : locked
+    const reason = !styleOnly ? runRefusal(`Put the joined text in parentheses in Code to give all of it ${entry.label.toLowerCase()}.`) : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : available ? `Needs iOS ${minimum} or newer. Change the deployment target to use it.` : tab ? 'Select the view inside this tab to style its content.' : !allowEdits ? 'This view cannot be changed until its source is resolved.' : locked
     return { name: entry.name, label: entry.label, category: entry.category, description: entry.description, ...(entry.hidden ? { hidden: true } : {}), available: supported, reason: supported ? undefined : reason }
-  }) }
+  })
+  if (catalogs.size >= 256) catalogs.clear()
+  catalogs.set(key, catalog)
+  return catalog
 }
 
 /** Move whole segments; never reconstruct an existing modifier or its arguments. */

@@ -128,23 +128,31 @@ export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): Beha
 
 /** The objects a view reads from its surroundings, by type. */
 const environmentObjects = (ctx: FeatureContext, decl: StructDecl | undefined) => decl?.members.flatMap(m => m.kind === 'varDecl' && m.typeAnnotation && m.attributes.some(a => a.name === 'EnvironmentObject') ? [raw(ctx, m.typeAnnotation.span).replace(/\s/g, '')] : []) ?? []
-const screenCache = new WeakMap<FeatureContext, { root?: string; screens: { name: string; reads: string[] }[] }>()
+const screenCache = new WeakMap<FeatureContext, { root?: string; screens: { name: string; reads: string[] }[]; opened: Map<string, Map<StructDecl | undefined, string[]>> }>()
 /**
  * The screens a tap on `node` can open: made with no values, or needing only an object
  * its own screen reads from its surroundings, which a pushed or presented screen
  * inherits. Never the view the app's window shows, which holds every screen, and never
  * the screen the tap is on.
  */
-function tapDestinations(ctx: FeatureContext, node: AuthoringNode): string[] {
+function tapDestinations(ctx: FeatureContext, node: AuthoringNode): readonly string[] {
   let cached = screenCache.get(ctx)
   if (!cached) {
     const standalone = (d: StructDecl) => !d.generics.length && !d.members.some(m => m.kind === 'initDecl' || m.kind === 'varDecl' && !m.accessor && !m.initializer && !m.attributes.some(a => ['State', 'Environment', 'EnvironmentObject'].includes(a.name)))
     const screens = ctx.ast.flatMap(f => f.declarations).flatMap(d => d.kind === 'structDecl' && d.inherits.some(t => t.name === 'View') && standalone(d) && namedStruct(ctx, d.name) === d ? [{ name: d.name, reads: environmentObjects(ctx, d) }] : [])
-    cached = { root: appRoot(ctx), screens }
+    cached = { root: appRoot(ctx), screens, opened: new Map() }
     screenCache.set(ctx, cached)
   }
-  const around = new Set(environmentObjects(ctx, ownerOf(ctx, node)))
-  return cached.screens.filter(screen => screen.name !== node.owner && screen.name !== cached.root && screen.reads.every(type => around.has(type))).map(screen => screen.name)
+  // The same for every view of a screen, so worked out once for each: a list of every screen for each view was quadratic.
+  const owner = ownerOf(ctx, node), byOwner = cached.opened.get(node.owner) ?? new Map<StructDecl | undefined, string[]>()
+  cached.opened.set(node.owner, byOwner)
+  let opened = byOwner.get(owner)
+  if (!opened) {
+    const around = new Set(environmentObjects(ctx, owner))
+    opened = cached.screens.filter(screen => screen.name !== node.owner && screen.name !== cached.root && screen.reads.every(type => around.has(type))).map(screen => screen.name)
+    byOwner.set(owner, opened)
+  }
+  return opened
 }
 
 /** `Button { … } label: { … }`: the action is the trailing closure, and what it shows is its label (D16). */

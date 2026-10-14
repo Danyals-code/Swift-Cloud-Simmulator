@@ -26,7 +26,7 @@ import {
   type ViewInstance,
 } from '@studio/shared'
 import { DEFAULT_STEP_BUDGET } from '@studio/swift-runtime'
-import { Parser, type SourceFileNode } from '@studio/swift-syntax'
+import { Parser, type SourceFileNode, type Token } from '@studio/swift-syntax'
 import { buildAuthoringModel, layerDraftSites, scenarioFiles, Checker, lintStrictness, type LayerDraftSites, type SemanticModel } from '@studio/swift-sema'
 import {
   applyLayoutDraft,
@@ -215,11 +215,13 @@ function analyse(request: CompileRequest): Analysis {
   const parseStart = performance.now()
   const files: SourceFileNode[] = []
   const diagnostics: Diagnostic[] = []
+  const tokens = new Map<string, readonly Token[]>()
 
   for (const file of request.files) {
     const result = Parser.parse(file.text, file.id)
     files.push(result.sourceFile)
     diagnostics.push(...result.diagnostics)
+    tokens.set(file.id, result.tokens)
   }
   const parseMs = performance.now() - parseStart
 
@@ -230,7 +232,7 @@ function analyse(request: CompileRequest): Analysis {
   // its inference would be working from a broken tree, and a warning derived from
   // that is exactly the false positive the pass exists to avoid.
   const strict = diagnostics.some((d) => d.severity === 'error') ? [] : lintStrictness(files, model)
-  const authoring = buildAuthoringModel({ deploymentTarget: request.deploymentTarget, componentDescriptions: request.componentDescriptions, colors: request.colors, files: request.files, parsed: files, diagnostics: [...diagnostics, ...model.diagnostics], projectId: request.projectId ?? '', revision: request.revision })
+  const authoring = buildAuthoringModel({ deploymentTarget: request.deploymentTarget, componentDescriptions: request.componentDescriptions, colors: request.colors, files: request.files, parsed: files, tokens, diagnostics: [...diagnostics, ...model.diagnostics], projectId: request.projectId ?? '', revision: request.revision })
   const checkMs = performance.now() - checkStart
 
   return {

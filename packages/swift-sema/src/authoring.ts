@@ -8,7 +8,7 @@ import {
   type AuthoringNode, type AuthoringProperty, type AuthoringSnapshot,
   type Diagnostic, type PropertyValueKind, type SourceFile, type SourceSpan,
 } from '@studio/shared'
-import { Lexer, Parser, forEachChild, isSyntaxError, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type VarDecl } from '@studio/swift-syntax'
+import { Lexer, Parser, forEachChild, isSyntaxError, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type Token, type VarDecl } from '@studio/swift-syntax'
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from './builtins'
 import { containerContent, helperCall, helperContent, helperReach, setByEveryInit, viewHelpers, writtenParameters, type MutableNode, type ViewHelper } from './authoring-helpers'
 import { joinedText } from './authoring-runs'
@@ -75,6 +75,17 @@ function classify(expr: Expr, scope: Scope, tokens: ReadonlyMap<string, readonly
   return { kind: 'computed' }
 }
 
+/** The index of the first token starting at or after `offset`, by halves. */
+function firstToken(tokens: readonly Token[], offset: number): number {
+  let low = 0, high = tokens.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (tokens[middle]!.span.start < offset) low = middle + 1
+    else high = middle
+  }
+  return low
+}
+
 export interface AuthoringInput {
   readonly files: readonly SourceFile[]
   readonly projectId: string
@@ -82,6 +93,8 @@ export interface AuthoringInput {
   readonly deploymentTarget?: string
   readonly componentDescriptions?: readonly ComponentDescription[]
   readonly parsed?: readonly SourceFileNode[]
+  /** Each file's tokens as `Lexer.tokenize` gives them, where they are at hand: parsing lexes every file. */
+  readonly tokens?: ReadonlyMap<string, readonly Token[]>
   readonly diagnostics?: readonly Diagnostic[]
   readonly colors?: readonly PreviewColorAsset[]
 }
@@ -106,7 +119,28 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   const previews: { body: Block; node: MutableNode }[] = []
   const tokens = new Map<string, VarDecl[]>()
   const contextual = new Map<string, VarDecl[]>()
-  const fingerprint = (span: SourceSpan) => JSON.stringify(Lexer.tokenize(source(span), span.file).tokens.filter(t => t.kind !== 'endOfFile').map(t => [t.kind, t.text]))
+  /** Each file lexed once, with each token as its fingerprint writes it. */
+  const lexed = new Map<string, { readonly tokens: readonly Token[]; readonly written: readonly string[] }>()
+  /**
+   * The kind and text of each token in a view's source, lexed on its own. A span from a
+   * token's start or a token's end to a token's end lexes as that run of its file's tokens,
+   * as lexing reads no further back than where it starts; lexing each view's own text again
+   * lexed it once more for every view around it.
+   */
+  const fingerprint = (span: SourceSpan) => {
+    const text = texts.get(span.file)
+    let file = lexed.get(span.file)
+    if (text !== undefined && !file) {
+      const tokens = input.tokens?.get(span.file) ?? Lexer.tokenize(text, span.file).tokens
+      lexed.set(span.file, file = { tokens, written: tokens.map(t => JSON.stringify([t.kind, t.text])) })
+    }
+    if (file) {
+      const first = firstToken(file.tokens, span.start), end = firstToken(file.tokens, span.end)
+      const starts = file.tokens[first]?.span.start === span.start || file.tokens[first - 1]?.span.end === span.start
+      if (first < end && starts && file.tokens[end - 1]!.span.end === span.end) return `[${file.written.slice(first, end).join(',')}]`
+    }
+    return JSON.stringify(Lexer.tokenize(source(span), span.file).tokens.filter(t => t.kind !== 'endOfFile').map(t => [t.kind, t.text]))
+  }
 
   function add(kind: AuthoringNode['kind'], name: string, span: SourceSpan, owner: string, parent?: MutableNode): MutableNode {
     // An `else if` is the whole of its "Otherwise" branch, so the two share a span. With

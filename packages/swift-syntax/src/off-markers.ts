@@ -43,6 +43,32 @@ export function withoutOffMarkers(text: string): string {
   return text.replace(new RegExp(MARKER, 'g'), '')
 }
 
+const SPACES = /[^\S\r\n]*/y
+const MARKER_AT = new RegExp(MARKER, 'y')
+
+/** Where the markers written straight after `at` finish, with nothing between them. */
+function pastMarkers(text: string, at: number): number {
+  for (MARKER_AT.lastIndex = at; MARKER_AT.test(text); at = MARKER_AT.lastIndex);
+  return at
+}
+
+/**
+ * Whether a person's comment opens the rest of the line at `at`, past spaces and markers:
+ * whether `withoutOffMarkers(text.slice(at))` starts with one. Read only as far as the
+ * answer needs, as a view's chain asks it of the rest of its file.
+ */
+export function commentFollows(text: string, at: number): boolean {
+  for (let spaced = -1; spaced !== at;) {
+    SPACES.lastIndex = at
+    // It matches anywhere in the text, if only nothing; past its end it does not.
+    spaced = SPACES.test(text) ? SPACES.lastIndex : at
+    at = pastMarkers(text, spaced)
+  }
+  // A marker taken out joins the characters either side of it.
+  const next = text[pastMarkers(text, at + 1)]
+  return text[at] === '/' && (next === '/' || next === '*')
+}
+
 /** Where the switched-off modifiers written straight after `end` finish - whitespace and markers only - or `end` when there are none. */
 export function afterOffMarkers(text: string, end: number): number {
   const trailing = TRAILING.exec(text.slice(end))
@@ -56,6 +82,8 @@ export function afterOffMarkers(text: string, end: number): number {
  * text, not a comment, and the studio's own off markers never count.
  */
 export function hasHumanComment(text: string, file: string): boolean {
+  // Every comment and every marker starts with one of these, so without them there is nothing to lex for.
+  if (!text.includes('//') && !text.includes('/*')) return false
   const tokens = Lexer.tokenize(text, file).tokens
   let at = 0
   for (const token of tokens) {
