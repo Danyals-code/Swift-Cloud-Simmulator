@@ -64,6 +64,9 @@ export function viewCallChain(expr: Expr): { base: CallExpr; modifiers: CallExpr
 export const AUTHORING_COLORS = ['primary', 'secondary', 'black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'mint', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink', 'brown', 'clear']
 export const AUTHORING_FONTS = TEXT_STYLES
 export const SYSTEM_COLORS = ['systemBackground', 'secondarySystemBackground', 'tertiarySystemBackground', 'systemGroupedBackground', 'secondarySystemGroupedBackground', 'tertiarySystemGroupedBackground']
+/** The colours a control offers, from iOS 15 and before it: listed once rather than for every view. */
+const COLORS_FROM_15: readonly string[] = [...AUTHORING_COLORS, 'accentColor', ...SYSTEM_COLORS]
+const COLORS_BEFORE_15: readonly string[] = [...AUTHORING_COLORS.filter(c => !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c)), 'accentColor', ...SYSTEM_COLORS]
 /** Only the color's opacity wrapper; the returned spans leave its expression intact. */
 export function colorOpacityParts(value: Expr): { color: Expr; opacity: Expr } | undefined {
   if (value.kind !== 'call' || value.trailingClosure || value.callee.kind !== 'memberAccess' || value.callee.member !== 'opacity' || !value.callee.base || value.args.length !== 1 || value.args[0]!.label !== null) return undefined
@@ -178,6 +181,11 @@ export type ButtonLabel = {
   readonly view?: Expr
 }
 
+/** The file and the line ending it is written with, for the last file asked about. */
+let ending: { readonly text: string; readonly eol: string } | undefined
+/** The line ending a file is written with: every Button and stack asks, and the answer is a search of the whole file. */
+const lineEndingOf = (text: string): string => (ending?.text === text ? ending : ending = { text, eol: text.includes('\r\n') ? '\r\n' : '\n' }).eol
+
 /**
  * Where a Button is sized: its label. A frame outside the button sizes the room around a
  * bordered style and leaves its capsule as it was (doc 18, Fix first 3); one on the label
@@ -188,7 +196,7 @@ export type ButtonLabel = {
  * comment that would lose its place.
  */
 export function buttonLabel(base: CallExpr, text: string): ButtonLabel | null {
-  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const eol = lineEndingOf(text)
   const lineStart = (offset: number) => text.lastIndexOf('\n', offset - 1) + 1
   const indentAt = (offset: number) => /^[ \t]*/.exec(text.slice(lineStart(offset)))![0]
   const ownLine = (offset: number) => !text.slice(lineStart(offset), offset).trim()
@@ -239,7 +247,7 @@ function autoSpacing(recipe: ControlRecipe, name: string, base: CallExpr, expr: 
   const views = statements.filter(statement => viewName(statement) !== 'Spacer')
   const auto = views.length >= 2 && statements.length === views.length * 2 - 1 && statements.every((statement, index) => index % 2 === 1 ? plainSpacer(statement) : viewName(statement) !== 'Spacer')
   const row = name.includes('HStack'), word = LAYOUT_WORDS[row ? 'HStack' : 'VStack']
-  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const eol = lineEndingOf(text)
   const lineStart = (offset: number) => text.lastIndexOf('\n', offset - 1) + 1
   const problem = (value: string) => value !== 'auto' || auto ? null
     : views.some(view => viewName(view) === 'ForEach') ? `Auto spacing puts a Spacer between views written one by one, and this ${word} repeats its views from data. Set a number instead.`
@@ -317,13 +325,20 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   const constructorEditable = !!constructor && targetVersion >= Number.parseFloat(constructor.minimumIOS)
   const minimum = authoringViewMinimum(node)
   if (!Number.isFinite(targetVersion) || minimum === undefined || targetVersion < minimum) return []
-  const colors = [...AUTHORING_COLORS.filter(c => targetVersion >= 15 || !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c)), 'accentColor', ...SYSTEM_COLORS]
+  const colors = targetVersion >= 15 ? COLORS_FROM_15 : COLORS_BEFORE_15
   const listStyles = targetVersion >= 14 ? ['plain', 'inset', 'grouped', 'insetGrouped', 'sidebar'] : ['plain', 'grouped']
   const recipes: ControlRecipe[] = []
   const scope = node.properties.some(p => p.scope === 'template') ? 'All rows in this template' : `Defined in ${node.owner}`
   const raw = (span: SourceSpan) => text.slice(span.start, span.end)
+  const ownModifier = modifiers.some(m => !isAppleCall(modName(m)))
   function add(id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description = 'Changes this source value; existing modifier order is preserved.', origin = node.source): void {
-    recipes.push({ control: { id, label, ...controlKind(kind), value, options, min, max, scope, description, source: origin }, patch })
+    // Written out for each shape of kind: spreading `controlKind` between other keys sent
+    // every key after it down V8's slowest path, for every value of every view.
+    const { kind: shown, unit, step } = controlKind(kind)
+    const control: DesignControl = unit === undefined ? { id, label, kind: shown, value, options, min, max, scope, description, source: origin }
+      : step === undefined ? { id, label, kind: shown, unit, value, options, min, max, scope, description, source: origin }
+      : { id, label, kind: shown, unit, step, value, options, min, max, scope, description, source: origin }
+    recipes.push({ control, patch })
   }
   function replace(id: string, label: string, value: Expr, kind: ControlKind, options?: readonly string[], min?: number, max?: number, prefix = '.'): void {
     // Edit the literal branches, never erase the condition or replace linked data.
@@ -351,7 +366,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   }
   function append(id: string, label: string, kind: ControlKind, value: string, format: (v: string) => string, options?: readonly string[], min?: number, max?: number, description = 'Adds a local modifier at the end of this view’s modifier chain. Earlier styles keep their order.'): void {
     // A project's own modifier may return anything; any of Apple's can be followed by another.
-    if (modifiers.some(m => !isAppleCall(modName(m)))) return
+    if (ownModifier) return
     add(id, label, kind, value, v => ({ start: expr.span.end, end: expr.span.end, text: format(v) }), options, min, max, description)
   }
   function argument(id: string, label: string, name: string | null, kind: ControlKind, value: string, options?: readonly string[], min?: number): void {
@@ -587,7 +602,22 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     }
   }
   // A run of joined text takes text styles only: a padding or a size would make it a view (Wave 3a).
-  return recipes.map(recipe => ({ ...recipe, control: constrainNumericControl(recipe.control, node.name, node.behavior?.binding?.type) })).filter((recipe, index) => !(node.textRun && /^(add|fill):/.test(recipe.control.id)) && !recipes.slice(0, index).some(prior => prior.control.source.start === recipe.control.source.start && prior.control.source.end === recipe.control.source.end && prior.control.kind === recipe.control.kind && prior.control.value === recipe.control.value && prior.control.source !== node.source))
+  // A value read twice keeps its first control, unless that one edits the view as a whole;
+  // each is looked up among those before it rather than compared with every one.
+  const before = new Map<number, DesignControl[]>(), kept: ControlRecipe[] = []
+  for (const recipe of recipes) {
+    const { source, kind, value } = recipe.control
+    const repeated = before.get(source.start)?.some(prior => prior.source.end === source.end && prior.kind === kind && prior.value === value)
+    if (source !== node.source) {
+      const at = before.get(source.start)
+      if (at) at.push(recipe.control)
+      else before.set(source.start, [recipe.control])
+    }
+    if (repeated || node.textRun && /^(add|fill):/.test(recipe.control.id)) continue
+    const control = constrainNumericControl(recipe.control, node.name, node.behavior?.binding?.type)
+    kept.push(control === recipe.control ? recipe : { ...recipe, control })
+  }
+  return kept
 }
 
 export function constrainNumericControl(control: DesignControl, view: string, type?: string): DesignControl {

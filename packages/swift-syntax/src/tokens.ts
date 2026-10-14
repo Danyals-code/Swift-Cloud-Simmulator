@@ -106,7 +106,9 @@ export function isOperatorChar(ch: string): boolean {
 export function isIdentifierStart(ch: string): boolean {
   const code = ch.codePointAt(0) ?? 0
   if (code > 0x7f) return !/\s/.test(ch)
-  // `$` leads closure shorthand ($0) and property-wrapper projections ($count).
+  // `$` leads closure shorthand ($0) and property-wrapper projections ($count). One
+  // character, as the lexer asks of every one, is read by its code rather than a pattern.
+  if (ch.length === 1) return code >= 97 && code <= 122 || code >= 65 && code <= 90 || code === 95 || code === 36
   return /[A-Za-z_$]/.test(ch)
 }
 

@@ -75,6 +75,20 @@ function classify(expr: Expr, scope: Scope, tokens: ReadonlyMap<string, readonly
   return { kind: 'computed' }
 }
 
+/**
+ * A token as a fingerprint writes it, `JSON.stringify([kind, text])`. A kind is a plain word,
+ * and most texts have nothing JSON escapes, so those are written without it.
+ */
+const asWritten = (token: Token): string => plain(token.text) ? `["${token.kind}","${token.text}"]` : JSON.stringify([token.kind, token.text])
+/** Whether JSON writes a text as it is: with no quote, backslash, control character or surrogate in it. */
+function plain(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code < 0x20 || code === 0x22 || code === 0x5c || code >= 0xd800 && code <= 0xdfff) return false
+  }
+  return true
+}
+
 /** The index of the first token starting at or after `offset`, by halves. */
 function firstToken(tokens: readonly Token[], offset: number): number {
   let low = 0, high = tokens.length
@@ -111,6 +125,8 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   const layers = layerProject(parsed, input.deploymentTarget)
   const nodes: MutableNode[] = []
   const byId = new Map<string, MutableNode>()
+  /** What `inTemplate` found for each layer. */
+  const templated = new Map<MutableNode, boolean>()
   const roots: string[] = []
   const declaredNames = new Set<string>()
   const definitions = new Map<string, { decl: StructDecl; node: MutableNode }[]>()
@@ -119,8 +135,11 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   const previews: { body: Block; node: MutableNode }[] = []
   const tokens = new Map<string, VarDecl[]>()
   const contextual = new Map<string, VarDecl[]>()
-  /** Each file lexed once, with each token as its fingerprint writes it. */
-  const lexed = new Map<string, { readonly tokens: readonly Token[]; readonly written: readonly string[] }>()
+  /**
+   * Each file lexed once, with its tokens written as a fingerprint writes them, joined, and
+   * where each one's writing starts in that, so a run of them is one slice of it.
+   */
+  const lexed = new Map<string, { readonly tokens: readonly Token[]; readonly written: string; readonly at: readonly number[] }>()
   /**
    * The kind and text of each token in a view's source, lexed on its own. A span from a
    * token's start or a token's end to a token's end lexes as that run of its file's tokens,
@@ -132,12 +151,14 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     let file = lexed.get(span.file)
     if (text !== undefined && !file) {
       const tokens = input.tokens?.get(span.file) ?? Lexer.tokenize(text, span.file).tokens
-      lexed.set(span.file, file = { tokens, written: tokens.map(t => JSON.stringify([t.kind, t.text])) })
+      const pieces = tokens.map(asWritten), at = [0]
+      for (const piece of pieces) at.push(at.at(-1)! + piece.length + 1)
+      lexed.set(span.file, file = { tokens, written: pieces.join(','), at })
     }
     if (file) {
       const first = firstToken(file.tokens, span.start), end = firstToken(file.tokens, span.end)
       const starts = file.tokens[first]?.span.start === span.start || file.tokens[first - 1]?.span.end === span.start
-      if (first < end && starts && file.tokens[end - 1]!.span.end === span.end) return `[${file.written.slice(first, end).join(',')}]`
+      if (first < end && starts && file.tokens[end - 1]!.span.end === span.end) return `[${file.written.slice(file.at[first], file.at[end]! - 1)}]`
     }
     return JSON.stringify(Lexer.tokenize(source(span), span.file).tokens.filter(t => t.kind !== 'endOfFile').map(t => [t.kind, t.text]))
   }
@@ -149,6 +170,8 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     if (byId.has(id)) id = JSON.stringify([span.file, span.start, span.end, kind, name])
     const node: MutableNode = { id, kind, name, source: span, owner, parentId: parent?.id, fingerprint: fingerprint(span), children: [], properties: [], runtimeIds: [] }
     nodes.push(node)
+    // A layer met again under the same id changes the walk up from what is below it.
+    if (byId.has(id)) templated.clear()
     byId.set(id, node)
     if (parent) parent.children.push(id)
     else roots.push(id)
@@ -214,9 +237,16 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     }
   }
 
+  /** Whether a layer is in a row template, or is one: asked of every value of every view, so kept until a layer's id is taken again. */
+  function inTemplate(node: MutableNode): boolean {
+    let known = templated.get(node)
+    if (known === undefined) templated.set(node, known = [...upFrom(node)].some(layer => layer.kind === 'template'))
+    return known
+  }
+
   function property(node: MutableNode, name: string, expr: Expr | null, scope: Scope, capability?: string, reason?: string): AuthoringProperty {
     const value = expr ? classify(expr, scope, tokens, declaredNames, contextual) : { kind: 'literal' as const }
-    const repeated = [...upFrom(node)].some(layer => layer.kind === 'template')
+    const repeated = inTemplate(node)
     const invalid = diagnostics.some(d => d.severity === 'error' && d.span.file === node.source.file && d.span.start < node.source.end && d.span.end >= node.source.start)
     return {
       id: `${node.id}:${node.properties.length}`, name, expression: expr ? source(expr.span) : 'Implicit',
@@ -305,8 +335,9 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     // A syntax error takes the controls of its own file's views, not every file's: a half-typed draft elsewhere
     // is no reason to lock the design, and the planner refuses only changes to the file that does not parse.
     if (!diagnostics.some(d => d.span.file === node.source.file && (isSyntaxError(d) || d.severity === 'error' && d.span.start < node.source.end && d.span.end >= node.source.start))) {
-      const template = [...upFrom(parent)].some(ancestor => ancestor.kind === 'template')
-      const controls = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget).map(r => ({ ...r.control, scope: template ? 'All rows in this template' : r.control.scope, description: r.control.id.startsWith('fill:') ? `${r.control.description} Parent: ${parent.name}. Hug uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : r.control.description }))
+      const template = inTemplate(parent)
+      // A control that keeps its scope and description is kept as it is, rather than copied.
+      const controls = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget).map(({ control }) => template || control.id.startsWith('fill:') ? { ...control, scope: template ? 'All rows in this template' : control.scope, description: control.id.startsWith('fill:') ? `${control.description} Parent: ${parent.name}. Hug uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : control.description } : control)
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }

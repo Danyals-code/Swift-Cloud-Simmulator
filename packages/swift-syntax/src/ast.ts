@@ -914,7 +914,7 @@ export function forEachChild(node: Node, visit: (child: Node) => void): void {
       node.members.forEach(visit)
       return
     case 'macroDecl':
-      node.args.forEach((a) => visit(a.value))
+      for (const a of node.args) visit(a.value)
       if (node.body) visit(node.body)
       return
 
@@ -1022,12 +1022,13 @@ export function forEachChild(node: Node, visit: (child: Node) => void): void {
       return
     case 'call':
       visit(node.callee)
-      node.args.forEach((a) => visit(a.value))
+      // A loop, not a closure for each call: every pass over a project walks every call.
+      for (const a of node.args) visit(a.value)
       if (node.trailingClosure) visit(node.trailingClosure)
       return
     case 'subscript':
       visit(node.base)
-      node.args.forEach((a) => visit(a.value))
+      for (const a of node.args) visit(a.value)
       return
     case 'closure':
       node.captures?.forEach(capture => visit(capture.value))

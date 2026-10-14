@@ -33,14 +33,14 @@ export function offMarkerText(marker: string): string | undefined {
   try { const value: unknown = JSON.parse(match[1]!); return typeof value === 'string' ? value : undefined } catch { return undefined }
 }
 
-/** Every marker in `text`, in order. */
+/** Every marker in `text`, in order. Text without a marker's head has none, and no pattern is made for it. */
 export function offMarkersIn(text: string): IterableIterator<RegExpMatchArray> {
-  return text.matchAll(new RegExp(MARKER, 'g'))
+  return text.includes(HEAD) ? text.matchAll(new RegExp(MARKER, 'g')) : [][Symbol.iterator]()
 }
 
 /** `text` with its markers taken out, so what is left can be searched for a person's comments. */
 export function withoutOffMarkers(text: string): string {
-  return text.replace(new RegExp(MARKER, 'g'), '')
+  return text.includes(HEAD) ? text.replace(new RegExp(MARKER, 'g'), '') : text
 }
 
 const SPACES = /[^\S\r\n]*/y

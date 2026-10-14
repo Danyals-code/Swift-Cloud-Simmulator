@@ -2,7 +2,7 @@ import { SUPPORTED_VIEWS } from './builtins'
 import { deploymentVersion } from '@studio/shared'
 import type { AuthoringNode, CollectionSettings, DesignValue, DesignRecord, RecordField } from '@studio/shared'
 import { afterOffMarkers, Lexer, type Expr, type VarDecl } from '@studio/swift-syntax'
-import { callOf, hasComments, shadowsMember, identifier, insertMember, lineIndent, literal, namedStruct, ownerOf, patch, raw, scalarType, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
+import { callOf, hasComments, shadowsMember, identifier, insertMember, layerById, lineIndent, literal, namedStruct, ownerOf, patch, raw, scalarType, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { swiftString } from './design-controls'
 
 export function recordDeclaration(ctx: FeatureContext, variable: VarDecl): { name: string; fields: RecordField[]; signature: string } | undefined {
@@ -76,10 +76,10 @@ export function collectionFor(ctx: FeatureContext, node: AuthoringNode): Collect
   return { name: variable.name, owner: node.owner, signature: schema.signature, recordType: schema.name, fields: schema.fields, records, binding: value.name.startsWith('$'), parameter: closure.params[0]!.name.replace(/^\$/, ''), source: variable.initializer.span, mutable: !variable.isLet && variable.attributes.some(a => a.name === 'State'), templateId: node.children.find(id => ctx.nodes.find(n => n.id === id)?.kind === 'template') }
 }
 export function enclosingCollection(ctx: FeatureContext, node: AuthoringNode): CollectionSettings | undefined {
-  let parent = ctx.nodes.find(n => n.id === node.parentId)
+  let parent = layerById(ctx, node.parentId)
   while (parent) {
     if (parent.kind === 'collection') return collectionFor(ctx, parent)
-    parent = ctx.nodes.find(n => n.id === parent!.parentId)
+    parent = layerById(ctx, parent.parentId)
   }
   return undefined
 }

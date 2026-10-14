@@ -33,6 +33,7 @@ struct Root: View {
         VStack(spacing: -8) { // a comment
             Text("Item \(count) of \("all".uppercased())") /* trailing */
             Text(#"raw \(not) "quoted""#)${offMarker('.bold()')}
+            Text("👋🏽 and a tab:${'\t'} and a \\ backslash")
             Text("multi") + Text("joined").bold()
             if count > 0 { Text("positive") } else if count < -1 { Text("negative") } else { Text("zero") }
             Button("Tap") { count += 1 }

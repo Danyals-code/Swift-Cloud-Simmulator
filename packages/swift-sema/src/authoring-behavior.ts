@@ -1,7 +1,7 @@
 import { Lexer, type CallExpr, type StructDecl } from '@studio/swift-syntax'
 import { deploymentVersion, isHelperDefinition, tappableProblem } from '@studio/shared'
 import type { AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
-import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, literal, modifierIndent, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
+import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, layerById, literal, modifierIndent, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { collectionFor, recordsSwift } from './authoring-collections'
 import { enumCases, namedActions } from './authoring-components'
 import { styleExpression } from './authoring-resources'
@@ -116,7 +116,7 @@ export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): Beha
   const inputs = stateInputs(ctx, node)
   const bindingState = argument && inputs.find(s => raw(ctx, argument.value.span) === '$' + s.name)
   const type = label === 'text' ? 'String' : label === 'isOn' ? 'Bool' : bindingState?.type ?? (node.name === 'Slider' ? 'Double' : node.name === 'DatePicker' ? 'Date' : node.name === 'ColorPicker' ? 'Color' : 'Int')
-  const collections = node.name === 'Button' ? ctx.nodes.filter(n => n.owner === node.owner && n.kind === 'collection').flatMap(n => { const c = collectionFor(ctx, n); return c ? [c] : [] }).filter((c, i, a) => a.findIndex(other => other.name === c.name) === i) : []
+  const collections = node.name === 'Button' ? collectionLayers(ctx, node.owner).flatMap(n => { const c = collectionFor(ctx, n); return c ? [c] : [] }).filter((c, i, a) => a.findIndex(other => other.name === c.name) === i) : []
   const withTitle = node.name === 'Button' && call.args.length === 1 && call.args[0]?.label === null
   const canConfigureAction = (withTitle || labelledButton(call)) && !!call.trailingClosure && call.trailingClosure.params.length === 0
   // Any other view When tapped can make tappable, as a card or a row is (D16).
@@ -126,9 +126,25 @@ export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): Beha
   return { appear, states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' || canMakeTappable ? tapDestinations(ctx, node) : [], canConfigureAction, canMakeTappable, titled: withTitle && call.args[0]!.value.kind === 'stringLiteral', currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined }
 }
 
+/** Each owner's collection layers, in their order: every Button asks for its own owner's. */
+const collectionCache = new WeakMap<FeatureContext, Map<string, AuthoringNode[]>>()
+function collectionLayers(ctx: FeatureContext, owner: string): readonly AuthoringNode[] {
+  let byOwner = collectionCache.get(ctx)
+  if (!byOwner) {
+    collectionCache.set(ctx, byOwner = new Map())
+    for (const layer of ctx.nodes) {
+      if (layer.kind !== 'collection') continue
+      const owned = byOwner.get(layer.owner)
+      if (owned) owned.push(layer)
+      else byOwner.set(layer.owner, [layer])
+    }
+  }
+  return byOwner.get(owner) ?? []
+}
+
 /** The objects a view reads from its surroundings, by type. */
 const environmentObjects = (ctx: FeatureContext, decl: StructDecl | undefined) => decl?.members.flatMap(m => m.kind === 'varDecl' && m.typeAnnotation && m.attributes.some(a => a.name === 'EnvironmentObject') ? [raw(ctx, m.typeAnnotation.span).replace(/\s/g, '')] : []) ?? []
-const screenCache = new WeakMap<FeatureContext, { root?: string; screens: { name: string; reads: string[] }[]; opened: Map<string, Map<StructDecl | undefined, string[]>> }>()
+const screenCache = new WeakMap<FeatureContext, { root?: string; screens: { name: string; reads: string[] }[]; opened: Map<string, Map<StructDecl | undefined, string[]>>; reachable: Map<string, string[]> }>()
 /**
  * The screens a tap on `node` can open: made with no values, or needing only an object
  * its own screen reads from its surroundings, which a pushed or presented screen
@@ -140,7 +156,7 @@ function tapDestinations(ctx: FeatureContext, node: AuthoringNode): readonly str
   if (!cached) {
     const standalone = (d: StructDecl) => !d.generics.length && !d.members.some(m => m.kind === 'initDecl' || m.kind === 'varDecl' && !m.accessor && !m.initializer && !m.attributes.some(a => ['State', 'Environment', 'EnvironmentObject'].includes(a.name)))
     const screens = ctx.ast.flatMap(f => f.declarations).flatMap(d => d.kind === 'structDecl' && d.inherits.some(t => t.name === 'View') && standalone(d) && namedStruct(ctx, d.name) === d ? [{ name: d.name, reads: environmentObjects(ctx, d) }] : [])
-    cached = { root: appRoot(ctx), screens, opened: new Map() }
+    cached = { root: appRoot(ctx), screens, opened: new Map(), reachable: new Map() }
     screenCache.set(ctx, cached)
   }
   // The same for every view of a screen, so worked out once for each: a list of every screen for each view was quadratic.
@@ -148,8 +164,11 @@ function tapDestinations(ctx: FeatureContext, node: AuthoringNode): readonly str
   cached.opened.set(node.owner, byOwner)
   let opened = byOwner.get(owner)
   if (!opened) {
-    const around = new Set(environmentObjects(ctx, owner))
-    opened = cached.screens.filter(screen => screen.name !== node.owner && screen.name !== cached.root && screen.reads.every(type => around.has(type))).map(screen => screen.name)
+    // The screens open to every view that reads the same objects, less the view's own.
+    const around = new Set(environmentObjects(ctx, owner)), key = JSON.stringify([...around].sort())
+    let reachable = cached.reachable.get(key)
+    if (!reachable) cached.reachable.set(key, reachable = cached.screens.filter(screen => screen.name !== cached.root && screen.reads.every(type => around.has(type))).map(screen => screen.name))
+    opened = reachable.filter(name => name !== node.owner)
     byOwner.set(owner, opened)
   }
   return opened
@@ -303,19 +322,19 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
 function appearSite(ctx: FeatureContext, node: AuthoringNode): { by: 'branch' | 'row'; owner: AuthoringNode; value?: string } | { problem: string } {
   const expression = expressionOf(ctx, node), chain = expression && viewCallChain(expression)
   if (!chain || chain.modifiers.some(m => m.callee.kind === 'memberAccess' && ['animation', 'transition'].includes(m.callee.member))) return { problem: 'Existing animation code is developer-owned. Edit it in Swift.' }
-  let parent = ctx.nodes.find(n => n.id === node.parentId), inserted: AuthoringNode | undefined, owner = node
+  let parent = layerById(ctx, node.parentId), inserted: AuthoringNode | undefined, owner = node
   while (parent && parent.kind !== 'definition') {
     if (!inserted && (parent.kind === 'branch' && ['Condition', 'Otherwise', 'Switch'].includes(parent.name) || parent.kind === 'template')) inserted = parent
     // A ForEach lays nothing out, so a modifier on it would land on every row.
     if (inserted && parent.kind !== 'template' && parent.name !== 'ForEach' && expressionOf(ctx, parent)) { owner = parent; break }
-    parent = ctx.nodes.find(n => n.id === parent!.parentId)
+    parent = layerById(ctx, parent.parentId)
   }
   if (!inserted) return { problem: APPEAR_ALWAYS_SHOWN }
   if (owner === node) return { problem: 'An appear animation needs a container that stays while this view comes and goes. Put it in a stack first.' }
   if (viewCallChain(expressionOf(ctx, owner)!)?.modifiers.some(m => m.callee.kind === 'memberAccess' && m.callee.member === 'animation')) return { problem: 'The enclosing container already controls animation. Preserve it and add the transition in Swift.' }
   if (inserted.kind !== 'template') return { by: 'branch', owner }
   // Rows come and go as their collection does: its count changes with every row added or removed.
-  const collection = ctx.nodes.find(n => n.id === inserted!.parentId), data = collection && callOf(ctx, collection)?.args[0]?.value
+  const collection = layerById(ctx, inserted.parentId), data = collection && callOf(ctx, collection)?.args[0]?.value
   const name = data && /^\$?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(raw(ctx, data.span)) ? raw(ctx, data.span).replace(/^\$/, '') : undefined
   const fixed = data?.kind === 'identifier' && ownerOf(ctx, node)?.members.some(m => m.kind === 'varDecl' && m.name === name && m.isLet && !!m.initializer)
   if (!name || fixed) return { problem: 'An appear animation on rows plays as rows are added or removed, and these rows are fixed in the code rather than read from a collection that changes, such as ForEach(items). Add it in Code.' }

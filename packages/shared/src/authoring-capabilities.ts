@@ -144,6 +144,14 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('navigationBarTitleDisplayMode', 'modifier', [[null]], false, '14.0'),
 ]
 
+/** The capabilities of each name, in the table's order: every view and modifier read asks, so the table is not searched whole. */
+const BY_NAME = new Map<string, AuthoringCapability[]>()
+for (const capability of AUTHORING_CAPABILITIES) {
+  const named = BY_NAME.get(capability.name)
+  if (named) named.push(capability)
+  else BY_NAME.set(capability.name, [capability])
+}
+
 export function authoringCapability(name: string, kind: AuthoringCapability['kind'], labels: readonly (string | null)[]): AuthoringCapability | undefined {
-  return AUTHORING_CAPABILITIES.find(c => c.name === name && c.kind === kind && c.forms.some(f => f.length === labels.length && f.every((label, i) => label === labels[i])))
+  return BY_NAME.get(name)?.find(c => c.kind === kind && c.forms.some(f => f.length === labels.length && f.every((label, i) => label === labels[i])))
 }
