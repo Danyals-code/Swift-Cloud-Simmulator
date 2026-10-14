@@ -21,8 +21,8 @@ import type {
 } from '@studio/swift-syntax'
 import { argumentLabels, collectConformance, hoistNestedTypes, valueKind, walk, type TypeNames } from '@studio/swift-syntax'
 import {
+  isAppleCall,
   isKnownGlobal,
-  isKnownModifier,
   isViewRoot,
   EXTENSIBLE_BUILTIN_TYPES,
   KNOWN_ATTRIBUTES,
@@ -38,6 +38,7 @@ import {
   BLEND_MODES,
   STYLE_TOKENS,
   UNIMPLEMENTED_MODIFIERS,
+  APPLE_VIEW_MODIFIERS,
   UNIMPLEMENTED_VIEWS,
 } from './builtins'
 import { Scope, type PropertyInfo, type SemanticModel, type TypeInfo } from './model'
@@ -1074,7 +1075,7 @@ export class Checker {
     // `padding(…)` is a call on it - the idiom the whole extension exists for. The
     // checker has no receiver type to confirm that with, and reporting it would put a
     // red error on the most common way to write a reusable modifier.
-    if (this.inViewExtension > 0 && isKnownModifier(name)) return
+    if (this.inViewExtension > 0 && isAppleCall(name)) return
 
     // Inside `extension String`, `uppercased()` is `self.uppercased()`. The standard
     // library's member list is not something this checker holds, so the honest answer
@@ -1152,14 +1153,7 @@ export class Checker {
       return
     }
     if (UNIMPLEMENTED_MODIFIERS.has(member)) {
-      this.report(
-        span,
-        'warning',
-        'unsupported_swiftui_modifier',
-        `'.${member}' is recognised but not applied by the preview. ` +
-          'It is exported to Xcode unchanged.',
-        `.${member}`,
-      )
+      this.report(span, 'warning', 'unsupported_swiftui_modifier', notApplied(member), `.${member}`)
       return
     }
 
@@ -1174,6 +1168,11 @@ export class Checker {
     // know - `.frame(width: size.rounded())` - but those sit under an argument, not
     // on the chain, so they never reach here.
     if (NON_MODIFIER_MEMBERS.has(member)) return
+    // A real SwiftUI modifier on a view, which the preview does not draw: one Xcode builds.
+    if (APPLE_VIEW_MODIFIERS.has(member)) {
+      this.report(span, 'warning', 'unsupported_swiftui_modifier', notApplied(member), `.${member}`)
+      return
+    }
 
     this.report(
       span,
@@ -1442,6 +1441,11 @@ export class Checker {
 }
 
 /** The callee of the call a chain of modifiers is rooted at: `RatingView` in `RatingView().padding()`. */
+/** What the preview says of a real SwiftUI modifier it does not apply, which Xcode builds as written. */
+function notApplied(member: string): string {
+  return `'.${member}' is recognized but not applied by the preview. It is exported to Xcode unchanged.`
+}
+
 function rootCallee(expr: Expr): Expr | null {
   let current: Expr = expr
   while (current.kind === 'call' && current.callee.kind === 'memberAccess' && current.callee.base) current = current.callee.base

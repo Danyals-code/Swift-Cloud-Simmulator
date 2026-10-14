@@ -3,6 +3,7 @@ import { authoringCapability, type AuthoringNode, type SourceSpan } from '@studi
 import { Lexer, type CallExpr, type Expr } from '@studio/swift-syntax'
 import { controlKind, type ControlKind, type ControlRecipe } from './design-controls'
 import { EDGE_SET_MEMBERS } from './structural-check'
+import { isAppleCall } from './builtins'
 
 const anchors = ['center', 'topLeading', 'top', 'topTrailing', 'leading', 'trailing', 'bottomLeading', 'bottom', 'bottomTrailing']
 const edges = EDGE_SET_MEMBERS
@@ -57,7 +58,8 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
     const resizing = modifiers.filter(m => ['resizable', 'scaledToFit', 'scaledToFill'].includes(nameOf(m)) || contentMode(m))
     const ratio = modifiers.some(m => nameOf(m) === 'aspectRatio' && !contentMode(m))
     const span = { ...base.span, start: base.span.end, end: modifiers.at(-1)?.span.end ?? base.span.end }
-    if (safe(span) && !ratio && resizing.every(m => m.args.length === 0 || contentMode(m)) && modifiers.every(m => authoringCapability(nameOf(m), 'modifier', m.args.map(a => a.label)))) {
+    // The rest of the chain is kept as written after the sizing; a project's own modifier may need the Image itself.
+    if (safe(span) && !ratio && resizing.every(m => m.args.length === 0 || contentMode(m)) && modifiers.every(m => isAppleCall(nameOf(m)))) {
       const mode = resizing.some(m => nameOf(m) === 'scaledToFill' || contentMode(m) === 'fill') ? 'Fill' : resizing.some(m => nameOf(m) === 'scaledToFit' || contentMode(m) === 'fit') ? 'Fit' : resizing.some(m => nameOf(m) === 'resizable') ? 'Stretch' : 'Intrinsic'
       add('image:sizing', 'Image sizing', 'select', mode, value => {
         const retained = modifiers.filter(m => !resizing.includes(m)).map(m => text.slice(m.callee.kind === 'memberAccess' ? m.callee.base!.span.end : m.span.start, m.span.end)).join('')
@@ -120,7 +122,9 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
       // Only `Edge.Set`'s own members are edges: `.space16` or `Layout.padding` there is the amount, a token or constant.
       const edgeSet = first?.kind === 'memberAccess' && edges.includes(first.member) && (!first.base || /^(?:SwiftUI\.)?Edge\.Set$/.test(raw(first.base.span).replace(/\s/g, '')))
       if (edgeSet || first?.kind === 'arrayLiteral') {
-        if (first.kind === 'memberAccess') replace(id + ':edges', 'Padding edges', first, 'select', edges)
+        // Every edge is a padding's own default, so `.all` is written as no edge at all: `.padding(8)`.
+        const amount = m.args[1], edge = first.kind === 'memberAccess' ? { ...first.span, end: amount?.span.start ?? first.span.end } : undefined
+        if (first.kind === 'memberAccess') add(id + ':edges', 'Padding edges', 'select', first.member, v => v === 'all' && safe(edge!) ? { ...edge!, text: '' } : { ...first.span, text: `${first.base ? raw(first.base.span) : ''}.${v}` }, edges, undefined, undefined, undefined, first.span)
         else if (safe(first.span) && first.elements.every(e => e.kind === 'memberAccess' && !e.base && edges.includes(e.member))) {
           for (const edge of ['top', 'leading', 'bottom', 'trailing']) add(id + ':' + edge, `Pad ${edge}`, 'toggle', String(first.elements.some(e => e.kind === 'memberAccess' && (e.member === edge || e.member === 'all' || e.member === 'horizontal' && ['leading', 'trailing'].includes(edge) || e.member === 'vertical' && ['top', 'bottom'].includes(edge)))), value => {
             const selected = new Set(first.elements.flatMap(e => e.kind !== 'memberAccess' ? [] : e.member === 'all' ? ['top', 'leading', 'bottom', 'trailing'] : e.member === 'horizontal' ? ['leading', 'trailing'] : e.member === 'vertical' ? ['top', 'bottom'] : [e.member]))
@@ -128,8 +132,8 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
             return { ...first.span, text: '[' + [...selected].map(e => '.' + e).join(', ') + ']' }
           })
         }
-        if (!m.args[1]) add(id + ':amount', 'Padding amount', 'pt', '', v => ({ start: first.span.end, end: first.span.end, text: ', ' + v }))
-      } else if (!first || ['integerLiteral', 'floatLiteral', 'unary'].includes(first.kind)) add(id + ':edges', 'Padding edges', 'select', 'all', v => first ? { start: first.span.start, end: first.span.start, text: `.${v}, ` } : insert(m, null, `.${v}, 16`), edges)
+        if (!m.args[1]) add(id + ':amount', 'Padding amount', 'pt', '', v => first.kind === 'memberAccess' && first.member === 'all' ? { ...first.span, text: v } : { start: first.span.end, end: first.span.end, text: ', ' + v })
+      } else if (!first || ['integerLiteral', 'floatLiteral', 'unary'].includes(first.kind)) add(id + ':edges', 'Padding edges', 'select', 'all', v => v === 'all' ? { start: m.span.end, end: m.span.end, text: '' } : first ? { start: first.span.start, end: first.span.start, text: `.${v}, ` } : insert(m, null, `.${v}, 16`), edges)
     }
     if (name === 'frame' && !m.args.some(a => a.label === 'width' || a.label === 'height')) {
       const order = ['minWidth', 'idealWidth', 'maxWidth', 'minHeight', 'idealHeight', 'maxHeight', 'alignment']

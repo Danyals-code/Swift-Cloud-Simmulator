@@ -3,7 +3,10 @@ import { Parser, afterOffMarkers, hasHumanComment, offMarker, offMarkerText, off
 import { roundedCorners, viewCallChain } from './design-controls'
 import { NEW_BORDER, borderOf, borderSource, cornersOf, type Corners } from './authoring-border'
 import { authoringViewMinimum } from './authoring-view'
-import { SUPPORTED_MODIFIERS } from './builtins'
+import { APPLE_VIEW_MODIFIERS, KEEPS_TEXT, MODIFIER_CATEGORIES, SUPPORTED_MODIFIERS, isAppleCall } from './builtins'
+import { modifierPrefix } from './layer/chain-edit'
+import { runRefusal } from './layer/context'
+import { chainSlots } from './layer/slots'
 
 /**
  * The modifier stack: everything written after a view is created, in source order.
@@ -110,9 +113,8 @@ const CATALOG: readonly CatalogEntry[] = [
   { name: 'navigationTitle', label: 'Screen title', category: 'behavior', slot: SLOT.behaviour, description: 'The title in the navigation bar', minimumIOS: 14, source: () => '.navigationTitle("Title")' },
   { name: 'navigationBarTitleDisplayMode', label: 'Title size', category: 'behavior', slot: SLOT.behaviour, description: 'Large or inline title', minimumIOS: 14, source: () => '.navigationBarTitleDisplayMode(.inline)' },
 ]
-const BEHAVIOR = new Set(['task', 'onAppear', 'onDisappear', 'onChange', 'onReceive', 'onTapGesture', 'onLongPressGesture', 'onSubmit', 'onDelete', 'onMove', 'gesture', 'simultaneousGesture', 'highPriorityGesture', 'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'popover', 'navigationDestination', 'navigationTitle', 'navigationBarTitleDisplayMode', 'toolbar', 'tabItem', 'tag', 'id', 'environment', 'environmentObject', 'disabled', 'allowsHitTesting', 'animation', 'transition', 'searchable', 'contextMenu', 'accessibilityLabel', 'accessibilityIdentifier', 'accessibilityValue', 'accessibilityHint', 'accessibilityHidden'])
-const LAYOUT = new Set(['offset', 'position', 'fixedSize', 'alignmentGuide', 'safeAreaInset', 'containerRelativeFrame', 'layoutPriority', 'aspectRatio', 'scaledToFit', 'scaledToFill', 'ignoresSafeArea'])
-const TEXT = new Set(['bold', 'italic', 'fontWeight', 'fontDesign', 'multilineTextAlignment', 'textCase', 'underline', 'strikethrough', 'kerning', 'tracking', 'baselineOffset', 'lineSpacing', 'minimumScaleFactor', 'truncationMode', 'allowsTightening', 'monospacedDigit'])
+/** What a modifier SwiftUI has, and the preview does not draw, says on its card. */
+const NOT_DRAWN = 'Not drawn in the preview'
 const LABELS: Readonly<Record<string, string>> = { task: 'Task', onAppear: 'When shown', onDisappear: 'When hidden', onChange: 'When value changes', onTapGesture: 'When tapped', onLongPressGesture: 'When held', resizable: 'Resize image', scaledToFit: 'Fit', scaledToFill: 'Fill', fill: 'Shape fill', sheet: 'Opens a sheet', fullScreenCover: 'Opens full screen', navigationDestination: 'Push destination', popover: 'Opens a popover', alert: 'Alert', toolbar: 'Toolbar', overlay: 'Overlay', tabItem: 'Tab bar item' }
 const friendly = (name: string) => CATALOG.find(c => c.name === name)?.label ?? LABELS[name] ?? name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase())
 const nameOf = (call: CallExpr) => call.callee.kind === 'memberAccess' ? call.callee.member : 'unknown'
@@ -122,11 +124,13 @@ const SHAPES = new Set(['Rectangle', 'RoundedRectangle', 'UnevenRoundedRectangle
 const PAINT_SLOTS: Readonly<Record<string, number>> = { fill: SLOT.fill, glassEffect: SLOT.fill, stroke: SLOT.stroke, strokeBorder: SLOT.stroke }
 /** Where a modifier usually sits in a chain, from text styles to behaviour; 99 for one the studio does not place. */
 export function slotOf(name: string): number {
-  return CATALOG.find(c => c.name === name)?.slot ?? PAINT_SLOTS[name] ?? (TEXT.has(name) ? SLOT.text : LAYOUT.has(name) ? SLOT.offset : BEHAVIOR.has(name) ? SLOT.behaviour : 99)
+  return CATALOG.find(c => c.name === name)?.slot ?? PAINT_SLOTS[name] ?? (MODIFIER_CATEGORIES.text.has(name) ? SLOT.text : MODIFIER_CATEGORIES.layout.has(name) ? SLOT.offset : MODIFIER_CATEGORIES.behavior.has(name) ? SLOT.behaviour : 99)
 }
 
+/** Where a modifier is listed: Apple's in what it does, whether or not the preview draws it, and a project's own as custom. */
 function category(name: string): ModifierCategory {
-  return CATALOG.find(c => c.name === name)?.category ?? (BEHAVIOR.has(name) ? 'behavior' : LAYOUT.has(name) ? 'layout' : TEXT.has(name) ? 'text' : SUPPORTED_MODIFIERS.has(name) ? 'appearance' : 'custom')
+  const listed = (['behavior', 'layout', 'text'] as const).find(group => MODIFIER_CATEGORIES[group].has(name))
+  return CATALOG.find(c => c.name === name)?.category ?? listed ?? (isAppleCall(name) ? 'appearance' : 'custom')
 }
 
 // ---------------------------------------------------------------- the off marker
@@ -223,8 +227,24 @@ function offCall(original: string): { call: CallExpr; text: string } | undefined
   return { call: declaration.initializer, text }
 }
 
-/** The UI receives all source occurrences, including ones it cannot change. */
-export function modifierModel(node: AuthoringNode, expr: Expr, text: string, deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, allowEdits = true): { modifiers: AuthoringModifier[]; modifierCatalog: ModifierCatalogEntry[] } {
+/** What keeps every entry of a chain where it is written. */
+function heldInPlace(parsed: { base: CallExpr; end: number }, text: string, file: string): { commented: boolean; conditional: boolean } {
+  return {
+    // Only comments a person wrote pin the chain; the studio's own off markers never do.
+    commented: hasHumanComment(text.slice(parsed.base.span.end, parsed.end), file) || /^[^\S\r\n]*(?:\/\/|\/\*)/.test(withoutOffMarkers(text.slice(parsed.end))),
+    // A `#if` line goes with the modifier after it, so moving, removing or switching off any of
+    // them would change which builds apply which, or leave a clause unclosed.
+    conditional: DIRECTIVE_LINE.test(text.slice(parsed.base.span.end, parsed.end)),
+  }
+}
+
+/**
+ * The UI receives all source occurrences, including ones it cannot change. `allowEdits` is
+ * false while the view's source has a problem to resolve first, and a run of joined text
+ * (`node.textRun`) takes only what keeps it a Text (`KEEPS_TEXT`).
+ */
+export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, allowEdits = true }: { deploymentTarget?: string; allowEdits?: boolean } = {}): { modifiers: AuthoringModifier[]; modifierCatalog: ModifierCatalogEntry[] } {
+  const run = !!node.textRun
   const parsed = segmentsOf(expr, text)
   if (!parsed) return { modifiers: [], modifierCatalog: [] }
   const { segments } = parsed
@@ -235,11 +255,7 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
   const locked = !allowEdits ? 'Resolve source diagnostics or edit this view in Code.'
     : minimumViewVersion !== undefined && version < minimumViewVersion ? `${node.name} needs iOS ${minimumViewVersion} or newer. Change the deployment target to edit it here.`
       : 'This view is kept exactly as written, so its modifiers are changed in Code.'
-  // Only comments a person wrote pin the chain; the studio's own off markers never do.
-  const commented = hasHumanComment(text.slice(parsed.base.span.end, parsed.end), node.source.file) || /^[^\S\r\n]*(?:\/\/|\/\*)/.test(withoutOffMarkers(text.slice(parsed.end)))
-  // A `#if` line goes with the modifier after it, so moving, removing or switching off any of
-  // them would change which builds apply which, or leave a clause unclosed.
-  const conditional = DIRECTIVE_LINE.test(text.slice(parsed.base.span.end, parsed.end))
+  const { commented, conditional } = heldInPlace(parsed, text, node.source.file)
   const pinned = commented || conditional
   const pinnedReason = conditional ? 'A #if in this modifier chain decides which builds apply these modifiers. Change their order in Code.' : undefined
   const corners = cornersOf(viewCallChain(expr), text)
@@ -272,18 +288,22 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
     const reason = !editable ? locked : pinnedReason ?? (commented ? 'Comments in this modifier chain need to stay attached. Change values here or reorder in Code.' : !movable[index] ? category(name) === 'behavior' ? 'This behavior stays in its source position.' : !known ? 'This modifier is preserved; its structure is edited in Code.' : 'This modifier has type or content requirements. Change its structure in Code.' : undefined)
     const propertyIds = node.properties.filter(p => p.source && p.source.start >= start && p.source.end <= call.span.end).map(p => p.id)
     const linked = node.properties.find(p => p.source && p.source.start >= start && p.source.end <= call.span.end && p.valueKind === 'token')
-    const summary = controls.filter(c => !c.id.startsWith('fill:')).map(c => c.value || 'Default').join(' · ') || (linked ? linked.expression : category(name) === 'custom' ? 'Custom modifier' : call.trailingClosure ? category(name) === 'behavior' ? 'Configured action' : 'View content' : call.args.length ? 'Linked or advanced value' : 'On')
+    const drawn = SUPPORTED_MODIFIERS.has(name) || !isAppleCall(name)
+    const summary = controls.filter(c => !c.id.startsWith('fill:')).map(c => c.value || 'Default').join(' · ') || (linked ? linked.expression : !drawn ? NOT_DRAWN : category(name) === 'custom' ? 'Custom modifier' : call.trailingClosure ? category(name) === 'behavior' ? 'Configured action' : 'View content' : call.args.length ? 'Linked or advanced value' : 'On')
     const { reason: _unused, ...caps } = capabilitiesOf(reason)
     void _unused
     const fillsIn = onlyStroke(segment)
-    return { id: JSON.stringify([source.file, call.span.start, call.span.end, expression]), name, label: friendly(name), category: category(name), summary, expression, source: { ...call.span, start }, controls, propertyIds, enabled: true, capabilities: { edit: editable && controls.length > 0, ...caps, ...(fillsIn ? { toggle: false } : {}), reason: fillsIn ? 'Switched off, this stroke would leave the shape filled in. Change it in Code.' : reason } }
+    return { id: JSON.stringify([source.file, call.span.start, call.span.end, expression]), name, label: friendly(name), category: category(name), summary, expression, source: { ...call.span, start }, controls, propertyIds, enabled: true, ...drawn ? {} : { drawn: false as const }, capabilities: { edit: editable && controls.length > 0, ...caps, ...(fillsIn ? { toggle: false } : {}), reason: fillsIn ? 'Switched off, this stroke would leave the shape filled in. Change it in Code.' : reason } }
   })
-  const unknown = segments.some(segment => segment.call && !SUPPORTED_MODIFIERS.has(nameOf(segment.call)))
+  // A project's own modifier may return anything, so nothing is added beside it; Apple's return `some View`.
+  const unknown = segments.some(segment => segment.call && !isAppleCall(nameOf(segment.call)))
   const available = editable && !unknown
   return { modifiers, modifierCatalog: CATALOG.filter(entry => !entry.only || entry.only.includes(node.name)).map(entry => {
-    const minimum = Math.max(entry.minimumIOS ?? 13, Number.parseFloat(authoringCapability(entry.name, 'modifier', [null])?.minimumIOS ?? '13'))
-    const supported = available && version >= minimum
-    return { name: entry.name, label: entry.label, category: entry.category, description: entry.description, ...(entry.hidden ? { hidden: true } : {}), available: supported, reason: supported ? undefined : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : available ? `Needs iOS ${minimum} or newer. Change the deployment target to use it.` : node.name === 'Tab' && node.kind !== 'component' ? 'Select the view inside this tab to style its content.' : !allowEdits ? 'This view cannot be changed until its source is resolved.' : locked }
+    const minimum = Math.max(entry.minimumIOS ?? 13, Number.parseFloat(authoringCapability(entry.name, 'modifier', [null])?.minimumIOS ?? '13'), run ? KEEPS_TEXT[entry.name] ?? 13 : 13)
+    const styleOnly = !run || entry.name in KEEPS_TEXT
+    const supported = available && styleOnly && version >= minimum
+    const reason = !styleOnly ? runRefusal(`Put the joined text in parentheses in Code to give all of it ${entry.label.toLowerCase()}.`) : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : available ? `Needs iOS ${minimum} or newer. Change the deployment target to use it.` : node.name === 'Tab' && node.kind !== 'component' ? 'Select the view inside this tab to style its content.' : !allowEdits ? 'This view cannot be changed until its source is resolved.' : locked
+    return { name: entry.name, label: entry.label, category: entry.category, description: entry.description, ...(entry.hidden ? { hidden: true } : {}), available: supported, reason: supported ? undefined : reason }
   }) }
 }
 
@@ -291,7 +311,7 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
 export function editModifier(node: AuthoringNode, expr: Expr, text: string, operation: ModifierOperation, deploymentTarget?: string, options: { shadowToken?: string } = {}): string {
   const parsed = segmentsOf(expr, text)
   if (!parsed) throw new Error('Select a view with an editable modifier chain.')
-  const model = modifierModel(node, expr, text, deploymentTarget)
+  const model = modifierModel(node, expr, text, { deploymentTarget })
   const { segments } = parsed
   const slices = segments.map(s => text.slice(s.start, s.end))
   const chainStart = segments[0]?.start ?? expr.span.end
@@ -304,14 +324,19 @@ export function editModifier(node: AuthoringNode, expr: Expr, text: string, oper
       index = model.modifiers.findIndex(m => m.id === operation.before)
       if (index < 0) throw new Error('The modifier insertion point changed. Select the view again.')
     } else index = placement(model.modifiers, entry.slot)
-    // Inserting before a type-specific operation can make otherwise valid Swift invalid.
-    if (index < segments.length && model.modifiers.slice(index).some(m => !m.capabilities.remove)) {
+    // Inserting before a call only the view's own type takes, or one the project declares, can make
+    // otherwise valid Swift invalid, and a comment or `#if` keeps every entry where it is. Any of
+    // Apple's view modifiers returns `some View`, so a new one can go before it.
+    const held = Object.values(heldInPlace(parsed, text, node.source.file)).some(Boolean)
+    const pinned = (modifier: AuthoringModifier) => !modifier.capabilities.remove && (held || !APPLE_VIEW_MODIFIERS.has(modifier.name))
+    if (index < segments.length && model.modifiers.slice(index).some(pinned)) {
       if (operation.before !== undefined) throw new Error('Add this modifier after the pinned entries to preserve their type and behavior requirements.')
       index = segments.length
     }
     const at = index < segments.length ? segments[index]!.start : parsed.end
-    const lastPrefix = slices.at(-1)?.match(/^\s*/)?.[0] ?? ''
-    const prefix = /\r?\n/.test(lastPrefix) ? lastPrefix : ''
+    // On a line of its own where the chain has its modifiers on lines of their own, and under a block's closing brace.
+    const slots = chainSlots(expr, text)
+    const prefix = slots ? modifierPrefix(slots, text) : ''
     const corners = cornersOf(viewCallChain(expr), text)
     return text.slice(0, at) + prefix + entry.source({ target: deploymentVersion(deploymentTarget), shadowToken: options.shadowToken, corners, indent: prefix ? prefix.replace(/^\r?\n/, '') : null }) + text.slice(at)
   }

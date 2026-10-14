@@ -1,9 +1,9 @@
 'use client'
 
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { argumentLayerProblem, groupLayoutOf, isStructuralLayer, layerMoveProblem, tappableProblem, LAYER_MOVE_CONTAINERS, LAYOUT_WORDS } from '@studio/shared'
+import { argumentLayerProblem, groupLayoutOf, helperPlaces, isHelperCall, isHelperDefinition, isStructuralLayer, layerMoveProblem, tappableProblem, LAYER_MOVE_CONTAINERS, LAYOUT_WORDS } from '@studio/shared'
 import type { AuthoringNode, AuthoringSelection, AuthoringSnapshot, DesignEditRequest, HiddenViewInfo, SourceFile, SourceSpan, ViewLayer } from '@studio/shared'
-import { rebaseSourceLayers, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from '../lib/sourceLayers'
+import { rebaseSourceLayers, sourceLayerHelperReach, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from '../lib/sourceLayers'
 import { Icon, type IconName } from './ui/Icon'
 import { MenuButton, type MenuItem } from './ui/Menu'
 import { eventLog } from '../lib/eventLog'
@@ -77,7 +77,8 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
   const [organizing, setOrganizing] = useState<{ node: AuthoringNode; kind: 'rename' | 'reparent' } | null>(null)
   const [draft, setDraft] = useState('')
   const [destination, setDestination] = useState('')
-  const labelFor = (node: AuthoringNode) => labels.find(l => l.owner === node.owner && l.fingerprint === node.fingerprint && (l.offset === undefined || l.offset === node.source.start))?.label ?? sourceLayerLabel(node)
+  /** A layer's name: the one the designer gave it, else the words it draws on the phone, else its content or kind. */
+  const labelFor = (node: AuthoringNode, drawn?: string) => labels.find(l => l.owner === node.owner && l.fingerprint === node.fingerprint && (l.offset === undefined || l.offset === node.source.start))?.label ?? drawn ?? sourceLayerLabel(node)
   const [ownQuery, setQuery] = useState('')
   const query = externalQuery ?? ownQuery
   const [expandNext, setExpandNext] = useState(false)
@@ -146,7 +147,8 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
   const idsFor = (node: AuthoringNode) => selectedIds.includes(node.id) ? selectedIds : [node.id]
   /** The first of the layers selected together, where their group goes. */
   const groupFirst = nodes.get(selectedIds[0] ?? '')
-  const menus = (node: AuthoringNode): MenuItem[] => {
+  /** A layer's actions; `unused` is a helper nothing calls, which can go (Wave 3a). */
+  const menus = (node: AuthoringNode, unused = false): MenuItem[] => {
     const siblings = nodes.get(node.parentId ?? '')?.children ?? []
     const index = siblings.indexOf(node.id)
     const writable = editable && !!onEdit && !disabled
@@ -169,7 +171,8 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
     ]
     return [
       ...(node.kind === 'template' ? [{ value: 'enter', label: 'Edit row design' }] : []),
-      ...(node.definitionId ? [{ value: 'enter', label: 'Edit main component' }] : []),
+      ...(node.definitionId ? [{ value: 'enter', label: isHelperCall(node) ? `Edit ${node.name} on its own` : 'Edit main component' }] : []),
+      ...(unused ? [{ value: 'delete', label: `Remove ${node.name}`, disabled: !writable }] : []),
       ...(isStructuralLayer(node) || slotProblem ? [
         { value: 'rename', label: 'Rename layer…', disabled: !writable || !onRename },
         ...structure.map(item => slotProblem ? { ...item, title: slotProblem } : item),
@@ -193,7 +196,7 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
     <span className={styles.move}><button type="button" data-testid="layer-show" disabled={disabled || !editable || !onShow} aria-label={`Show ${view.name}`} title="Restore this view" onClick={() => onShow?.(view)}><Icon name="eye-off" size={14} /></button></span>
   </div>)
   return <section className={embedded ? styles.embedded : styles.panel} aria-label="Design layers" data-testid="logical-layers">
-    {!embedded && <div className={styles.heading}><span>{entry ? entry.kind === 'template' ? 'Row design' : entry.kind === 'branch' ? 'Page' : 'The Main' : pageName ? `${pageName} layers` : 'Layers'}</span><button type="button" data-testid="collapse-layers" title={expandNext ? 'Expand all layers' : 'Collapse all layers'} aria-label={expandNext ? 'Expand all layers' : 'Collapse all layers'} onClick={() => {
+    {!embedded && <div className={styles.heading}><span>{entry ? entry.kind === 'template' ? 'Row design' : entry.kind === 'branch' ? 'Page' : isHelperDefinition(entry) ? entry.name : 'The Main' : pageName ? `${pageName} layers` : 'Layers'}</span><button type="button" data-testid="collapse-layers" title={expandNext ? 'Expand all layers' : 'Collapse all layers'} aria-label={expandNext ? 'Expand all layers' : 'Collapse all layers'} onClick={() => {
       const ids = new Set(snapshot.nodes.map(node => node.id))
       setQuery('')
       setNavigation(state => ({
@@ -204,21 +207,27 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
       }))
       setExpandNext(value => !value)
     }}><Icon name={expandNext ? 'expand' : 'collapse'} size={14} /></button></div>}
-    {entry && <div className={styles.context}><button type="button" onClick={() => setNavigation(state => ({ ...state, entered: undefined, dismissedEntry: selected }))}>{pageName || 'All screens'}</button><Icon name="chevron-right" size={12} /><span>{entry.kind === 'template' ? 'Row design' : sourceLayerLabel(entry)}</span>{entry.kind !== 'branch' && <p>{entry.kind === 'template' ? 'Changes affect all rows using this design.' : 'Changes affect every instance of this component.'}</p>}</div>}
+    {entry && <div className={styles.context}><button type="button" onClick={() => setNavigation(state => ({ ...state, entered: undefined, dismissedEntry: selected }))}>{pageName || 'All screens'}</button><Icon name="chevron-right" size={12} /><span>{entry.kind === 'template' ? 'Row design' : sourceLayerLabel(entry)}</span>{entry.kind !== 'branch' && <p>{entry.kind === 'template' ? 'Changes affect all rows using this design.' : isHelperDefinition(entry) ? sourceLayerHelperReach(entry) : 'Changes affect every instance of this component.'}</p>}</div>}
     <div ref={tree} className={embedded ? styles.embeddedTree : styles.tree} role={embedded ? 'group' : 'tree'} aria-multiselectable="true" aria-label="Design layers" aria-busy={disabled} inert={disabled || undefined} onMouseLeave={() => onHover?.(null)}>
-      {rows.map(({ node, depth, expanded: modelExpanded, parentId, children, shared }, index) => {
+      {rows.map(({ node, depth, expanded: modelExpanded, parentId, children, shared, key, places, unused, label: drawn }, index) => {
         const ownHidden = placedHidden.filter(item => item.owner === node.id).map(item => item.view)
         const expandable = children.length > 0 || ownHidden.length > 0
         // A row with children is open exactly when its children are listed; one holding only hidden views opens for them.
         const expanded = modelExpanded || !children.length && ownHidden.length > 0 && !current.closed.has(node.id)
-        const actions = menus(node)
+        const actions = menus(node, unused)
         const displayDepth = depth
         const notShown = sourceLayerNotShown(snapshot, node)
-        const label = labelFor(node), type = sourceLayerType(node)
+        const label = labelFor(node, drawn), type = unused ? 'Not used' : sourceLayerType(node)
         const canDrag = editable && !!onEdit && !disabled && isStructuralLayer(node)
-        return <Fragment key={node.id}>
+        return <Fragment key={key}>
           <div className={styles.row} style={{ paddingLeft: `min(${indent + displayDepth * INDENT}px, 35%)` }} data-source-id={node.id} data-source-name={node.name} data-source-owner={node.owner} data-source-kind={node.kind} data-shared-design={shared || undefined} role="treeitem" aria-label={`${label}${label !== type ? `, ${type}` : ''}`} aria-level={displayDepth + 1} aria-selected={selectedIds.length > 1 ? selectedIds.includes(node.id) : selectedRow === node.id} data-hovered={hoveredRow === node.id || undefined} aria-expanded={expandable ? expanded : undefined} tabIndex={tabStop === node.id ? 0 : -1} data-inactive={notShown || undefined} data-dragging={drag?.id === node.id || undefined} data-drop={drag?.over === node.id ? drag.position : undefined} draggable={canDrag}
-            onMouseEnter={() => { if (!stale) onHover?.(node, shared ? undefined : runtimeFor(node)) }} onMouseLeave={() => onHover?.(null)}
+            onMouseEnter={() => {
+              if (stale) return
+              // A helper's call the preview could not say it drew stands for its views, wherever the helper is used.
+              const helper = isHelperCall(node) && !node.runtimeIds.length ? nodes.get(node.definitionId ?? '') : undefined
+              if (helper) onHover?.(helper)
+              else onHover?.(node, shared ? undefined : runtimeFor(node))
+            }} onMouseLeave={() => onHover?.(null)}
             onDragStart={event => {
               if (!canDrag) { event.preventDefault(); return }
               event.stopPropagation()
@@ -282,7 +291,8 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
             <span className={styles.icon}><Icon name={ICONS[node.name] ?? (children.length ? 'section' : 'shape')} /></span>
             <span className={styles.name}>{label}</span>
             {drag?.over === node.id && drag.position === 'inside' && <span className={styles.dropLabel}>Move inside</span>}
-            <span className={styles.kind}>{notShown ? 'Not shown' : shared ? 'One design' : node.kind === 'component' ? 'Component' : label !== type ? type : ''}</span>
+            {/* A helper called from several places says how many, short enough to leave its name whole; one nothing calls says so. */}
+            <span className={styles.kind} title={unused ? `Nothing calls ${node.name}. Its views can still be changed, or it can be removed.` : !notShown && !shared && places && places > 1 ? `${helperPlaces(places)}. A change to its views reaches each of them.` : undefined}>{notShown ? 'Not shown' : shared ? 'One design' : places && places > 1 ? `${places} places` : node.kind === 'component' ? type : label !== type ? type : ''}</span>
             {actions.length > 0 && <span className={styles.move} onClick={event => event.stopPropagation()}><MenuButton label={`Actions for ${label}`} items={actions} onSelect={value => action(node, value)} testId="source-layer-actions"><Icon name="ellipsis" size={14} /></MenuButton></span>}
           </div>
           {expanded && hiddenRows(ownHidden, displayDepth + 1)}

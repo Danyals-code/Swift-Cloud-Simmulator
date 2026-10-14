@@ -27,11 +27,17 @@ export const lineEnding = (text: string) => text.includes('\r\n') ? '\r\n' : '\n
 /** Where the text between a modifier and the one before it starts: the end of the one before. */
 const gapStart = (slots: ChainSlots, index: number) => index === 0 ? slots.base.span.end : slots.modifiers[index - 1]!.span.end
 
-/** The whitespace a new modifier is written after: the chain's own, or a line of its own under a block. */
+/**
+ * The whitespace a new modifier is written after: the chain's own, or a line of its own
+ * under a block. A modifier switched off before another is the studio's own comment, and
+ * the line the next one starts on is still the chain's.
+ */
 export function modifierPrefix(slots: ChainSlots, text: string): string {
   for (let index = slots.modifiers.length - 1; index >= 0; index--) {
     const gap = text.slice(gapStart(slots, index), dotOf(slots.modifiers[index]!, text))
     if (/^\s*$/.test(gap) && gap.includes('\n')) return gap
+    const line = /\r?\n[ \t]*$/.exec(gap)?.[0]
+    if (line && /^\s*$/.test(withoutOffMarkers(gap))) return line
   }
   if (slots.modifiers.length) return ''
   // A block on several lines takes its first modifier under its closing brace.

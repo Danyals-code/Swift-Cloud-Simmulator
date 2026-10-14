@@ -3,7 +3,7 @@
 import { SymbolPicker } from './SymbolPicker'
 import { GuidedInteraction } from './GuidedInteraction'
 import { useState } from 'react'
-import { offersWhenTapped, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type ComponentDescription, type ComponentVariant, type BehaviorAction, type DesignRecord, type DesignValue, type RecordField, type PreviewInput, type NavigationDestination } from '@studio/shared'
+import { isHelperDefinition, offersWhenTapped, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type ComponentDescription, type ComponentVariant, type BehaviorAction, type DesignRecord, type DesignValue, type RecordField, type PreviewInput, type NavigationDestination } from '@studio/shared'
 import { defaultRecord, RecordEditor } from './RecordEditor'
 import { parseRecordDrafts } from '../lib/recordDrafts'
 import { newValueDefaults } from '../lib/newValue'
@@ -53,6 +53,7 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
   const template = children.find(n => n.kind === 'template')
   const visualChildren = settingsVisualChildren(snapshot, node)
   const callSites = snapshot?.nodes.filter(n => n.definitionId === node.id) ?? []
+  const helper = isHelperDefinition(node)
   const reusableOwner = snapshot?.nodes.some(n => n.kind === 'component' && n.name === node.owner && snapshot.nodes.find(parent => parent.id === n.parentId)?.name !== 'WindowGroup')
   const textInput = node.controls?.find(c => ['content', 'title'].includes(c.id) && c.kind === 'text')
   // Text rows written alike, or the library's Repeat over a range, become records (D13).
@@ -76,7 +77,10 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
       {onDescribe && <ComponentDescriptionEditor node={node} descriptions={descriptions} onSave={onDescribe} />}
     </section>}
     {section === 'basics' && reusableOwner && textInput && <details><summary>Changeable per copy</summary><p>Let each copy set its own text. Copies that exist now keep “{textInput.value}”.</p><label>Field name<input aria-label="Component input name" value={inputName} onChange={e => setInputName(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'component-expose', control: textInput.id, name: inputName })}>Make text changeable per copy</button></details>}
-    {section === 'basics' && node.kind === 'definition' && <section><h3>The Main</h3><p>Changes here reach all {callSites.length} copies of {node.name}.</p><details><summary>Copies</summary><ul>{callSites.map(site => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · {site.source.file}</button></li>)}</ul></details></section>}
+    {/* A helper is no component: its views are drawn where it is called, which is what it says (Wave 3a). */}
+    {section === 'basics' && node.kind === 'definition' && (helper
+      ? !!callSites.length && <section><h3>Where it is used</h3><details><summary>Places</summary><ul>{callSites.map((site, index) => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · place {index + 1}</button></li>)}</ul></details></section>
+      : <section><h3>The Main</h3><p>Changes here reach all {callSites.length} copies of {node.name}.</p><details><summary>Copies</summary><ul>{callSites.map(site => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · {site.source.file}</button></li>)}</ul></details></section>)}
     {section === 'data' && (node.name === 'List' || node.kind === 'collection') && <section><h3>List content</h3>
       <p>{node.kind === 'collection' ? 'Repeat for each item · one design is used by every row.' : 'Each row has its own content and structure.'}</p>
       {template && <button type="button" onClick={() => onSelect?.(template)}>Edit row design</button>}
@@ -93,11 +97,12 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
     </section>}
     {section === 'basics' && node.kind === 'template' && <section><h3>Row design</h3><p>Select a view to edit the design used by every row.</p>{visualChildren.map(child => <button key={child.id} type="button" onClick={() => onSelect?.(child)}>{sourceLayerLabel(child)}</button>)}<button type="button" disabled={busy} onClick={() => { let parent = snapshot?.nodes.find(n => n.id === node.parentId); const collection = parent; while (parent && parent.name !== 'List') parent = snapshot?.nodes.find(n => n.id === parent!.parentId); if (parent ?? collection) onSelect?.((parent ?? collection)!) }}>List settings</button><button type="button" disabled={busy} onClick={() => void command({ kind: 'insert', snippet: 'Text("New element")' })}>Add element to row template</button><p>Added elements appear in every row.</p></section>}
     {section === 'field' && !!node.fields?.length && <section><h3>Shows the field</h3><label>Field<select aria-label="Row field" value={field} onChange={e => setField(e.target.value)}>{node.fields.map(f => <option key={f}>{f}</option>)}</select></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'bind-field', field })}>Use this field in every row</button></section>}
-    {section === 'basics' && !!children.length && node.kind === 'definition' && <section><h3>Inside the Main</h3>{visualChildren.map(child => <button key={child.id} type="button" onClick={() => onSelect?.(child)}>{sourceLayerLabel(child)}</button>)}</section>}
+    {section === 'basics' && !!children.length && node.kind === 'definition' && <section><h3>{helper ? `Inside ${node.name}` : 'Inside the Main'}</h3>{visualChildren.map(child => <button key={child.id} type="button" onClick={() => onSelect?.(child)}>{sourceLayerLabel(child)}</button>)}</section>}
     {(section === 'interaction' || section === 'advanced') && node.behavior && ((section === 'interaction' ? offersWhenTapped(node.behavior) : node.behavior.canConfigureAction) || node.behavior.binding || node.behavior.states.length > 0) && <BehaviorEditor key={node.id} part={section === 'interaction' ? 'basic' : 'advanced'} snapshot={snapshot} onSelect={onSelect} node={node} onCommand={command} busy={busy} />}
     {/* Components are made from the copies a designer already has, so the flow
         starts by finding them rather than by asking for a name. */}
-    {section === 'basics' && ['view', 'component'].includes(node.kind) && node.name !== 'WindowGroup' && (onFindCopies
+    {/* A run of joined text stays a Text in its sum, which a component's call would not be (Wave 3a). */}
+    {section === 'basics' && ['view', 'component'].includes(node.kind) && node.name !== 'WindowGroup' && !node.textRun && (onFindCopies
       ? <MakeComponent node={node} busy={busy} nudge={pasteNudge} onDismissNudge={onDismissNudge} onFind={onFindCopies} onShow={copy => { const found = snapshot?.nodes.find(n => n.id === copy.id); if (found) onSelect?.(found) }} onMake={async (componentName, copies, names) => {
           if (!onCommand) return 'Select a view first.'
           setBusy(true)

@@ -1,9 +1,9 @@
 import type { PagePreview } from './protocol'
 import type { ComponentSource } from './view-layer'
 
-/** Every view whose code draws a page's content, outermost first, each at its call site. */
+/** Every view whose code draws a page's content, outermost first, each at its call site. A helper is part of its view. */
 export function viewsDrawing(page: PagePreview): readonly ComponentSource[] {
-  return page.viewHierarchy?.[0]?.children[0]?.componentSources ?? []
+  return page.viewHierarchy?.[0]?.children[0]?.componentSources?.filter(call => !call.helper) ?? []
 }
 
 const sameCall = (a: ComponentSource, b: ComponentSource) =>

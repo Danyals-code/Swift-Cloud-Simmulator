@@ -1,7 +1,7 @@
 'use client'
 
 import { useLayoutEffect, useRef, useState } from 'react'
-import { isStructuralLayer, layoutParentOf, offersWhenTapped, stackLayoutOf, LAYOUT_WORDS, type AuthoringNode, type ResourceOperation, type Size, type SourceSpan } from '@studio/shared'
+import { isHelperDefinition, isStructuralLayer, layoutParentOf, offersWhenTapped, stackLayoutOf, LAYOUT_WORDS, type AuthoringNode, type ResourceOperation, type Size, type SourceSpan } from '@studio/shared'
 import { AuthoringFeatures, type FeatureProps } from './AuthoringFeatures'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
 import { LayoutGuide } from './LayoutGuide'
@@ -9,7 +9,7 @@ import { ModifierStack } from './ModifierStack'
 import { LayerSections } from './layer/LayerSections'
 import { NavigationDestinationEditor } from './NavigationDestinationEditor'
 import { TokenField, valueFields } from './settings/TokenField'
-import { sourceLayerIsVisual, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
+import { sourceLayerHelperReach, sourceLayerIsVisual, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
 import { authoringSettingsContext, settingsContextLabel, settingsVisualChildren } from '../lib/authoringSettings'
 import { MenuButton } from './ui/Menu'
 import { SHORTCUT_KEYS } from '../lib/shortcuts'
@@ -35,7 +35,7 @@ const NAVIGATE_TYPES: readonly { type: 'push' | 'sheet' | 'cover'; label: string
  * `onCopy` and `onPaste` put Copy and Paste in the view menu, as ⌘C and ⌘V do (D6);
  * Paste is off while nothing is copied.
  */
-export function AuthoringInspector({ node, stale, onReveal, onChange, features, onCopy, onPaste, measure, sizeOverlap }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange; onCopy?: (node: AuthoringNode) => void; onPaste?: (node: AuthoringNode) => void; measure?: Size; sizeOverlap?: () => Promise<string | null> }) {
+export function AuthoringInspector({ node, drawn, stale, onReveal, onChange, features, onCopy, onPaste, measure, sizeOverlap }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; /** The words the selected view draws where it was selected, which name it when it is bound to data (Wave 3a). */ drawn?: string; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange; onCopy?: (node: AuthoringNode) => void; onPaste?: (node: AuthoringNode) => void; measure?: Size; sizeOverlap?: () => Promise<string | null> }) {
   const root = useRef<HTMLDivElement | null>(null)
   const focus = useRef<{ source: string; owner: string; control: string; label: string; caret: number | null; modifier?: string; button?: string } | null>(null)
   const [retained, setRetained] = useState(node)
@@ -75,7 +75,7 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features, 
   const isList = selected.name === 'List' || selected.kind === 'collection' || selected.kind === 'template'
   const featureKey = `${sourceKey}:${selected.fingerprint}:${selected.collection?.signature}`
   const dataKey = `${featureKey}:${JSON.stringify(features?.previewInputs ?? [])}`
-  const title = sourceLayerLabel(selected)
+  const title = (selected === node ? drawn : undefined) ?? sourceLayerLabel(selected)
   const type = sourceLayerType(selected)
   const tokens = features?.snapshot?.styles ?? []
   const resource = (operation: ResourceOperation) => features?.onCommand ? features.onCommand(operation) : Promise.resolve('Select the view again.')
@@ -120,7 +120,7 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features, 
           else if (value === 'paste') onPaste?.(selected)
         }}><Icon name="ellipsis" size={15} /></MenuButton>}
       </header>
-      {template ? <p className={styles.scope}>Row design · changes apply to every row</p> : selected.kind === 'definition' && features?.snapshot ? <p className={styles.scope}>The Main · changes apply to every copy ({features.snapshot.nodes.filter(n => n.definitionId === selected.id).length})</p> : selected.runtimeIds.length > 1 ? <p className={styles.scope}>One design · changes apply to {selected.runtimeIds.length} places on screen</p> : null}
+      {template ? <p className={styles.scope}>Row design · changes apply to every row</p> : isHelperDefinition(selected) ? <p className={styles.scope}>{sourceLayerHelperReach(selected)}</p> : selected.kind === 'definition' && features?.snapshot ? <p className={styles.scope}>The Main · changes apply to every copy ({features.snapshot.nodes.filter(n => n.definitionId === selected.id).length})</p> : selected.runtimeIds.length > 1 ? <p className={styles.scope}>One design · changes apply to {selected.runtimeIds.length} places on screen</p> : null}
       {!!breadcrumbs.length && <nav className={styles.breadcrumbs} aria-label="Selection path">{breadcrumbs.map(ancestor => <button type="button" key={ancestor.id} onClick={() => features?.onSelect?.(ancestor)}>{sourceLayerLabel(ancestor)}</button>)}</nav>}
       {/* Code the studio does not rewrite is shown as what it is - a locked block -
           rather than as controls that quietly do nothing. */}

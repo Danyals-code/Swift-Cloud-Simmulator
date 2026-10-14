@@ -1,5 +1,5 @@
 import { Lexer, type CallExpr, type StructDecl } from '@studio/swift-syntax'
-import { deploymentVersion, tappableProblem } from '@studio/shared'
+import { deploymentVersion, isHelperDefinition, tappableProblem } from '@studio/shared'
 import type { AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
 import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, literal, modifierIndent, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { collectionFor, recordsSwift } from './authoring-collections'
@@ -10,6 +10,8 @@ import { appRoot } from './authoring-navigation-app'
 import { viewCallChain } from './design-controls'
 
 export function stateInputs(ctx: FeatureContext, node: AuthoringNode): StateInput[] {
+  // A helper is written inside its view, whose own definition reads the view's states (Wave 3a).
+  if (isHelperDefinition(node)) return []
   const owner = ownerOf(ctx, node)
   if (!owner) return []
   return owner.members.flatMap((member): StateInput[] => {

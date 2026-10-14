@@ -41,7 +41,7 @@ describe('R03/R04 minimal source recipes', () => {
   })
   it('preserves a binding while editing a nested font size', () => {
     const source = wrap('Text(title).font(.system(size: 14, weight: .bold, design: .rounded))', '@State var title = "Hello"')
-    expect(target(source).controls?.some(c => c.label === 'Text')).toBe(false)
+    expect(target(source).controls?.some(c => c.label === 'Text' && !c.disabledReason)).toBe(false)
     expect(edited(source, 'Font size', '24')).toBe(source.replace('size: 14', 'size: 24'))
     expect(edited(source, 'Font weight', 'regular')).toBe(source.replace('weight: .bold', 'weight: .regular'))
   })
@@ -601,18 +601,18 @@ describe('C11: a structural change is checked before it is kept', () => {
     return planDesignEdit({ projectId: 'p', baseRevision: 1, scope: node.owner, files: files(text), target: node.source, fingerprint: node.fingerprint, operation })
   }
 
-  it('refuses a drop onto a helper that holds one view, which no layer stands for (C5)', () => {
-    // The canvas drops onto what it draws; "Header" is drawn by `header`, not by `body`.
+  it('refuses a drop onto a helper that holds one view, whose views are a layer scope of their own (C5)', () => {
+    // The canvas drops onto what it draws; "Header" is drawn by `header`, not by `body` (Wave 3a reads it as a layer).
     const source = wrap('VStack {\n    header\n    Text("Body")\n}', 'var header: some View {\n    Text("Header")\n}')
     expect(restructureAt(source, 'Text("Body")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Header")'), position: 'after' }))
-      .toEqual({ ok: false, reason: 'Drop it on a layer of this screen. That spot is drawn by a helper in the Swift code, where a view could repeat or disappear.' })
+      .toEqual({ ok: false, reason: 'Move it within header, or out of it in Code. A view moved into or out of a helper would change every place it is used.' })
   })
 
-  it('refuses a canvas drop onto a view a helper draws, which repeats it and loses it from Layers (C5)', () => {
+  it('refuses a canvas drop onto a view a helper draws, which would repeat it (C5)', () => {
     // It builds: the helper is a view builder. But it draws "Title" once for every swatch.
     const source = wrap('VStack {\n    swatch("Red")\n    swatch("Blue")\n    Text("Title")\n}', '@ViewBuilder func swatch(_ name: String) -> some View {\n    Text(name)\n}')
     expect(restructureAt(source, 'Text("Title")', { kind: 'moveTo', targetOffset: source.indexOf('Text(name)'), position: 'after' }))
-      .toEqual({ ok: false, reason: 'Drop it on a layer of this screen. That spot is drawn by a helper in the Swift code, where a view could repeat or disappear.' })
+      .toEqual({ ok: false, reason: 'Move it within swatch, or out of it in Code. A view moved into or out of a helper would change every place it is used.' })
   })
 
   it('refuses a view placed beside one written after return, which iOS would never show (C5)', () => {

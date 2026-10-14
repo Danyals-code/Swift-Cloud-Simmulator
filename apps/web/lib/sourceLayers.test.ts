@@ -4,7 +4,7 @@ import { FOLIO_FILES } from '@studio/project-model/templates'
 import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
 import { hiddenViewsIn } from '@studio/swift-syntax'
 import type { AuthoringSnapshot } from '@studio/shared'
-import { rebaseSourceLayers, sourceLayerHiddenOwner, sourceLayerHiddenInScope, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerIsVisual, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from './sourceLayers'
+import { rebaseSourceLayers, sourceDefinitionAround, sourceLayerDrawn, sourceLayerHelperReach, sourceLayerNames, sourceLayerHiddenOwner, sourceLayerHiddenInScope, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerIsVisual, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from './sourceLayers'
 
 const collection = 'ForEach(0..<3, id: \\.self) { i in Text("Row").padding(8) }'
 const source = `import SwiftUI
@@ -592,5 +592,159 @@ struct ContentView: View {
     expect(labels(closed.rows)).toEqual(['List', 'Column', 'Next up'])
     expect(closed.rows.find(item => item.node.id === column)?.expanded).toBe(false)
     expect(closed.hidden).toEqual([{ view: markers(text)[0], owner: column }])
+  })
+})
+
+describe('helper views in the layer tree', () => {
+  const text = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    @State private var ready = true
+    var body: some View {
+        VStack {
+            header
+            badge
+            if ready { badge }
+        }
+    }
+    var header: some View {
+        HStack { Text("Title"); Text("Subtitle") }
+    }
+    var badge: some View { Text("New") }
+}`
+  const run = () => {
+    resetPipelineState()
+    const result = compile({ projectId: 'p', revision: 1, files: files(text), canvas: { width: 402, height: 874 }, colorScheme: 'light' })
+    expect(result.diagnostics.filter(item => item.severity === 'error')).toEqual([])
+    const snapshot = result.authoring!
+    return { snapshot, layers: result.viewHierarchy!, state: { snapshot, files: files(text), closed: new Set<string>(), opened: new Set(snapshot.nodes.map(node => node.id)) } }
+  }
+  const outline = (rows: ReturnType<typeof sourceLayerRows>['rows']) => rows.map(row => `${'  '.repeat(row.depth)}${sourceLayerLabel(row.node)}`)
+
+  it('lists a helper’s views under each place it is called, in a group named after it', () => {
+    const { snapshot, layers, state } = run()
+    const { rows } = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: layers })
+    expect(outline(rows)).toEqual(['Column', '  header', '    Row', '      Title', '      Subtitle', '  badge', '    New', '  badge', '    New'])
+    expect(new Set(rows.map(row => row.key)).size).toBe(rows.length)
+    const header = rows.find(row => sourceLayerLabel(row.node) === 'header')!
+    expect(sourceLayerType(header.node)).toBe('Group')
+    expect(rows.filter(row => sourceLayerLabel(row.node) === 'New').map(row => row.parentId)).toEqual(rows.filter(row => sourceLayerLabel(row.node) === 'badge').map(row => row.node.id))
+  })
+
+  it('says how many places a helper is used in', () => {
+    const { snapshot, layers, state } = run()
+    const { rows } = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: layers })
+    expect(rows.filter(row => row.node.kind === 'component').map(row => row.places)).toEqual([1, 2, 2])
+  })
+
+  it('opens every place a helper is called around a view selected in it', () => {
+    const { snapshot, layers, state } = run()
+    const title = snapshot.nodes.find(node => sourceLayerLabel(node) === 'New')!
+    const { rows } = sourceLayerRows(snapshot, { ...state, opened: new Set() }, title.id, '', { runtimeLayers: layers })
+    expect(outline(rows)).toEqual(['Column', '  header', '  badge', '    New', '  badge', '    New'])
+  })
+
+  it('names a helper after itself, and finds the screen around its views rather than the helper', () => {
+    const { snapshot } = run()
+    const definition = snapshot.nodes.find(node => node.kind === 'definition' && node.name === 'badge')!
+    expect(sourceLayerLabel(definition)).toBe('badge')
+    const title = snapshot.nodes.find(node => sourceLayerLabel(node) === 'Title')!
+    expect(sourceDefinitionAround(snapshot, title.source)?.name).toBe('ContentView')
+  })
+
+  it('says what a change to a helper reaches, in the words Layers uses', () => {
+    const { snapshot } = run()
+    const helper = (name: string) => snapshot.nodes.find(node => node.kind === 'definition' && node.name === name)!
+    expect(sourceLayerHelperReach(helper('badge'))).toBe('Used in 2 places. Changes affect each of them.')
+    expect(sourceLayerHelperReach(helper('header'))).toBe('Used in 1 place. Changes show there.')
+  })
+
+  it('reads each place a helper draws data with what it draws there', () => {
+    resetPipelineState()
+    const stats = text.replace('header\n            badge\n            if ready { badge }', 'stats("Done")\n            stats("Left")').replace('var badge: some View { Text("New") }', 'func stats(_ title: String) -> some View { Text(title) }')
+    const result = compile({ projectId: 'p', revision: 1, files: files(stats), canvas: { width: 402, height: 874 }, colorScheme: 'light' })
+    const snapshot = result.authoring!
+    const rows = sourceLayerRows(snapshot, { snapshot, files: files(stats), closed: new Set(), opened: new Set(snapshot.nodes.map(node => node.id)) }, undefined, '', { runtimeLayers: result.viewHierarchy! }).rows
+    expect(rows.map(row => `${'  '.repeat(row.depth)}${row.label ?? sourceLayerLabel(row.node)}`)).toEqual(['Column', '  stats', '    Done', '  stats', '    Left', 'header', '  Row', '    Title', '    Subtitle'])
+  })
+
+  it('lists a helper nothing calls under its screen, as not used, with its views to select', () => {
+    resetPipelineState()
+    const unused = text.replace('            header\n', '')
+    const result = compile({ projectId: 'p', revision: 1, files: files(unused), canvas: { width: 402, height: 874 }, colorScheme: 'light' })
+    const snapshot = result.authoring!
+    const { rows } = sourceLayerRows(snapshot, { snapshot, files: files(unused), closed: new Set(), opened: new Set(snapshot.nodes.map(node => node.id)) }, undefined, '', { runtimeLayers: result.viewHierarchy! })
+    expect(outline(rows)).toEqual(['Column', '  badge', '    New', '  badge', '    New', 'header', '  Row', '    Title', '    Subtitle'])
+    expect(rows.filter(row => row.unused).map(row => sourceLayerLabel(row.node))).toEqual(['header'])
+    expect(sourceLayerHelperReach(rows.find(row => row.unused)!.node)).toBe('Not used anywhere yet.')
+  })
+
+  it('says a call is shown when the helper’s views are drawn there, inside a condition too', () => {
+    const { snapshot } = run()
+    const calls = snapshot.nodes.filter(node => node.kind === 'component' && node.name === 'badge')
+    expect(calls.map(call => sourceLayerNotShown(snapshot, call))).toEqual([false, false])
+  })
+})
+
+describe('rows named by the words they draw', () => {
+  const run = (members: string, body: string) => {
+    resetPipelineState()
+    const text = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct Item: Identifiable { let id: Int; let title: String }
+struct ContentView: View {
+${members}
+    var body: some View { ${body} }
+}`
+    const result = compile({ projectId: 'p', revision: 1, files: files(text), canvas: { width: 402, height: 874 }, colorScheme: 'light' })
+    expect(result.diagnostics.filter(item => item.severity === 'error')).toEqual([])
+    const snapshot = result.authoring!
+    const state = { snapshot, files: files(text), closed: new Set<string>(), opened: new Set(snapshot.nodes.map(node => node.id)) }
+    /** The rows' names, of those a filter finds. */
+    return (query = '') => sourceLayerRows(snapshot, state, undefined, query, { runtimeLayers: result.viewHierarchy! }).rows.map(row => row.label ?? sourceLayerLabel(row.node))
+  }
+
+  it('reads a text bound to data, interpolated or formatted as it is drawn', () => {
+    expect(run('    let items = [Item(id: 1, title: "Milk"), Item(id: 2, title: "Eggs")]\n    let count = 3\n    let price = 12.5',
+      'VStack { ForEach(items) { item in Text(item.title) }; Text("Total: \\(count) of 6"); Text(price, format: .currency(code: "USD")); Text("Plain") }')())
+      .toEqual(['Column', 'Milk', 'Total: 3 of 6', '$12.50', 'Plain'])
+  })
+
+  it('shortens long words at a space, and finds a row by them', () => {
+    const long = 'Delivered to the front door of the building on Tuesday morning'
+    const labels = run(`    let note = "${long}"`, 'VStack { Text(note); Text("Other") }')
+    expect(labels()[1]).toBe('Delivered to the front door of the…')
+    expect(labels('front door')).toEqual(['Column', 'Delivered to the front door of the…'])
+  })
+})
+
+describe('the words a selected view draws', () => {
+  it('are read from the place it was selected at', () => {
+    resetPipelineState()
+    const text = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    let items = ["Milk", "Eggs"]
+    var body: some View { VStack { ForEach(items, id: \\.self) { item in Text(item) } } }
+}`
+    const result = compile({ projectId: 'p', revision: 1, files: files(text), canvas: { width: 402, height: 874 }, colorScheme: 'light' })
+    const row = result.authoring!.nodes.find(node => node.name === 'Text')!
+    const names = sourceLayerNames(result.viewHierarchy!)
+    expect(row.runtimeIds.map((_, at) => sourceLayerDrawn(row, names, at))).toEqual(['Milk', 'Eggs'])
+  })
+})
+
+describe('a control’s drawn words', () => {
+  it('name it when they are its title, and not when its label is views of its own', () => {
+    resetPipelineState()
+    const text = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    let title = "Save"
+    var body: some View { VStack { Button(title) { }; Button { } label: { Text("Card") } } }
+}`
+    const result = compile({ projectId: 'p', revision: 1, files: files(text), canvas: { width: 402, height: 874 }, colorScheme: 'light' })
+    const names = sourceLayerNames(result.viewHierarchy!)
+    expect(result.authoring!.nodes.filter(node => node.name === 'Button').map(node => sourceLayerDrawn(node, names))).toEqual(['Save', undefined])
   })
 })

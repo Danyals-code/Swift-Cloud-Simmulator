@@ -1,5 +1,6 @@
-import type { ViewLayer } from '@studio/shared'
-import { asView, labelView, stopped, type ViewValue } from './view-value'
+import { LAYERED_LABEL_VIEWS, type ViewLayer } from '@studio/shared'
+import { textOf } from './to-layout'
+import { asView, labelView, stopped, type ViewArg, type ViewValue } from './view-value'
 
 export function layerLabel(view: ViewValue): string {
   // A view that stopped is still the view it was: its layer says which.
@@ -7,6 +8,10 @@ export function layerLabel(view: ViewValue): string {
   if (halted) return halted.name
   const title = view.args.find(a => a.label === null)?.value
   if (title?.kind === 'string') return title.value
+  // Texts joined with `+` draw their runs' words, one after another (Wave 3a).
+  if (view.name === 'Text' && !view.args.length && view.children.length) return view.children.map(layerLabel).join('')
+  // `Text(price, format: .currency(code: "USD"))`: the words it draws, `$12.50` (Wave 3a).
+  if (view.name === 'Text') return textOf(view)
   if (view.name === 'Image') {
     const symbol = view.args.find(a => a.label === 'systemName')?.value
     if (symbol?.kind === 'string') return symbol.value
@@ -22,14 +27,20 @@ export function layerLabel(view: ViewValue): string {
   return ''
 }
 
+/** A label's or an icon's views, from an argument of a view in `LAYERED_LABEL_VIEWS`, or null for any other argument. */
+export function labelArgView(arg: ViewArg): ViewValue | null {
+  return arg.label === 'icon' ? asView(arg.value) : labelView(arg)
+}
+
 /**
- * What `Button { … } label: { … }` is drawn with (D16). The host keeps a label as the
- * Button's arguments, since its content closure is the action, so the label's views are
- * listed here as the Button's own layers: a view in a tappable card is then found on the
- * canvas and in Layers like any other.
+ * What `Button { … } label: { … }` is drawn with (D16), and a Menu's, a Picker's or a
+ * GroupBox's label and a Label's icon (Wave 3a). The host keeps them as the control's
+ * arguments, since its content closure is the action or its content, so they are listed
+ * here as the control's own layers: a view in a label is then found on the canvas and
+ * in Layers like any other.
  */
 function labelViews(view: ViewValue): ViewValue[] {
-  return view.name === 'Button' ? view.args.flatMap(arg => labelView(arg) ?? []) : []
+  return LAYERED_LABEL_VIEWS.has(view.name) ? view.args.flatMap(arg => labelArgView(arg) ?? []) : []
 }
 
 /** The SF Symbol a tab item shows, for the tab's lane on the design canvas. */

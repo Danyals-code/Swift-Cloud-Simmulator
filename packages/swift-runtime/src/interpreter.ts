@@ -24,9 +24,14 @@ import type {
 } from '@studio/swift-syntax'
 import {
   argumentLabels,
+  boundParameter,
   collectConformance,
   DECIMAL_TYPES,
   hoistNestedTypes,
+  isSomeView,
+  isStatic,
+  memberwiseParameter,
+  memberwiseProperties,
   valueKind,
   type ConformanceModel,
   type TypeNames,
@@ -479,7 +484,7 @@ export class Interpreter {
     const members = this.membersOf(typeName)
     const stored = members.filter(
       (m): m is VarDecl =>
-        m.kind === 'varDecl' && m.accessor === null && m.requirement === null && !isStaticDecl(m),
+        m.kind === 'varDecl' && m.accessor === null && m.requirement === null && !isStatic(m),
     )
 
     // Declared initialiser wins over the memberwise one, which is also Swift's rule:
@@ -511,12 +516,20 @@ export class Interpreter {
       return instance
     }
 
-    // Memberwise initialiser: labelled arguments win over declared defaults.
+    // Memberwise initialiser: labelled arguments win over declared defaults. A trailing
+    // closure is bound as Swift binds it (`boundParameter`), past a `var title = ""` in
+    // front of the content; any other argument without a label takes the next property.
+    const parameters = memberwiseProperties(stored)
+    const shapes = parameters.map(memberwiseParameter)
     const supplied = new Map<string, SwiftValue>()
-    args.forEach((arg, index) => {
-      const name = arg.label ?? stored[index]?.name
+    let next = 0
+    for (const arg of args) {
+      const at = arg.label !== null || arg.value.kind === 'closure' ? boundParameter(shapes, next, { label: arg.label, trailing: arg.label === null }) : -1
+      const index = at >= 0 || arg.label !== null ? at : next
+      if (index >= 0) next = index + 1
+      const name = arg.label ?? parameters[index]?.name
       if (name) supplied.set(name, arg.value)
-    })
+    }
 
     for (const property of stored) {
       const expected = namedTypeOf(property.typeAnnotation)
@@ -720,7 +733,7 @@ export class Interpreter {
       (m): m is VarDecl => m.kind === 'varDecl' && m.name === member && m.accessor !== null,
     )
     if (computed?.accessor) {
-      return this.runBody(
+      const value = this.runBody(
         `${target.typeName}.${member}`,
         computed.accessor,
         this.globals.child(target),
@@ -728,6 +741,7 @@ export class Interpreter {
         namedTypeOf(computed.typeAnnotation),
         computed.attributes.some((a) => a.name === 'ViewBuilder'),
       )
+      return this.helperView(target, member, computed.typeAnnotation, value, span)
     }
 
     return withCandidates(methodsNamed(members, member), labels, (decl) => ({ kind: 'function', decl, self: target, env: this.globals, owner: this.declaringTypeOf(lookupIn, decl) }))
@@ -922,7 +936,7 @@ export class Interpreter {
     const label = fn.self ? `${fn.self.typeName}.${decl.name}` : decl.name
     this.owners.push(owner ?? null)
     try {
-      return this.runBody(
+      const value = this.runBody(
         label,
         decl.body,
         env,
@@ -930,9 +944,18 @@ export class Interpreter {
         namedTypeOf(decl.returnType),
         decl.attributes.some((a) => a.name === 'ViewBuilder'),
       )
+      return fn.self ? this.helperView(fn.self, decl.name, decl.returnType, value, span) : value
     } finally {
       this.owners.pop()
     }
+  }
+
+  /**
+   * What a view's `some View` member drew, as the host says it: drawn from `span`, where
+   * it was read or called (Wave 3a). Any other member's value is left as it is.
+   */
+  private helperView(self: StructValue, name: string, type: TypeRef | null, value: SwiftValue, span: SourceSpan): SwiftValue {
+    return isSomeView(type) && name !== 'body' && this.conformsTo(self.typeName, 'View') ? this.host.helperView?.(name, value, span) ?? value : value
   }
 
   private bindParameters(
@@ -1393,8 +1416,6 @@ export class Interpreter {
     const members = this.membersOf(typeName)
     if (members.length === 0) return undefined
 
-    const isStatic = isStaticDecl
-
     const property = members.find(
       (m): m is VarDecl => m.kind === 'varDecl' && m.name === member && isStatic(m),
     )
@@ -1442,7 +1463,7 @@ export class Interpreter {
     for (const typeName of TOKEN_HOSTS) {
       const type = this.conformance.types.get(typeName)
       if (!type || type.decl) continue
-      if (!type.members.some(m => (m.kind === 'varDecl' || m.kind === 'funcDecl') && m.name === member && isStaticDecl(m))) continue
+      if (!type.members.some(m => (m.kind === 'varDecl' || m.kind === 'funcDecl') && m.name === member && isStatic(m))) continue
       return this.staticMember(typeName, member, span)
     }
     return undefined
@@ -2010,6 +2031,12 @@ export class Interpreter {
     }
 
     const target = this.evaluate(base, env)
+
+    // `self.header`: a view's helper is read where the whole expression is, as `header` is (Wave 3a).
+    if (base.kind === 'selfExpr' && target.kind === 'struct') {
+      const value = this.memberOfStruct(target, member, { ...span, start: base.span.start })
+      if (value !== undefined) return unwrapProjection(value)
+    }
 
     if (base.kind === 'superExpr' && target.kind === 'struct') {
       const above = this.superclassOf(this.owners[this.owners.length - 1] ?? target.typeName)
@@ -3468,10 +3495,6 @@ const FRAMEWORK_CONTEXTUAL: ReadonlySet<string> = new Set([
   'easeIn', 'easeOut', 'easeInOut', 'spring', 'bouncy', 'snappy', 'smooth', 'opacity', 'slide', 'scale', 'move', 'push',
   'hidden', 'visible', 'never', 'always', 'destructive', 'cancel', 'sheet', 'popover', 'none', 'some', 'shared', 'main',
 ])
-
-function isStaticDecl(decl: { modifiers: readonly { name: string }[] }): boolean {
-  return decl.modifiers.some((m) => m.name === 'static' || m.name === 'class')
-}
 
 /**
  * Redirects an lvalue through a projection when the storage holds one.

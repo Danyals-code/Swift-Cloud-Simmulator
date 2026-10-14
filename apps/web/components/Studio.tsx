@@ -48,7 +48,7 @@ import { AppNavigationSettings } from './settings/AppNavigationSettings'
 import { ScreenSettings } from './settings/ScreenSettings'
 import { AppearancePicker, DevicePicker, TextSizePicker } from './PreviewEnvironment'
 import { designScreens, designTree, liveDesignScreen, screenRemovalRefusal, type DesignTree } from '../lib/designTree'
-import { sourceLayerAround, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
+import { sourceLayerAround, sourceLayerDrawn, sourceLayerLabel, sourceLayerNames, sourceLayerType } from '../lib/sourceLayers'
 const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane), { ssr: false })
 import { ShortcutsDialog } from './ShortcutsDialog'
 import { FileSwitcher } from './FileSwitcher'
@@ -507,6 +507,7 @@ export function Studio() {
   const pageHierarchy = useMemo(() => designPage?.viewHierarchy ?? (livePage ? [livePage] : undefined), [designPage?.viewHierarchy, livePage])
   const focusedPage = designPage ?? livePage
   const layers = useMemo(() => designPages?.length ? designPages.flatMap(page => page.viewHierarchy ?? []) : result?.viewHierarchy ?? NO_FILES, [designPages, result?.viewHierarchy])
+  const layerNames = useMemo(() => sourceLayerNames(layers), [layers])
   const designRootId = designPage?.rootId ?? designPage?.id
   const pageCount = designPages?.length ?? layers.filter(layer => layer.type === 'Page').length
   /**
@@ -1522,6 +1523,8 @@ export function Studio() {
    */
   const drawnFrom = { navigator: [result?.revision, mode], settings: [result?.revision, mode, level, authoringNode?.id], editor: [project, activeFileId, mode], preview: [result?.revision, mode] }
   /** The right-hand panel shows the App, the focused screen, or the selected view. */
+  // A view bound to data is named by the words it draws where it was selected, as its row in Layers is (Wave 3a).
+  const drawnTitle = authoringNode ? sourceLayerDrawn(authoringNode, layerNames, Math.max(0, authoringNode.runtimeIds.indexOf(selectedLayerId ?? ''))) : undefined
   const settingsPanel = <PaneBoundary area="settings" resetKeys={drawnFrom.settings}>{level === 'app'
     ? <AppSettings project={project} tree={tree} snapshot={result?.authoring} screenViews={screens.map(screen => screen.view)} busy={busy} onRenameApp={useStudio.getState().renameProject} onResource={resourceCommand} onAssets={updateAssets} onSelect={selectAuthoring}
         navigation={<AppNavigationSettings navigation={result?.authoring?.navigation} screens={screens} busy={busy} onCommand={navigationCommand} onReveal={revealSpan} />} />
@@ -1532,11 +1535,11 @@ export function Studio() {
             onNodeChange={(node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }, undefined, undefined, undefined, true)}
             onNodeCommand={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation, undefined, undefined, undefined, true)} onSelect={selectAuthoring} onReveal={revealSpan} />
         : <p className="text-footnote text-xc-text-3" role={busy ? 'status' : undefined}>{busy ? 'Drawing screens…' : 'Select a screen, a view, or the App.'}</p>
-      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined} measure={selectedSize} sizeOverlap={sizeOverlap} />}</PaneBoundary>
+      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} drawn={drawnTitle} stale={busy} onReveal={revealSpan} onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined} measure={selectedSize} sizeOverlap={sizeOverlap} />}</PaneBoundary>
   const settingsTitle = <nav className={styles.levelPath} aria-label="Settings level" data-level={level}>
     <button type="button" aria-current={level === 'app' ? 'page' : undefined} onClick={selectApp} data-testid="level-app">App</button>
     {level !== 'app' && focusedScreen && <><span aria-hidden>›</span><button type="button" aria-current={level === 'screen' ? 'page' : undefined} onClick={() => openPage(focusedScreen.page)} data-testid="level-screen">{focusedScreen.name}</button></>}
-    {level === 'view' && authoringNode && <><span aria-hidden>›</span><span aria-current="page" data-testid="level-view">{sourceLayerLabel(authoringNode)}</span></>}
+    {level === 'view' && authoringNode && <><span aria-hidden>›</span><span aria-current="page" data-testid="level-view">{drawnTitle ?? sourceLayerLabel(authoringNode)}</span></>}
   </nav>
 
   const showLeftPanel = <button type="button" className={styles.panelToggle} data-testid="pane-toggle-navigator" aria-pressed="false" aria-label="Show left panel" title="Show left panel" onClick={toggleLeftPanel}><Icon name="sidebar-left" size={16} /></button>

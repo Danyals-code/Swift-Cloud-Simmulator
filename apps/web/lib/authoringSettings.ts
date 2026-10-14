@@ -1,7 +1,6 @@
-import type { AuthoringNode, AuthoringSnapshot } from '@studio/shared'
+import { CONTENT_SLOT_NAMES, isHelperDefinition, type AuthoringNode, type AuthoringSnapshot } from '@studio/shared'
 import { sourceLayerIsVisual } from './sourceLayers'
 
-const CONTENT_SLOTS = new Set(['Background', 'Overlay', 'Toolbar', 'Sheet', 'Full screen cover', 'Destination', 'Safe area inset', 'Header', 'Footer'])
 const NAVIGATION = new Set(['NavigationStack', 'NavigationView', 'NavigationSplitView', 'NavigationLink'])
 
 /** The source tree keeps ownership; the designer tree only changes its presentation. */
@@ -11,7 +10,9 @@ export function authoringSettingsContext(snapshot: AuthoringSnapshot | undefined
   let parent = selected.parentId ? nodes.get(selected.parentId) : undefined
   while (parent && !ancestors.some(node => node.id === parent!.id)) {
     ancestors.unshift(parent)
-    parent = parent.parentId ? nodes.get(parent.parentId) : undefined
+    // A helper's views are where it is used (Wave 3a): from one place, they sit in what holds it.
+    const uses = isHelperDefinition(parent) ? snapshot?.nodes.filter(node => node.definitionId === parent!.id) ?? [] : []
+    parent = uses.length === 1 ? uses[0] : parent.parentId ? nodes.get(parent.parentId) : undefined
   }
   const wrappers: AuthoringNode[] = []
   const collect = (node: AuthoringNode) => {
@@ -60,7 +61,7 @@ export function authoringSettingsContext(snapshot: AuthoringSnapshot | undefined
   const list = [...ancestors, selected].reverse().find(node => node.name === 'List')
   const conditions = unique(context.filter(node => node.kind === 'branch' && ['Condition', 'When', 'Switch', 'Otherwise'].includes(node.name) || node.kind === 'branch' && node.name.startsWith('Case ')))
   const navigation = unique([...(NAVIGATION.has(selected.name) ? [selected] : []), ...context.filter(node => NAVIGATION.has(node.name))])
-  const slots = unique(context.filter(node => node.kind === 'branch' && CONTENT_SLOTS.has(node.name)))
+  const slots = unique(context.filter(node => node.kind === 'branch' && CONTENT_SLOT_NAMES.has(node.name)))
   const surrounding = unique(context.filter(node => node.kind !== 'branch' && node.kind !== 'template' && (!!node.modifiers?.length || (node.kind === 'component' ? node.properties.length > 0 || node.controls?.some(control => !/^(add:|fill:)/.test(control.id)) : !!node.controls?.length))))
   return { nodes, ancestors, wrappers, forwarded, collections, repeatedBy, list, conditions, navigation, slots, surrounding }
 }
@@ -84,7 +85,7 @@ export function settingsVisualChildren(snapshot: AuthoringSnapshot | undefined, 
       const child = nodes.get(id)
       // A row's label/content is separate from its destination, toolbar or decoration.
       // Selecting that slot explicitly starts at its own children, so they stay accessible.
-      if (!child || child.kind === 'branch' && CONTENT_SLOTS.has(child.name)) continue
+      if (!child || child.kind === 'branch' && CONTENT_SLOT_NAMES.has(child.name)) continue
       if (sourceLayerIsVisual(child)) children.push(child)
       else visit(child)
     }

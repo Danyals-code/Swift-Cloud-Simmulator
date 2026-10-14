@@ -1,4 +1,4 @@
-import { isDynamicTypeSize, type ComponentSource, type LogLevel, type Size, type SourceSpan, type UIEvent } from '@studio/shared'
+import { isDynamicTypeSize, type LogLevel, type Size, type SourceSpan, type UIEvent } from '@studio/shared'
 import type { Block, Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
@@ -43,6 +43,7 @@ import {
   BUTTON_CONFIGURATION_TYPE,
   DIMENSIONS_TYPE,
   handlerIdFor,
+  sourcedViews,
   stoppedView,
   type ActionValue,
   type RuntimeFailure,
@@ -1364,21 +1365,7 @@ function findPreviewsProperty(files: readonly SourceFileNode[]): Block | null {
 
 /** Tag all painted descendants because navigation/tabs can unwrap a component root. */
 function componentViews(views: readonly ViewValue[], instance: StructValue): ViewValue[] {
-  if (!instance.viewSource) return [...views]
-  const owner: ComponentSource = { name: instance.typeName, source: instance.viewSource }
-  const annotate = (view: ViewValue): ViewValue => ({
-    ...view,
-    componentSources: [owner, ...(view.componentSources ?? [])],
-    children: view.children.map(annotate),
-    modifiers: view.modifiers.map(modifier => ({
-      ...modifier,
-      args: modifier.args.map(argument => {
-        const child = asView(argument.value)
-        return child ? { ...argument, value: asSwiftValue(annotate(child)) } : argument
-      }),
-    })),
-  })
-  return views.map(annotate)
+  return instance.viewSource ? sourcedViews(views, { name: instance.typeName, source: instance.viewSource }) : [...views]
 }
 
 /** Unlike Swift assignment, preview isolation also copies reference types. */

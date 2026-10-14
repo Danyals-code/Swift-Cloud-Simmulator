@@ -18,6 +18,7 @@ export { Parser, isSyntaxError, typeName, type ParseResult } from './parser'
 
 export * from './conformance'
 export * from './value-kinds'
+export * from './swift-rules'
 export * from './off-markers'
 export { HIDDEN_MARKER } from './studio-markers'
 export {

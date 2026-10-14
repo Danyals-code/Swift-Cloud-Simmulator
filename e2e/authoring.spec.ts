@@ -81,7 +81,8 @@ test('computed content stays read-only and source reveal opens the corresponding
   await openSource(page)
   await page.getByTestId('render-tree').getByText('Count 0', { exact: true }).click()
   const inspector = page.getByTestId('authoring-inspector')
-  await expect(page.getByTestId('level-view')).toHaveText('Text')
+  // A text bound to data is named by the words it draws (Wave 3a).
+  await expect(page.getByTestId('level-view')).toHaveText('Count 0')
   // Computed content has no editable Text field (the "Expression" badge went with
   // the removed Code details section); the source is reached through View actions.
   await expect(inspector.getByRole('textbox', { name: 'Text', exact: true })).toHaveCount(0)

@@ -116,11 +116,12 @@ test('inspecting the preview follows the pointer in Layers and selects what is c
   await page.getByTestId('workspace-design').click()
 
   // Design opens in Edit, where the preview points at Design's own Layers: the
-  // source views, so the interpolated count is the Text layer that draws it.
+  // source views, so the interpolated count is the Text layer that draws it, named
+  // by the words it draws (Wave 3a).
   await expect(page.getByTestId('live-toggle')).toHaveAttribute('aria-pressed', 'false')
   const layers = page.getByTestId('logical-layers')
   const button = layers.getByRole('treeitem', { name: 'Increase, Button', exact: true })
-  const count = layers.getByRole('treeitem', { name: 'Text', exact: true })
+  const count = layers.getByRole('treeitem', { name: 'Count: 0, Text', exact: true })
   await expect(button).toBeVisible()
 
   // Hovering names the view without selecting it, and the naming stops when the

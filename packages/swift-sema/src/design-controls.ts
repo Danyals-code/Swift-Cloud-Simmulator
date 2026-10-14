@@ -1,8 +1,9 @@
-import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, TEXT_STYLES, authoringCapability, deploymentVersion, stackLayoutOf, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, TEXT_STYLES, authoringCapability, deploymentVersion, readTextParts, stackLayoutOf, writeTextParts, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
 import { advancedControls } from './design-advanced-controls'
 import { authoringViewMinimum } from './authoring-view'
-import { Lexer, type CallExpr, type Expr, type Stmt } from '@studio/swift-syntax'
+import { Lexer, type CallExpr, type Expr, type Stmt, type StringLiteralExpr } from '@studio/swift-syntax'
 import { BORDER_POSITIONS, borderOf, cornersOf, rewriteBorder, type BorderPosition } from './authoring-border'
+import { isAppleCall } from './builtins'
 
 interface Patch { readonly start: number; readonly end: number; readonly text: string }
 export interface ControlRecipe {
@@ -25,9 +26,36 @@ export function controlKind(kind: ControlKind): Pick<DesignControl, 'kind' | 'un
 }
 /** A switch's two values, as Swift writes them. */
 export const BOOLEANS: readonly string[] = ['true', 'false']
+/**
+ * Where a view written as no call is marked on its own syntax node (Wave 3a): a helper read
+ * as a property, `header` or `self.header`, and Texts joined with `+` in parentheses,
+ * `(A + B)`. The authoring model marks them as it finds them, so a chain may start at one
+ * as it does at a call, and only there: `model.title.uppercased()` is no view.
+ */
+const VIEW_BASE = Symbol('view base')
+type Marked = Expr & { [VIEW_BASE]?: CallExpr }
+
+/**
+ * Marks `expr` as a view its modifiers are chained on, standing where a call would, with no
+ * arguments, written across `span`: the parentheses around a sum, or the expression itself.
+ */
+export function markViewBase(expr: Expr, span: SourceSpan = expr.span): void {
+  (expr as Marked)[VIEW_BASE] ??= { kind: 'call', callee: expr, args: [], trailingClosure: null, span }
+}
+
+/** Whether `expr` is marked as a view with no call of its own (`markViewBase`). */
+export const isViewBase = (expr: Expr): boolean => !!(expr as Marked)[VIEW_BASE]
+
+/**
+ * A view's call and the modifiers chained on it. A view written as no call stands where
+ * its call would be, as a call with no arguments, so its modifiers read and write as any
+ * view's do.
+ */
 export function viewCallChain(expr: Expr): { base: CallExpr; modifiers: CallExpr[] } | null {
+  const marked = (expr as Marked)[VIEW_BASE]
+  if (marked) return { base: marked, modifiers: [] }
   if (expr.kind !== 'call') return null
-  if (expr.callee.kind === 'memberAccess' && expr.callee.base?.kind === 'call') {
+  if (expr.callee.kind === 'memberAccess' && (expr.callee.base?.kind === 'call' || expr.callee.base && isViewBase(expr.callee.base))) {
     const inner = viewCallChain(expr.callee.base)
     if (inner) return { base: inner.base, modifiers: [...inner.modifiers, expr] }
   }
@@ -55,6 +83,49 @@ export function roundedCorners(radius: number, target: number): string {
 /** Swift escaping, including interpolation introducers and control characters. */
 export function swiftString(value: string): string {
   return '"' + Array.from(value, c => c === '\\' ? '\\\\' : c === '"' ? '\\"' : c === '\n' ? '\\n' : c === '\r' ? '\\r' : c === '\t' ? '\\t' : c.codePointAt(0)! < 32 || c.codePointAt(0) === 127 ? `\\u{${c.codePointAt(0)!.toString(16)}}` : c).join('') + '"'
+}
+
+/** A value read from somewhere, `item.title` or `price`, rather than one a type spells: `Date.now` names a type first. */
+const reference = (expr: Expr): boolean => expr.kind === 'identifier' ? /^[a-z_]/.test(expr.name) : expr.kind === 'memberAccess' && !!expr.base && reference(expr.base)
+
+/**
+ * The words of a string with values in it, `"Total: \(count) of \(limit)"`, as one
+ * value: a JSON array of strings that starts and ends with words and has the Swift
+ * inside each `\(…)` between them, `["Total: ", "count", " of ", "limit", ""]`. Writing it
+ * changes only the words, escaped as Swift needs them, and copies every value from the
+ * code byte for byte, whatever the value says. Undefined for a string with no values, or
+ * one written across lines or raw, whose escapes and indentation follow other rules.
+ */
+export function textPartsRecipe(literal: StringLiteralExpr, text: string): { value: string; write: (value: string) => Patch; problem: (value: string) => string | null; disabledReason?: string } | undefined {
+  const source = text.slice(literal.span.start, literal.span.end)
+  const values = literal.segments.filter(segment => segment.kind === 'interpolation')
+  if (!values.length || !source.startsWith('"') || source.startsWith('"""')) return undefined
+  // Each value as it is written, from its `\(` to its `)`.
+  const written = values.map(segment => text.slice(segment.span.start - 2, segment.span.end + 1))
+  if (written.some(value => !value.startsWith('\\(') || !value.endsWith(')'))) return undefined
+  const parts: string[] = []
+  let words = ''
+  for (const segment of literal.segments) {
+    if (segment.kind === 'text') { words += segment.value; continue }
+    parts.push(words, text.slice(segment.span.start, segment.span.end))
+    words = ''
+  }
+  parts.push(words)
+  /** The words typed, with every value as the code has it. */
+  const read = (value: string): string[] | null => {
+    const next = readTextParts(value)
+    return next && next.length === parts.length && next.every((part, index) => index % 2 === 0 || part === parts[index]) ? next : null
+  }
+  return {
+    value: writeTextParts(parts),
+    // Each run of words is a field of one line, which would drop a line break typed in the code.
+    ...(parts.some((part, index) => index % 2 === 0 && /[\r\n]/.test(part)) ? { disabledReason: 'These words have a line break, which is changed in Code.' } : {}),
+    problem: value => read(value) ? null : 'The values in this text stay as the code writes them. Change them in Code.',
+    write: value => {
+      const next = read(value) ?? parts
+      return { ...literal.span, text: '"' + next.map((part, index) => index % 2 ? written[(index - 1) / 2]! : swiftString(part).slice(1, -1)).join('') + '"' }
+    },
+  }
 }
 
 /** A modifier's name: `frame` for `.frame(width: 100)`. */
@@ -256,7 +327,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   }
   function replace(id: string, label: string, value: Expr, kind: ControlKind, options?: readonly string[], min?: number, max?: number, prefix = '.'): void {
     // Edit the literal branches, never erase the condition or replace linked data.
-    if (value.kind === 'ternary' && ['text', 'select', 'toggle'].includes(kind)) {
+    if (value.kind === 'ternary' && ['text', 'select', 'toggle', 'number'].includes(controlKind(kind).kind)) {
       const condition = raw(value.condition.span)
       replace(id + ':then', `${label} · when ${condition} is true`, value.then, kind, options, min, max, prefix)
       replace(id + ':else', `${label} · otherwise`, value.else, kind, options, min, max, prefix)
@@ -279,7 +350,8 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     }
   }
   function append(id: string, label: string, kind: ControlKind, value: string, format: (v: string) => string, options?: readonly string[], min?: number, max?: number, description = 'Adds a local modifier at the end of this view’s modifier chain. Earlier styles keep their order.'): void {
-    if (modifiers.some(m => !authoringCapability(modName(m), 'modifier', m.args.map(a => a.label)))) return
+    // A project's own modifier may return anything; any of Apple's can be followed by another.
+    if (modifiers.some(m => !isAppleCall(modName(m)))) return
     add(id, label, kind, value, v => ({ start: expr.span.end, end: expr.span.end, text: format(v) }), options, min, max, description)
   }
   function argument(id: string, label: string, name: string | null, kind: ControlKind, value: string, options?: readonly string[], min?: number): void {
@@ -335,7 +407,31 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   if (node.kind !== 'component' && constructorEditable && node.name === 'List' && !modifiers.some(m => modName(m) === 'listStyle')) append('add:listStyle', 'List style', 'select', '', v => `.listStyle(.${v})`, listStyles)
   if (node.kind !== 'component' && constructorEditable && node.name === 'RoundedRectangle') argument('shape:radius', 'Shape corner radius', 'cornerRadius', 'pt', '', undefined, 0)
   if (node.kind !== 'component' && constructorEditable && node.name === 'Spacer') argument('spacer:minLength', 'Minimum spacing', 'minLength', 'pt', '', undefined, 0)
-  if (node.kind !== 'component' && constructorEditable && node.name === 'Text' && base.args[0]) replace('content', 'Text', base.args[0].value, 'text')
+  if (node.kind !== 'component' && node.name === 'Text' && base.args[0]) textContent(base.args[0].value)
+  /**
+   * A Text's words. Written with values in them, the words around each `\(…)` are one
+   * value of their own (`textPartsRecipe`); a Text that is a value on its own shows it, read-only.
+   * Neither is the whole expression, which stays a value worked out in Swift, so neither
+   * names its span as the source it edits.
+   */
+  function textContent(value: Expr): void {
+    const property = node.properties.find(p => p.source?.start === value.span.start && p.source?.end === value.span.end)
+    const parts = constructorEditable && value.kind === 'stringLiteral' && !property?.declaration && property?.valueKind !== 'unsupported' ? textPartsRecipe(value, text) : undefined
+    if (parts) {
+      add('content:parts', 'Text', 'text', parts.value, parts.write, undefined, undefined, undefined, 'Changes the words around the values; each value stays as the code writes it.')
+      const recipe = recipes.at(-1)!
+      recipes[recipes.length - 1] = { ...recipe, problem: parts.problem, ...(parts.disabledReason ? { control: { ...recipe.control, disabledReason: parts.disabledReason } } : {}) }
+      return
+    }
+    if (constructorEditable) replace('content', 'Text', value, 'text')
+    const kind = property?.valueKind
+    const reason = value.kind === 'stringLiteral' ? undefined
+      : kind === 'data-binding' || base.args.slice(1).some(arg => ['format', 'style', 'formatter'].includes(arg.label ?? '')) && reference(value) ? 'This text comes from data. Change it in Code.'
+        : kind === 'component-argument' ? `This text is set where this ${property?.helperArgument ? 'helper' : 'view'} is used. Change it there.` : undefined
+    if (!reason) return
+    add('content:data', 'Text', 'text', raw(value.span), () => ({ ...value.span, text: raw(value.span) }), undefined, undefined, undefined, 'Shown as the code writes it.')
+    recipes[recipes.length - 1] = { ...recipes.at(-1)!, control: { ...recipes.at(-1)!.control, disabledReason: reason } }
+  }
   if (node.kind !== 'component' && constructorEditable && ['SecureField', 'Menu', 'DisclosureGroup', 'ContentUnavailableView', 'ProgressView', 'TextField', 'Toggle', 'Button', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Section', 'Stepper', 'Picker', 'DatePicker', 'ColorPicker'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
   /** A symbol's name, checked as it is typed: the field takes only a well-formed one. */
   function symbolName(value: Expr): void {
@@ -484,7 +580,8 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       }, ['Hug', 'Fill', 'Fixed'], undefined, undefined, 'Hug removes this axis constraint. Fill accepts the parent’s available size. Fixed starts at 100 points; edit the dimension to choose another size. Other frame arguments and surrounding modifiers are preserved.')
     }
   }
-  return recipes.map(recipe => ({ ...recipe, control: constrainNumericControl(recipe.control, node.name, node.behavior?.binding?.type) })).filter((recipe, index) => !recipes.slice(0, index).some(prior => prior.control.source.start === recipe.control.source.start && prior.control.source.end === recipe.control.source.end && prior.control.kind === recipe.control.kind && prior.control.value === recipe.control.value && prior.control.source !== node.source))
+  // A run of joined text takes text styles only: a padding or a size would make it a view (Wave 3a).
+  return recipes.map(recipe => ({ ...recipe, control: constrainNumericControl(recipe.control, node.name, node.behavior?.binding?.type) })).filter((recipe, index) => !(node.textRun && /^(add|fill):/.test(recipe.control.id)) && !recipes.slice(0, index).some(prior => prior.control.source.start === recipe.control.source.start && prior.control.source.end === recipe.control.source.end && prior.control.kind === recipe.control.kind && prior.control.value === recipe.control.value && prior.control.source !== node.source))
 }
 
 export function constrainNumericControl(control: DesignControl, view: string, type?: string): DesignControl {

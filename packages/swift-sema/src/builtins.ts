@@ -216,10 +216,10 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
  * preview does apply warned on every compile. Anything added here must not be there.
  */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
-  // layout
-  'safeAreaPadding', 'gridCellColumns', 'coordinateSpace',
+  // layout, and the order views overlap in
+  'safeAreaPadding', 'gridCellColumns', 'coordinateSpace', 'zIndex',
   // painting and effects
-  'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect', 'zIndex',
+  'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect',
   // a width of the system font, which the preview's text measurement cannot stretch
   'fontWidth',
 
@@ -247,6 +247,122 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   // interaction with no analogue in the preview
   'onHover', 'draggable', 'dropDestination', 'contentShape',
 ])
+
+/**
+ * Where the modifier stack lists one of SwiftUI's modifiers, by what it changes: what the
+ * view does, how it is laid out, or its text. Every name here is Apple's, whether or not
+ * the preview draws it. One of Apple's named in none of these changes how the view looks,
+ * and one the project declares is its own.
+ */
+export const MODIFIER_CATEGORIES: Readonly<Record<'behavior' | 'layout' | 'text', ReadonlySet<string>>> = {
+  behavior: new Set([
+    'task', 'onAppear', 'onDisappear', 'onChange', 'onReceive', 'onTapGesture', 'onLongPressGesture', 'onSubmit', 'onDelete', 'onMove',
+    'gesture', 'simultaneousGesture', 'highPriorityGesture', 'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'popover',
+    'navigationDestination', 'navigationTitle', 'navigationBarTitleDisplayMode', 'toolbar', 'tabItem', 'tag', 'id', 'environment',
+    'environmentObject', 'disabled', 'allowsHitTesting', 'animation', 'transition', 'searchable', 'contextMenu', 'accessibilityLabel',
+    'accessibilityIdentifier', 'accessibilityValue', 'accessibilityHint', 'accessibilityHidden',
+    'swipeActions', 'refreshable', 'contentShape', 'matchedGeometryEffect', 'phaseAnimator', 'keyframeAnimator', 'focused', 'onHover', 'draggable',
+    'dropDestination', 'onInsert', 'fileImporter', 'fileExporter', 'popoverTip', 'searchScopes', 'searchSuggestions', 'scrollDismissesKeyboard',
+    'scrollDisabled', 'navigationBarBackButtonHidden', 'accessibilityElement', 'accessibilityAddTraits', 'accessibilitySortPriority',
+    'navigationBarTitle', 'navigationBarItems', 'navigationBarHidden', 'toolbarTitleMenu', 'actionSheet', 'tabViewCustomization',
+    'textSelection', 'textContentType', 'autocapitalization', 'disableAutocorrection', 'writingToolsBehavior', 'findNavigator',
+    'findDisabled', 'submitScope', 'searchCompletion', 'searchPresentationToolbarBehavior', 'keyboardShortcut',
+    'onOpenURL', 'onContinueUserActivity', 'userActivity', 'handlesExternalEvents', 'onDrag', 'onDrop', 'onKeyPress',
+    'onContinuousHover', 'focusable', 'focusEffectDisabled', 'focusedValue', 'focusedSceneValue', 'defaultFocus', 'sensoryFeedback',
+    'help', 'deleteDisabled', 'moveDisabled', 'selectionDisabled', 'fileMover', 'photosPicker', 'quickLookPreview', 'widgetURL',
+    'containerValue', 'defersSystemGestures', 'menuActionDismissBehavior', 'buttonRepeatBehavior', 'contentTransition', 'transaction',
+    'matchedTransitionSource', 'navigationTransition', 'onGeometryChange', 'onScrollGeometryChange', 'onScrollPhaseChange',
+    'onScrollVisibilityChange', 'onPreferenceChange', 'preference', 'transformPreference', 'anchorPreference', 'transformAnchorPreference',
+    'accessibilityAction', 'accessibilityActions', 'accessibilityRemoveTraits', 'accessibilityInputLabels', 'accessibilityRepresentation',
+    'accessibilityRotor', 'accessibilityRespondsToUserInteraction', 'accessibilityShowsLargeContentViewer', 'accessibilityChildren',
+    'accessibilityFocused', 'accessibilityHeading', 'accessibilityAdjustableAction', 'accessibilityScrollAction',
+    'accessibilityIgnoresInvertColors', 'accessibilityTextContentType', 'accessibilityLinkedGroup', 'accessibilityCustomContent',
+    'accessibilityZoomAction', 'speechAlwaysIncludesPunctuation', 'speechSpellsOutCharacters', 'speechAdjustedPitch', 'speechAnnouncementsQueued',
+  ]),
+  layout: new Set([
+    'offset', 'position', 'fixedSize', 'alignmentGuide', 'safeAreaInset', 'containerRelativeFrame', 'layoutPriority', 'aspectRatio',
+    'scaledToFit', 'scaledToFill', 'ignoresSafeArea', 'zIndex', 'safeAreaPadding', 'gridCellColumns', 'coordinateSpace', 'geometryGroup',
+    'scrollTargetBehavior', 'scrollPosition',
+    'scenePadding', 'contentMargins', 'layoutValue', 'gridCellAnchor', 'gridCellUnsizedAxes', 'edgesIgnoringSafeArea',
+    'flipsForRightToLeftLayoutDirection', 'scrollClipDisabled', 'scrollBounceBehavior', 'scrollTargetLayout', 'defaultScrollAnchor',
+    'inspectorColumnWidth', 'navigationSplitViewColumnWidth',
+  ]),
+  text: new Set([
+    'bold', 'italic', 'fontWeight', 'fontDesign', 'multilineTextAlignment', 'textCase', 'underline', 'strikethrough', 'kerning', 'tracking',
+    'baselineOffset', 'lineSpacing', 'minimumScaleFactor', 'truncationMode', 'allowsTightening', 'monospacedDigit', 'fontWidth',
+    'textScale', 'typesettingLanguage', 'textRenderer',
+  ]),
+}
+
+/**
+ * Real SwiftUI view modifiers that change how a view looks, in neither `SUPPORTED_MODIFIERS`
+ * nor `UNIMPLEMENTED_MODIFIERS`: ones the checker has not been taught, which the preview
+ * neither applies nor names. Here so that Design knows them for what they are, Apple's,
+ * each returning `some View`, rather than a project's own whose type it cannot see; those
+ * that change what a view does, its layout or its text are in `MODIFIER_CATEGORIES`.
+ * Deprecated spellings are real too, and still build.
+ */
+export const OTHER_APPLE_MODIFIERS: ReadonlySet<string> = new Set([
+  'containerShape', 'backgroundStyle', 'colorInvert', 'luminanceToAlpha', 'containerBackground', 'colorScheme', 'listItemTint',
+  'symbolEffectsRemoved', 'hoverEffect', 'hoverEffectDisabled', 'privacySensitive', 'headerProminence', 'badgeProminence',
+  'listRowSeparatorTint', 'listSectionSeparatorTint', 'invalidatableContent', 'backgroundExtensionEffect', 'glassEffectID',
+  'glassEffectUnion', 'glassEffectTransition', 'buttonSizing', 'labelsHidden', 'scrollIndicatorsFlash', 'scrollEdgeEffectStyle',
+  'scrollEdgeEffectHidden', 'navigationViewStyle', 'navigationSubtitle', 'toolbarColorScheme', 'toolbarBackgroundVisibility',
+  'toolbarVisibility', 'toolbarTitleDisplayMode', 'toolbarRole', 'persistentSystemOverlays', 'statusBar', 'tabViewBottomAccessory',
+  'tabBarMinimizeBehavior', 'presentationCompactAdaptation', 'presentationContentInteraction', 'presentationSizing', 'tableStyle',
+  'formStyle', 'groupBoxStyle', 'disclosureGroupStyle', 'controlGroupStyle', 'navigationSplitViewStyle', 'indexViewStyle',
+  'labeledContentStyle', 'textEditorStyle', 'menuIndicator', 'menuOrder', 'tipBackground', 'tipViewStyle', 'widgetAccentable',
+  'backgroundPreferenceValue', 'overlayPreferenceValue',
+])
+
+/**
+ * The modifiers that keep a Text a Text, each by the iOS it does so from: the methods of
+ * SwiftUI's own `extension Text` that return `Text`, in the iOS 27 SDK. Only these can be
+ * written on a run of texts joined with `+`, and below iOS 16 a Text-only modifier still
+ * applies after them, as the chain is still a Text.
+ */
+export const KEEPS_TEXT: Readonly<Record<string, number>> = {
+  font: 13, fontWeight: 13, bold: 13, italic: 13, underline: 13, strikethrough: 13, kerning: 13, tracking: 13, baselineOffset: 13,
+  foregroundColor: 13, monospacedDigit: 15, fontWidth: 16, fontDesign: 16.1, monospaced: 16.4, foregroundStyle: 17, textScale: 17,
+  typesettingLanguage: 17,
+}
+
+/** Whether a modifier keeps a Text a Text at a deployment target (`KEEPS_TEXT`). */
+export const keepsText = (name: string, target: number): boolean => (KEEPS_TEXT[name] ?? Number.POSITIVE_INFINITY) <= target
+
+/** Calls only an Image takes, each giving back an Image. */
+export const IMAGE_CALLS: ReadonlySet<string> = new Set(['resizable', 'renderingMode', 'interpolation', 'antialiased'])
+/** Calls only a Shape takes, each giving back the shape it changes: once any other modifier is applied it is no longer a shape. */
+export const SHAPE_CALLS: ReadonlySet<string> = new Set(['trim', 'inset', 'rotation', 'scale', 'offset', 'transform', 'size'])
+/** A shape's own paint, which ends its shape calls. */
+export const SHAPE_PAINTS: ReadonlySet<string> = new Set(['fill', 'stroke', 'strokeBorder'])
+/** Calls only a ForEach takes, as the dynamic content it is. */
+export const DYNAMIC_CALLS: ReadonlySet<string> = new Set(['onDelete', 'onMove', 'onInsert'])
+
+/**
+ * Calls only an Image, a Shape or a ForEach takes, each giving back its own type: real
+ * SwiftUI, and anything may follow one, but a modifier written before it leaves it no
+ * Image, Shape or ForEach to apply to. They stay where the view's own call put them. A
+ * shape's `offset` is any view's too, so it is one of Apple's view modifiers.
+ */
+export const OWN_TYPE_CALLS: ReadonlySet<string> = new Set([...IMAGE_CALLS, ...SHAPE_CALLS, ...SHAPE_PAINTS, ...DYNAMIC_CALLS].filter(name => name !== 'offset'))
+
+/**
+ * Apple's view modifiers: the ones the preview applies, the ones it names and does not
+ * apply, and the rest of SwiftUI's. Each takes any view and returns `some View`, so Design
+ * can write a modifier before or after one without changing whether the code builds. A
+ * name outside this set and `OWN_TYPE_CALLS` is the project's own, whose type Design
+ * cannot see.
+ */
+export const APPLE_VIEW_MODIFIERS: ReadonlySet<string> = new Set(
+  [...SUPPORTED_MODIFIERS, ...UNIMPLEMENTED_MODIFIERS, ...OTHER_APPLE_MODIFIERS, ...Object.values(MODIFIER_CATEGORIES).flatMap(names => [...names])].filter(name => !OWN_TYPE_CALLS.has(name)),
+)
+
+/**
+ * A call SwiftUI declares on a view: a view modifier, or a call only the view's own type
+ * takes. Whether the preview draws it is `SUPPORTED_MODIFIERS`'s to say.
+ */
+export const isAppleCall = (name: string): boolean => APPLE_VIEW_MODIFIERS.has(name) || OWN_TYPE_CALLS.has(name)
 
 /**
  * SwiftUI blend modes the preview can draw, mapped to the CSS mode that means the same.
@@ -509,6 +625,3 @@ export function isKnownGlobal(name: string): boolean {
   )
 }
 
-export function isKnownModifier(name: string): boolean {
-  return SUPPORTED_MODIFIERS.has(name) || UNIMPLEMENTED_MODIFIERS.has(name)
-}

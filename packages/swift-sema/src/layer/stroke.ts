@@ -3,7 +3,8 @@ import { BORDER_POSITIONS, borderOf, borderSource, cornersOf, modifierName, rewr
 import { SLOT } from '../authoring-modifiers'
 import { insertCalls, insertionIndex, modifierPrefix, replaceRun, runHasComment, type Patch } from './chain-edit'
 import { colorSource, readColor, sameColor } from './color'
-import { SHAPE_CALLS, isShapeView, runAt, type ChainSlots } from './slots'
+import { SHAPE_CALLS } from '../builtins'
+import { isShapeView, runAt, type ChainSlots } from './slots'
 import { cardRefusal, commented, setTwice, type LayerContext } from './context'
 import { isToken, lengthOf, lengthSource } from './values'
 

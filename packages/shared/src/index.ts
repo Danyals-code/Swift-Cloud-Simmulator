@@ -14,6 +14,7 @@ export * from './export-formats'
 export * from './view-layer'
 export * from './page-views'
 export * from './authoring'
+export * from './view-parts'
 export * from './authoring-capabilities'
 export * from './design-edit'
 

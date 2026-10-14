@@ -45,7 +45,7 @@ function kindOf(d: Diagnostic): DesignWarning['kind'] {
 function sentenceOf(d: Diagnostic): string {
   const feature = d.feature ?? ''
   if (feature === 'Link' || feature === 'ShareLink') return `Tapping it opens nothing in the preview. In the app it opens ${feature === 'Link' ? 'the link' : 'the share sheet'}.`
-  let match = /^'(\.\w+)' is recognised but not applied/.exec(d.message)
+  let match = /^'(\.\w+)' is recognized but not applied/.exec(d.message)
   if (match) return `The preview doesn't apply ${match[1]}. The app does.`
   match = /^The preview does not recognise the attribute '(@\w+)'/.exec(d.message)
   if (match) return `The preview doesn't know ${match[1]} and ignores it. If it isn't Swift's or SwiftUI's, the app won't build.`

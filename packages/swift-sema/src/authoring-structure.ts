@@ -7,15 +7,16 @@ type StructureOperation = Extract<AuthoringOperation, { kind: 'layer-duplicate' 
 /**
  * The stack Wrap writes around the selected layers, before its `{`. Grouped the way they
  * already sit (a column in a column, or in a scroll view that scrolls up and down), it
- * takes the parent's alignment and spacing, so nothing moves (D3); stacked another way,
- * it starts at a spacing of 16.
+ * takes the parent's alignment and spacing, so nothing moves (D3). Stacked another way,
+ * it keeps the gap they had, the parent's spacing, and no alignment, which runs across
+ * the other axis; with no spacing written there, it writes none either.
  */
 export function wrapperOf(ctx: FeatureContext, node: AuthoringNode, layout: StackLayout): string {
-  if (groupLayoutOf(ctx.nodes, node) !== layout) return layout === 'ZStack' ? 'ZStack' : `${layout}(spacing: 16)`
   // A scroll view or a list sets no spacing or alignment of its own to take.
   const parent = layoutParentOf(ctx.nodes, node)
   const call = parent && stackLayoutOf(parent.name) ? callOf(ctx, parent) : undefined
-  const kept = call?.args.filter(arg => arg.label === 'alignment' || arg.label === 'spacing').map(arg => raw(ctx, arg.span)) ?? []
+  const along = groupLayoutOf(ctx.nodes, node) === layout
+  const kept = layout === 'ZStack' && !along ? [] : call?.args.filter(arg => arg.label === 'spacing' || along && arg.label === 'alignment').map(arg => raw(ctx, arg.span)) ?? []
   return kept.length ? `${layout}(${kept.join(', ')})` : layout
 }
 
