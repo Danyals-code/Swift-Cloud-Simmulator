@@ -2,7 +2,7 @@
 
 import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, SourceSpan } from '@studio/shared'
 import { screenTitleControl } from '../../lib/screens'
-import { sheetSettings, TOOLBAR_PLACES, toolbarGroups } from '../../lib/screenBars'
+import { SEARCH_PROMPT, sheetSettings, TOOLBAR_PLACES, toolbarGroups } from '../../lib/screenBars'
 import { PAGE_KINDS, type PageKind } from '../../lib/pageKinds'
 import { PropertyControl } from '../PropertyControl'
 import styles from './Settings.module.css'
@@ -18,9 +18,6 @@ interface BarsProps {
   onNodeCommand: (node: AuthoringNode, operation: AuthoringOperation) => Promise<string | null>
   onSelect: (node: AuthoringNode) => void
 }
-
-/** What a new search field asks for until the designer writes their own. */
-const PROMPT = 'Search'
 
 /**
  * The bars a screen draws (Wave 4b): its title, its toolbar items by where they sit, and its
@@ -55,7 +52,7 @@ export function BarsSection({ snapshot, definition, root, busy, onNodeChange, on
       {bars.problem && <p className={styles.note}>{bars.problem}</p>}
       <div className={styles.row}><span>Search field</span>
         <button type="button" role="switch" className={inspector.switch} aria-label="Search field" aria-checked={!!search} disabled={busy || !search && !!bars.searchProblem} title={search ? undefined : bars.searchProblem}
-          onClick={() => command(search ? { kind: 'searchable-remove' } : { kind: 'searchable-add', prompt: PROMPT })}><i /></button>
+          onClick={() => command(search ? { kind: 'searchable-remove' } : { kind: 'searchable-add', prompt: SEARCH_PROMPT })}><i /></button>
       </div>
       {!search && bars.searchProblem && <p className={styles.note}>{bars.searchProblem}</p>}
       {search && (prompt && searchNode

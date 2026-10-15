@@ -153,11 +153,13 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
     for (const [j, arg] of m.args.entries()) {
       const key = `${id}:${j}`, title = name.replace(/([A-Z])/g, ' $1') + (arg.label ? ' · ' + arg.label : '')
       if (STYLE_OPTIONS[name] && !arg.label) replace(key, title, arg.value, 'select', STYLE_OPTIONS[name])
-      if (['saturation', 'contrast', 'grayscale', 'minimumScaleFactor'].includes(name)) replace(key, title, arg.value, 'number', undefined, 0, ['grayscale', 'minimumScaleFactor'].includes(name) ? 1 : undefined)
+      if (['saturation', 'contrast', 'grayscale', 'minimumScaleFactor', 'trim'].includes(name)) replace(key, title, arg.value, 'number', undefined, 0, ['grayscale', 'minimumScaleFactor', 'trim'].includes(name) ? 1 : undefined)
       if (['brightness', 'layoutPriority'].includes(name)) replace(key, title, arg.value, 'number')
       if (['kerning', 'baselineOffset', 'listRowSpacing', 'listSectionSpacing', 'position'].includes(name)) replace(key, title, arg.value, 'pt')
       if (['allowsHitTesting', 'accessibilityHidden', 'allowsTightening', 'fixedSize'].includes(name)) replace(key, title, arg.value, 'toggle')
       if (['accessibilityValue', 'accessibilityHint'].includes(name)) replace(key, title, arg.value, 'text')
+      // An inset bar's edge (Wave 4c): top or bottom, or leading or trailing, as its alignment takes one of them.
+      if (name === 'safeAreaInset' && arg.label === 'edge') replace(key, title, arg.value, 'select', arg.value.kind === 'memberAccess' && ['leading', 'trailing'].includes(arg.value.member) ? ['leading', 'trailing'] : ['top', 'bottom'])
       if (name === 'frame' && ['maxWidth', 'maxHeight'].includes(arg.label ?? '') && arg.value.kind === 'memberAccess' && !arg.value.base && arg.value.member === 'infinity') add(key + ':bound', title, 'pt', '', v => ({ ...arg.value.span, text: v }), undefined, 0)
       if (name === 'colorMultiply') replace(key, 'Multiply color', arg.value, 'select', colors, undefined, undefined, 'Color.')
       if (name === 'scaleEffect') replace(key, arg.label ? `Scale ${arg.label}` : 'Scale', arg.value, 'number')

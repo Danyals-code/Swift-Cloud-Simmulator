@@ -526,6 +526,8 @@ function RenderNodeView({
           scrollbarWidth: 'none',
           // iOS scrollers do not capture a page scroll once they hit their end.
           overscrollBehavior: 'contain',
+          // A ScrollView that pages comes to rest on a page (Wave 4c): see `ScrollContent`.
+          scrollSnapType: scroll.paging ? scroll.axis === 'horizontal' ? 'x mandatory' : 'y mandatory' : undefined,
         }
       : {}),
     ...(node.border
@@ -801,9 +803,16 @@ function tapBeneath(layer: HTMLElement, at: { clientX: number; clientY: number }
  * A scroll view's children are laid out at the content's full extent, which is what
  * gives the browser something to scroll. Anything else just wraps its children
  * without adding a box.
+ *
+ * A scroll view that pages, `.scrollTargetBehavior(.paging)`, comes to rest a whole scroll
+ * view's width or height on, one page a swipe, as iOS's does (Wave 4c). The browser snaps to
+ * an empty mark at each page's start; the last one it can't reach, it rests at the end.
  */
 function ScrollContent({ node, children }: { node: RenderNode; children: ReactNode }) {
   if (!node.scroll) return <>{children}</>
+  const horizontal = node.scroll.axis === 'horizontal'
+  const page = horizontal ? node.frame.width : node.frame.height
+  const pages = node.scroll.paging && page > 0 ? Math.ceil((horizontal ? node.scroll.content.width : node.scroll.content.height) / page) : 0
   return (
     <div
       style={{
@@ -812,6 +821,13 @@ function ScrollContent({ node, children }: { node: RenderNode; children: ReactNo
         height: node.scroll.content.height,
       }}
     >
+      {Array.from({ length: pages }, (_, index) => (
+        <div
+          key={`page-${index}`}
+          aria-hidden
+          style={{ position: 'absolute', left: horizontal ? index * page : 0, top: horizontal ? 0 : index * page, width: 1, height: 1, pointerEvents: 'none', scrollSnapAlign: 'start', scrollSnapStop: 'always' }}
+        />
+      ))}
       {children}
     </div>
   )

@@ -2,9 +2,10 @@ import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, TEXT_STYLES, TOOLBAR_ITEMS, au
 import { advancedControls } from './design-advanced-controls'
 import { toolbarItemControls } from './design-object-controls'
 import { sheetControls } from './design-sheet-controls'
+import { pagerControls, safeAreaControl, setAround } from './design-content-controls'
 import { authoringViewMinimum } from './authoring-view'
 import { Lexer, type CallExpr, type Expr, type Stmt, type StringLiteralExpr } from '@studio/swift-syntax'
-import { BORDER_POSITIONS, borderOf, cornersOf, rewriteBorder, type BorderPosition } from './authoring-border'
+import { BORDER_POSITIONS, borderOf, cornersOf, modifierName, rewriteBorder, type BorderPosition } from './authoring-border'
 import { isAppleCall } from './builtins'
 import type { LayerProject } from './layer/context'
 import { LENGTH_HOSTS, constantNumber, declarationOf, literalNumber, resolveConstant } from './layer/tokens'
@@ -155,15 +156,13 @@ export function textPartsRecipe(literal: StringLiteralExpr, text: string): { val
   }
 }
 
-/** A modifier's name: `frame` for `.frame(width: 100)`. */
-const modName = (m: CallExpr) => m.callee.kind === 'memberAccess' ? m.callee.member : ''
 
 /** An axis's size constraints, by label: `width`, the `maxWidth` Fill writes, and `minWidth`. */
 const AXIS_LABELS = { width: ['width', 'maxWidth', 'minWidth'], height: ['height', 'maxHeight', 'minHeight'] } as const
 
 /** The frames that set a view's size along one axis. */
 function axisFrames(modifiers: readonly CallExpr[], axis: 'width' | 'height'): CallExpr[] {
-  return modifiers.filter(m => modName(m) === 'frame' && m.args.some(arg => (AXIS_LABELS[axis] as readonly string[]).includes(arg.label ?? '')))
+  return modifiers.filter(m => modifierName(m) === 'frame' && m.args.some(arg => (AXIS_LABELS[axis] as readonly string[]).includes(arg.label ?? '')))
 }
 
 /** A view statement's call, past what is set on it: `Spacer` for `Spacer().frame(width: 8)`. */
@@ -361,7 +360,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   const recipes: ControlRecipe[] = []
   const scope = node.properties.some(p => p.scope === 'template') ? 'All rows in this template' : `Defined in ${node.owner}`
   const raw = (span: SourceSpan) => text.slice(span.start, span.end)
-  const ownModifier = modifiers.some(m => !isAppleCall(modName(m)))
+  const ownModifier = modifiers.some(m => !isAppleCall(modifierName(m)))
   if (toolbarItem) { toolbarItemControls(base, text, targetVersion, add); return recipes }
   /**
    * A control, shown read only with `disabledReason` when it can't be changed here, and with
@@ -477,7 +476,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     const indicators = base.args.find(a => a.label === 'showsIndicators')
     if (indicators) replace('scroll:indicators', 'Show indicators', indicators.value, 'toggle')
   }
-  if (node.kind !== 'component' && constructorEditable && node.name === 'List' && !modifiers.some(m => modName(m) === 'listStyle')) append('add:listStyle', 'List style', 'select', '', v => `.listStyle(.${v})`, listStyles)
+  if (node.kind !== 'component' && constructorEditable && node.name === 'List' && !modifiers.some(m => modifierName(m) === 'listStyle')) append('add:listStyle', 'List style', 'select', '', v => `.listStyle(.${v})`, listStyles)
   if (node.kind !== 'component' && constructorEditable && node.name === 'RoundedRectangle') argument('shape:radius', 'Shape corner radius', 'cornerRadius', 'pt', '', undefined, 0)
   if (node.kind !== 'component' && constructorEditable && node.name === 'Spacer') argument('spacer:minLength', 'Minimum spacing', 'minLength', 'pt', '', undefined, 0)
   if (node.kind !== 'component' && node.name === 'Text' && base.args[0]) textContent(base.args[0].value)
@@ -504,6 +503,9 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   }
   // A Section's title is its Header, read with its footer (Wave 4a).
   if (node.kind !== 'component' && constructorEditable && ['SecureField', 'Menu', 'DisclosureGroup', 'ContentUnavailableView', 'ProgressView', 'TextField', 'Toggle', 'Button', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Stepper', 'Picker', 'DatePicker', 'ColorPicker'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
+  // A card titled with its label before iOS 15, `GroupBox(label: Text("Title"))`, has the Title the words give it (Wave 4c).
+  const cardLabel = node.kind !== 'component' && constructorEditable && node.name === 'GroupBox' && base.args[0]?.label === 'label' ? viewCallChain(base.args[0].value)?.base : undefined
+  if (cardLabel?.callee.kind === 'identifier' && cardLabel.callee.name === 'Text' && cardLabel.args.length === 1 && cardLabel.args[0]!.label === null) replace('title', 'Title', cardLabel.args[0]!.value, 'text')
   /** A symbol's name, checked as it is typed: the field takes only a well-formed one. */
   function symbolName(value: Expr): void {
     const first = recipes.length
@@ -527,7 +529,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   }
   // A Picker's option's Value: its tag, which the Picker's selection is compared with (Wave 4a).
   // A tab's tag, or any other, is not a value a designer sets.
-  const tag = modifiers.filter(m => modName(m) === 'tag' && m.args.length === 1 && m.args[0]!.label === null).at(-1)?.args[0]!.value
+  const tag = modifiers.filter(m => modifierName(m) === 'tag' && m.args.length === 1 && m.args[0]!.label === null).at(-1)?.args[0]!.value
   if (tag && byId && pickerAbove(node, byId)) {
     const first = recipes.length, type = tag.kind === 'memberAccess' && tag.base?.kind === 'identifier' ? tag.base.name : undefined
     const cases = type && enumCases(project.context, type)
@@ -551,7 +553,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       add(`modifier:${i}:position`, 'border · position', 'select', border.position, v => rewrite({ position: v as BorderPosition }), BORDER_POSITIONS, undefined, undefined, undefined, origin)
       continue
     }
-    const name = modName(m)
+    const name = modifierName(m)
     const capability = authoringCapability(name, 'modifier', m.args.map(a => a.label))
     if (!capability || targetVersion < Number.parseFloat(capability.minimumIOS)) continue
     if (name === 'padding' && !m.args.length && !m.trailingClosure) {
@@ -566,7 +568,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     }
     for (const [j, arg] of m.args.entries()) {
       const id = `modifier:${i}:${j}`
-      const label = `${name}${arg.label ? ' · ' + arg.label : ''}${modifiers.filter(v => modName(v) === name).length > 1 ? ' · ' + (i + 1) : ''}`
+      const label = `${name}${arg.label ? ' · ' + arg.label : ''}${modifiers.filter(v => modifierName(v) === name).length > 1 ? ' · ' + (i + 1) : ''}`
       if (['opacity', 'cornerRadius', 'lineLimit'].includes(name) && m.args.length === 1 && !arg.label) replace(id, label, arg.value, name === 'opacity' ? '%' : name === 'cornerRadius' ? 'pt' : 'number', undefined, 0, name === 'opacity' ? 1 : undefined)
       if (name === 'padding' && !arg.label && (m.args.length === 1 || j === 1)) replace(id, label, arg.value, 'pt', undefined, 0)
       if (name === 'frame' && ['width', 'height', 'minWidth', 'idealWidth', 'maxWidth', 'minHeight', 'idealHeight', 'maxHeight'].includes(arg.label ?? '')) replace(id, label, arg.value, 'pt', undefined, 0)
@@ -626,7 +628,11 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     const textOf = (file: string) => project.context.files.find(f => f.id === file)?.text ?? ''
     sheetControls({ node, expr, base, modifiers, text, target: targetVersion, colors, appendable: !ownModifier, structNamed, textOf }, add)
   }
-  const has = (name: string) => modifiers.some(m => modName(m) === name)
+  // Any view can reach under the bars, but not a run of joined text, which a modifier would make a view (Wave 4c).
+  if (!node.textRun) safeAreaControl(expr, base, modifiers, text, targetVersion, !ownModifier, add)
+  // A carousel takes a Dots background set on a view around it (Wave 4c).
+  if (node.kind === 'view' && node.name === 'TabView') pagerControls(expr, modifiers, text, targetVersion, add, byId && setAround(node, byId, 'indexViewStyle'))
+  const has = (name: string) => modifiers.some(m => modifierName(m) === name)
   if (!has('font')) append('add:font', 'Font size', 'pt', '', v => `.font(.system(size: ${Number(v)}))`, undefined, 1, 1000)
   if (!has('foregroundColor') && !has('foregroundStyle')) append('add:foreground', 'Text color', 'select', '', v => `.${targetVersion >= 15 ? 'foregroundStyle' : 'foregroundColor'}(${SYSTEM_COLORS.includes(v) ? `Color(.${v})` : `Color.${v}`})`, colors)
   if (!has('padding')) append('add:padding', 'Padding', 'pt', '', v => `.padding(${Number(v)})`, undefined, 0)

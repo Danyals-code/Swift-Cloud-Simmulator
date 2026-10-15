@@ -216,6 +216,8 @@ export interface ScrollElement extends ElementBase {
   readonly kind: 'scroll'
   readonly axis: Axis
   readonly showsIndicators: boolean
+  /** `.scrollTargetBehavior(.paging)`: a scroll comes to rest a whole scroll view's size on (Wave 4c). */
+  readonly paging?: boolean
   readonly content: LayoutElement
 }
 

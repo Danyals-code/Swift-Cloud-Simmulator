@@ -1,8 +1,9 @@
 'use client'
 
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { argumentLayerProblem, groupLayoutOf, helperPlaces, isHelperCall, isHelperDefinition, isStructuralLayer, layerMoveProblem, tappableProblem, CONTEXT_MENU_PREVIEW, LAYER_MOVE_CONTAINERS, LAYOUT_WORDS, MODIFIER_SLOTS } from '@studio/shared'
+import { argumentLayerProblem, groupLayoutOf, helperPlaces, isContainerLayout, isHelperCall, isHelperDefinition, isStructuralLayer, layerMoveProblem, tappableProblem, CONTEXT_MENU_PREVIEW, LAYER_MOVE_CONTAINERS, LAYOUT_WORDS, MODIFIER_SLOTS } from '@studio/shared'
 import type { AuthoringNode, AuthoringSelection, AuthoringSnapshot, DesignEditRequest, HiddenViewInfo, SourceFile, SourceSpan, ViewLayer } from '@studio/shared'
+import { containerActions } from '../lib/layerActions'
 import { rebaseSourceLayers, sourceLayerHelperReach, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from '../lib/sourceLayers'
 import { Icon, type IconName } from './ui/Icon'
 import { MenuButton, type MenuItem } from './ui/Menu'
@@ -158,11 +159,13 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
     // A view written as an argument keeps its name; the rest is off, and says why.
     const slotProblem = argumentLayerProblem(snapshot.nodes, node)
     const tapProblem = tappableProblem(snapshot.nodes, node)
+    // Group in and Unwrap, each off where the planner would refuse it, with its reason in full (Wave 4c).
+    const grouped = groupLayoutOf(snapshot.nodes, node)
     const structure: MenuItem[] = [
       { value: 'copy', label: 'Copy', detail: SHORTCUT_KEYS.copy, disabled: !isStructuralLayer(node) || !onCopy },
       { value: 'paste', label: 'Paste', detail: SHORTCUT_KEYS.paste, disabled: !canEdit || !onPaste },
       { value: 'duplicate', label: 'Duplicate', detail: SHORTCUT_KEYS.duplicate, disabled: !canEdit, separated: true },
-      ...(['VStack', 'HStack', 'ZStack'] as const).map(layout => ({ value: layout, label: `Group in ${LAYOUT_WORDS[layout]}`, detail: layout === groupLayoutOf(snapshot.nodes, node) ? SHORTCUT_KEYS.group : undefined, disabled: !canEdit })),
+      ...containerActions(snapshot.nodes, node, idsFor(node)).map(({ value, label, reason }) => ({ value, label, detail: value === grouped ? SHORTCUT_KEYS.group : undefined, disabled: !canEdit || !!reason, ...(reason && canEdit ? { title: reason } : {}) })),
       // A Button around it that keeps its look, for When tapped to say what it does (D16).
       { value: 'tappable', label: 'Make tappable', disabled: !canEdit || !!tapProblem, ...(tapProblem && canEdit ? { title: tapProblem } : {}) },
       { value: 'reparent', label: 'Move into…', disabled: !canEdit },
@@ -186,7 +189,8 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
     else if (value === 'copy') onCopy?.(node)
     else if (value === 'paste') onPaste?.(node)
     else if (value === 'duplicate') void edit(node, { kind: 'layer-duplicate' })
-    else if (value === 'VStack' || value === 'HStack' || value === 'ZStack') void edit(node, { kind: 'layer-wrap', ids: idsFor(node), layout: value })
+    else if (isContainerLayout(value)) void edit(node, { kind: 'layer-wrap', ids: idsFor(node), layout: value })
+    else if (value === 'unwrap') void edit(node, { kind: 'layer-unwrap' })
     else if (value === 'tappable') void edit(node, { kind: 'make-tappable' })
     else if (value === 'enter') enter(node)
     else if ((value === 'up' || value === 'down') && !menus(node).find(item => item.value === value)?.disabled) void edit(node, { kind: 'move', direction: value === 'up' ? -1 : 1 })

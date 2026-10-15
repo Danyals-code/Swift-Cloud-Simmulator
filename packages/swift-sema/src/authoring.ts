@@ -1,4 +1,4 @@
-import { isRow, modifierModel } from './authoring-modifiers'
+import { isRow, isTab, modifierModel } from './authoring-modifiers'
 import { layerContext, layerProject, readLayer } from './layer'
 import { borderOf, cornersOf } from './authoring-border'
 import { enrichAuthoring } from './authoring-features'
@@ -14,6 +14,8 @@ import { containerContent, helperCall, helperContent, helperReach, setByEveryIni
 import { joinedText } from './authoring-runs'
 import { colorOpacityParts, designControlRecipes, markViewBase, viewCallChain, AUTHORING_COLORS, AUTHORING_FONTS } from './design-controls'
 import { TOKEN_HOSTS } from './layer/tokens'
+import { pagesThrough } from './page-style'
+import { isSwiftUIView } from './authoring-view'
 
 /** What a name in scope reads: its kind of value, where it is declared, and whether a helper's call gives it. */
 interface Binding { kind: PropertyValueKind; source: SourceSpan; helper?: true }
@@ -39,6 +41,13 @@ function callName(expr: Expr): string | null {
   if (expr.kind === 'identifier') return expr.name
   if (expr.kind === 'memberAccess' && (!expr.base || expr.base.kind === 'identifier' && expr.base.name === 'SwiftUI')) return expr.member
   return null
+}
+
+/** The `Color.blue` a chain starts at, which a ViewBuilder takes as a view (Wave 4c); `Color(…)` is a call, and a view as one already. */
+function colorView(expr: Expr): Expr | undefined {
+  let root = expr
+  while (root.kind === 'call' && root.callee.kind === 'memberAccess' && root.callee.base) root = root.callee.base
+  return root.kind === 'memberAccess' && root.base?.kind === 'identifier' && root.base.name === 'Color' ? root : undefined
 }
 
 /** The closure of SwiftUI's older alert, `.alert(isPresented:) { Alert(…) }`: one that returns an `Alert` rather than the alert's actions. */
@@ -146,6 +155,9 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   const layerOf = (id: string | undefined) => id === undefined ? undefined : byId.get(id)
   /** What `inTemplate` found for each layer. */
   const templated = new Map<MutableNode, boolean>()
+  /** The TabViews whose views are swiped through as pages, which have no tabs (Wave 4c). */
+  const pagers = new Set<string>()
+  const pages = (tabView: AuthoringNode) => pagers.has(tabView.id)
   const roots: string[] = []
   const declaredNames = new Set<string>()
   const definitions = new Map<string, { decl: StructDecl; node: MutableNode }[]>()
@@ -301,15 +313,20 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       return
     }
     if (joined?.parenthesised) markViewBase(joined.sum, joined.parenthesised)
+    // A colour written as a view, `Color.blue`, is a Color, whose colour is its Fill (Wave 4c).
+    const color = !helper && !joined && !definitions.has('Color') ? colorView(expr) : undefined
+    if (color) markViewBase(color)
     const chain = viewCallChain(expr)
     if (!chain) { add('opaque', 'Custom expression', expr.span, parent.owner, parent); return }
-    const name = joined ? 'Text' : helper ? helper.helper.name : callName(chain.base.callee)
+    const name = joined ? 'Text' : helper ? helper.helper.name : color ? 'Color' : callName(chain.base.callee)
     if (!name) { add('opaque', 'Custom expression', expr.span, parent.owner, parent); return }
     const custom = helper ? [{ node: helperNode(helper.helper) }] : definitions.get(name) ?? []
-    const builtin = custom.length === 0 && SUPPORTED_VIEWS.has(name)
+    const builtin = custom.length === 0 && isSwiftUIView(name)
     const capability = builtin ? authoringCapability(name, 'view', chain.base.args.map(a => a.label)) : undefined
     const node = add(custom.length === 1 ? 'component' : name === 'ForEach' || name === 'List' && chain.base.args.length > 0 ? 'collection' : builtin ? 'view' : 'opaque', name, expr.span, parent.owner, parent)
     if (custom.length === 1) Object.assign(node, { definitionId: custom[0]!.node.id })
+    // A TabView whose views are swiped through gives them no tab (Wave 4c).
+    if (builtin && name === 'TabView' && pagesThrough(chain.modifiers)) pagers.add(node.id)
     if (helper) Object.assign(node, { helper: true })
     const shownAs = node.kind !== 'opaque' ? shown.get(expr) : undefined
     if (shownAs) Object.assign(node, { presented: shownAs })
@@ -369,7 +386,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }
-    if (!title) Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', { deploymentTarget: input.deploymentTarget, allowEdits: !!node.controls, row: isRow(node, layerOf), presented: shownAs }))
+    if (!title) Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', { deploymentTarget: input.deploymentTarget, allowEdits: !!node.controls, row: isRow(node, layerOf), tab: isTab(node, layerOf, pages), presented: shownAs }))
     // The same chain read as a layer: one value per Figma property (Wave 2).
     if (node.controls && !title && !isNonView(node)) {
       const layer = readLayer(expr, layerContext(layers, node, parent, texts.get(node.source.file) ?? ''))

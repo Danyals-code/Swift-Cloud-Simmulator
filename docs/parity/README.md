@@ -48,6 +48,22 @@ what Wave 4b draws. They cover:
 Every sheet is up at launch, so only the pulled-down search needed a gesture.
 `tests/system-ui-bars.test.ts` cites these.
 
+13 more in the same folder, paired with `tests/fixtures/ios27-system-ui-4c.swift`, measure
+what Wave 4c draws. They cover:
+- a page-style `TabView` 240 tall between a title and a button, drawn in place with both
+  kept, on white pages and on coloured ones;
+- its dots shown automatically, always and never, for one page and for several, with the
+  second of four selected, and on the capsule `.indexViewStyle(.page(backgroundDisplayMode:
+  .always))` gives them;
+- a root `TabView` in the page style, whose page fills the safe area under its dots;
+- a `ScrollView` with `.scrollTargetBehavior(.paging)`, at rest and after a swipe, with and
+  without `.contentMargins(16, for: .scrollContent)`.
+
+The dots are white over any page, so on a white one they can't be seen in iOS either; the
+others are white at 0.44, or black at 0.24 on the capsule. A swipe pages by the scroll view's
+width; with content margins it moves the content by 378, which the preview doesn't draw.
+`tests/system-ui-pager.test.ts` cites these.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh

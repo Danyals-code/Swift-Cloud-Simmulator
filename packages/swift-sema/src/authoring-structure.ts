@@ -1,5 +1,5 @@
-import { groupLayoutOf, isStructuralLayer, layerMoveProblem, layoutParentOf, stackLayoutOf, tappableProblem, LAYOUT_WORDS, type AuthoringNode, type AuthoringOperation, type StackLayout } from '@studio/shared'
-import { forEachChild, insertView, viewSiteAt, type Node } from '@studio/swift-syntax'
+import { groupLayoutOf, isStructuralLayer, layerMoveProblem, layoutParentOf, stackLayoutOf, tappableProblem, unwrapProblem, wrapProblem, type AuthoringNode, type AuthoringOperation, type ContainerLayout, type SourceFile } from '@studio/shared'
+import { forEachChild, insertView, unwrapView, viewSiteAt, UNWRAP_REFUSAL, type Node } from '@studio/swift-syntax'
 import { applyPatches, callOf, raw, type FeatureContext, type SourcePatch } from './authoring-context'
 
 type StructureOperation = Extract<AuthoringOperation, { kind: 'layer-duplicate' | 'layer-wrap' | 'layer-reparent' }>
@@ -9,15 +9,29 @@ type StructureOperation = Extract<AuthoringOperation, { kind: 'layer-duplicate' 
  * already sit (a column in a column, or in a scroll view that scrolls up and down), it
  * takes the parent's alignment and spacing, so nothing moves (D3). Stacked another way,
  * it keeps the gap they had, the parent's spacing, and no alignment, which runs across
- * the other axis; with no spacing written there, it writes none either.
+ * the other axis; with no spacing written there, it writes none either. A List or a Form
+ * takes the views as its rows, with nothing of the stack's (Wave 4c).
  */
-export function wrapperOf(ctx: FeatureContext, node: AuthoringNode, layout: StackLayout): string {
+export function wrapperOf(ctx: FeatureContext, node: AuthoringNode, layout: ContainerLayout): string {
+  if (!stackLayoutOf(layout)) return layout
   // A scroll view or a list sets no spacing or alignment of its own to take.
   const parent = layoutParentOf(ctx.nodes, node)
   const call = parent && stackLayoutOf(parent.name) ? callOf(ctx, parent) : undefined
   const along = groupLayoutOf(ctx.nodes, node) === layout
   const kept = layout === 'ZStack' && !along ? [] : call?.args.filter(arg => arg.label === 'spacing' || along && arg.label === 'alignment').map(arg => raw(ctx, arg.span)) ?? []
   return kept.length ? `${layout}(${kept.join(', ')})` : layout
+}
+
+/**
+ * Everything Wrap writes around the selected layers, outermost first, each before its `{`
+ * (Wave 4c). A Scroll holding several views holds them in the stack they sit in, so they
+ * keep their gap and alignment, and scrolls across when that stack is a row.
+ */
+export function wrappersOf(ctx: FeatureContext, node: AuthoringNode, layout: ContainerLayout, several: boolean): string[] {
+  if (layout !== 'ScrollView') return [wrapperOf(ctx, node, layout)]
+  const inner = groupLayoutOf(ctx.nodes, node)
+  const scroll = inner === 'HStack' ? 'ScrollView(.horizontal)' : 'ScrollView'
+  return several ? [scroll, wrapperOf(ctx, node, inner)] : [scroll]
 }
 
 export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operation: StructureOperation) {
@@ -37,9 +51,13 @@ export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operatio
   const first = sites[0]!, last = sites.at(-1)!
   const original = file.text.slice(first.start, last.end)
   if (operation.kind === 'layer-wrap') {
-    if (!['VStack', 'HStack', 'ZStack'].includes(operation.layout)) throw new Error(`Choose ${LAYOUT_WORDS.VStack}, ${LAYOUT_WORDS.HStack} or ${LAYOUT_WORDS.ZStack}.`)
-    const constructor = wrapperOf(ctx, node, operation.layout)
-    const text = `${constructor} {${eol}${first.indent}    ${original.replaceAll(eol, eol + '    ')}${eol}${first.indent}}`
+    // The Layers menu's own check (Wave 4c).
+    const problem = wrapProblem(ctx.nodes, operation.ids, operation.layout)
+    if (problem) throw new Error(problem)
+    const heads = wrappersOf(ctx, node, operation.layout, selected.length > 1)
+    // Each wrapper one step further in, and the views inside the innermost.
+    const nest = (depth: number): string => `${heads[depth]} {${eol}${first.indent}${'    '.repeat(depth + 1)}${depth + 1 < heads.length ? nest(depth + 1) : original.replaceAll(eol, eol + '    '.repeat(depth + 1))}${eol}${first.indent}${'    '.repeat(depth)}}`
+    const text = nest(0)
     return { files: applyPatches(ctx, [{ file: file.id, start: first.start, end: last.end, text }]), offset: first.start }
   }
   const destination = ctx.nodes.find(n => n.id === operation.destination)
@@ -75,6 +93,20 @@ export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operatio
   const inserted = insertView(remaining, file.id, target, original.replaceAll(eol + first.indent, eol))
   if (!inserted) throw new Error('This container cannot receive the selected layers.')
   return { files: ctx.files.map(f => f.id === file.id ? { ...f, text: inserted.text } : f), offset: inserted.offset }
+}
+
+/**
+ * Puts a container's views in its place (Wave 4c), when `unwrapProblem` says it can. Gives
+ * what goes with the container besides its views, for the structural check to hold it to.
+ */
+export function unwrapEdit(ctx: FeatureContext, node: AuthoringNode): { files: SourceFile[]; offset: number; removes: string } {
+  const problem = unwrapProblem(ctx.nodes, node)
+  if (problem) throw new Error(problem)
+  const file = ctx.files.find(f => f.id === node.source.file)!, call = callOf(ctx, node)
+  let refusal = UNWRAP_REFUSAL
+  const unwrapped = call?.trailingClosure && unwrapView(file.text, file.id, node.source.start, reason => { refusal = reason })
+  if (!unwrapped) throw new Error(refusal)
+  return { files: ctx.files.map(f => f.id === file.id ? { ...f, text: unwrapped.text } : f), offset: unwrapped.offset, removes: `${file.text.slice(call.span.start, call.trailingClosure.span.start)}{ }` }
 }
 
 /** What making a view tappable writes around it, less the view: the checker's word for what it may add (D16). */

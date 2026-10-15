@@ -915,9 +915,10 @@ export class SwiftUIHost implements InterpreterHost {
       return gesture(GESTURE_CONSTRUCTORS[name]!, minimum ?? 10)
     }
 
-    // `PlainButtonStyle()` is the style `.plain` names.
+    // `PlainButtonStyle()` is the style `.plain` names, and what it is given it is given as
+    // that one's: `PageTabViewStyle(indexDisplayMode: .never)` is `.page(indexDisplayMode: .never)` (Wave 4c).
     const legacy = LEGACY_STYLE_TOKENS.get(name)
-    if (legacy) return token(legacy)
+    if (legacy) return call.args.length ? opaque(TOKEN_TYPE, { name: legacy, args: call.args.map(a => a.value) } satisfies TokenPayload) : token(legacy)
 
     // `Alert(title:message:dismissButton:)` in an `.alert(isPresented:)`, as alerts were written
     // before iOS 15: the alert draws what it is given (`alertButtons`).

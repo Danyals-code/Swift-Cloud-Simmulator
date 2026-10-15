@@ -91,10 +91,20 @@ export const spreadOut = (value: string | undefined): boolean => value === AUTO_
 
 /** What lays a layer out: its parent, past the conditions, repeats and groups that only pass their views on. */
 export function layoutParentOf(nodes: readonly AuthoringNode[], node: AuthoringNode): AuthoringNode | undefined {
-  const byId = new Map(nodes.map(item => [item.id, item]))
+  // The snapshot's index, made once: the Layers menu asks this of every row (Wave 4c).
+  const byId = indexOf(nodes)
   let parent = byId.get(node.parentId ?? '')
   while (parent && (['branch', 'collection', 'template'].includes(parent.kind) || parent.name === 'Group' || parent.name === 'ForEach')) parent = byId.get(parent.parentId ?? '')
   return parent
+}
+
+/**
+ * Which way a container lays several views out (Wave 4c): a stack its own way, a scroll view
+ * along its axis, and a List or a Form in rows down. Undefined for any other view.
+ */
+function flowOf(node: AuthoringNode): StackLayout | undefined {
+  if (node.name === 'ScrollView') return node.controls?.some(control => control.id === 'scroll:axis' && control.value === 'horizontal') ? 'HStack' : 'VStack'
+  return stackLayoutOf(node.name) ?? (node.name === 'List' || node.name === 'Form' ? 'VStack' : undefined)
 }
 
 /**
@@ -103,8 +113,82 @@ export function layoutParentOf(nodes: readonly AuthoringNode[], node: AuthoringN
  */
 export function groupLayoutOf(nodes: readonly AuthoringNode[], node: AuthoringNode): StackLayout {
   const parent = layoutParentOf(nodes, node)
-  const scrollsAcross = parent?.name === 'ScrollView' && parent.controls?.some(control => control.id === 'scroll:axis' && control.value === 'horizontal')
-  return (parent && stackLayoutOf(parent.name)) ?? (scrollsAcross ? 'HStack' : 'VStack')
+  return (parent && flowOf(parent)) ?? 'VStack'
+}
+
+/** What a new screen starts as, or what views are wrapped in (Wave 4c): a stack, or a List, a Form or a Scroll that scrolls them. */
+export const CONTAINER_LAYOUTS = ['VStack', 'HStack', 'ZStack', 'List', 'Form', 'ScrollView'] as const
+export type ContainerLayout = typeof CONTAINER_LAYOUTS[number]
+/** Each container layout in a designer's words (Wave 4c): the stacks' as `LAYOUT_WORDS` says, and a ScrollView's as Scroll. */
+export const CONTAINER_WORDS: Readonly<Record<ContainerLayout, string>> = { VStack: LAYOUT_WORDS.VStack, HStack: LAYOUT_WORDS.HStack, ZStack: LAYOUT_WORDS.ZStack, List: 'List', Form: 'Form', ScrollView: 'Scroll' }
+/** Whether a layout is one Wrap and a new screen take (Wave 4c). */
+export const isContainerLayout = (layout: string): layout is ContainerLayout => (CONTAINER_LAYOUTS as readonly string[]).includes(layout)
+
+/** Words in a list a person reads (Wave 4c): `a, b and c`, or with `or`. */
+function listed(words: readonly string[], last: 'and' | 'or'): string {
+  return words.length > 1 ? `${words.slice(0, -1).join(', ')} ${last} ${words.at(-1)}` : words[0] ?? ''
+}
+
+/** What scrolls the views in it: a List or a Form inside one is given no height, and iOS shows none of it. */
+const SCROLLERS: ReadonlySet<string> = new Set(['ScrollView', 'List', 'Form'])
+
+/**
+ * Why the layers `ids` can't be wrapped in `layout` (Wave 4c), or null when the planner would
+ * wrap them, bar their being next to each other in the code, which it checks there: they are
+ * no layers of one parent, `layout` is none Wrap takes, or a List or a Form would be inside
+ * something that scrolls. The Layers menu and the planner ask the same.
+ */
+export function wrapProblem(nodes: readonly AuthoringNode[], ids: readonly string[], layout: string): string | null {
+  const byId = indexOf(nodes), first = byId.get(ids[0] ?? '')
+  if (!first || ids.some(id => { const node = byId.get(id); return !node || !isStructuralLayer(node) || node.parentId !== first.parentId || node.owner !== first.owner || node.source.file !== first.source.file })) return 'Select layers with the same parent. Nested and repeated row designs are edited separately.'
+  if (!isContainerLayout(layout)) return `Choose ${listed(Object.values(CONTAINER_WORDS), 'or')}.`
+  if (layout !== 'List' && layout !== 'Form') return null
+  for (let at = byId.get(first.parentId ?? ''); at && at.kind !== 'definition'; at = byId.get(at.parentId ?? '')) {
+    if (at.kind === 'view' && SCROLLERS.has(at.name)) return `A ${layout} inside a scroll view or a list has no height of its own, so iOS would show none of it. Wrap what holds it instead.`
+  }
+  return null
+}
+
+/** What Unwrap puts the views of in its place (Wave 4c): a stack, a group, a List, a Form or a Scroll. */
+const UNWRAPS: ReadonlySet<string> = new Set([...CONTAINER_LAYOUTS, 'LazyVStack', 'LazyHStack', 'Group'])
+/** What makes each of its views a row of its own (Wave 4c). */
+const ROWS: ReadonlySet<string> = new Set(['List', 'Form', 'Section'])
+/** How each layout lays views out, in a designer's words (Wave 4c). */
+const FLOWS: Readonly<Record<StackLayout, string>> = { VStack: 'stack down', HStack: 'run across', ZStack: 'overlap' }
+/** A stack's arguments that lay its views out, which its views would take from the stack around it instead (Wave 4c). */
+const ARRANGEMENT = ['spacing', 'alignment', 'pinnedViews'] as const
+/** An arrangement argument as written, with no space, and empty for SwiftUI's own: a stack's alignment is centred. */
+function arrangement(node: AuthoringNode, name: string): string {
+  const written = node.properties.find(property => property.name === name)?.expression.replace(/\s/g, '') ?? ''
+  return name === 'alignment' && written === '.center' ? '' : written
+}
+
+/**
+ * Why Unwrap can't put a container's views in its place (Wave 4c), or null when it can, so
+ * nothing is drawn differently. In this order: it is no container it unwraps; a modifier of
+ * its own would be lost with it; it holds nothing; what holds it lays out one view and it
+ * holds several; and, of a stack, a List, a Form or a Scroll holding several (a Group passes
+ * its views on as they are), they would be rows of a list, laid out another way, or spaced,
+ * aligned or pinned as the stack around them says rather than as it does.
+ */
+export function unwrapProblem(nodes: readonly AuthoringNode[], node: AuthoringNode): string | null {
+  if (node.kind !== 'view' || !UNWRAPS.has(node.name) || node.argument) return 'Select a stack, a group, a List, a Form or a Scroll to put its views in its place.'
+  const labels = node.modifiers?.map(modifier => modifier.label.toLowerCase()) ?? []
+  if (labels.length) return `Its ${listed(labels, 'and')} would be lost. Remove ${labels.length > 1 ? 'them' : 'it'} first.`
+  const byId = indexOf(nodes), children = node.children.map(id => byId.get(id))
+  if (!children.length) return 'There is nothing in it to keep. Delete it instead.'
+  // One view takes the place of one, and is laid out alike; a repeat or a condition may be several.
+  const several = children.length > 1 || !['view', 'component', 'opaque'].includes(children[0]?.kind ?? '')
+  if (!several) return null
+  const parent = layoutParentOf(nodes, node)
+  if (!parent || !LAYER_MOVE_CONTAINERS.has(parent.name)) return 'What holds it shows one view, so its views can’t all go there. Keep it, or change this in Code.'
+  if (node.name === 'Group') return null
+  const keep = ' Keep it, or change this in Code.'
+  if (ROWS.has(parent.name)) return `Each of its views would be a row of its own.${keep}`
+  const own = flowOf(node)!, around = flowOf(parent)!
+  if (own !== around) return `Its views would ${FLOWS[around]} rather than ${FLOWS[own]}.${keep}`
+  const lost = ARRANGEMENT.filter(name => arrangement(node, name) !== arrangement(parent, name)).map(name => arrangement(node, name) ? `${name} (${arrangement(node, name)})` : `default ${name}`)
+  return lost.length ? `Its ${listed(lost, 'and')} would be lost.${keep}` : null
 }
 
 /** Structural eligibility shared by the picker, drag targets, and source writer.

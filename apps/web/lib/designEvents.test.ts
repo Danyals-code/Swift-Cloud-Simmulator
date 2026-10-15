@@ -79,6 +79,7 @@ const EVERY_KIND: { readonly [K in Operation['kind']]: Extract<Operation, { kind
   'card-customize': { kind: 'card-customize', color: S },
   'layer-duplicate': { kind: 'layer-duplicate' },
   'layer-wrap': { kind: 'layer-wrap', ids: [S], layout: 'HStack' },
+  'layer-unwrap': { kind: 'layer-unwrap' },
   'layer-reparent': { kind: 'layer-reparent', ids: [S], destination: S },
   'make-tappable': { kind: 'make-tappable' },
   'layer-set': { kind: 'layer-set', changes: [{ section: 'layout', padding: { top: { token: S }, leading: 0, bottom: 0, trailing: 0 } }, { section: 'text', font: { style: S } }] },

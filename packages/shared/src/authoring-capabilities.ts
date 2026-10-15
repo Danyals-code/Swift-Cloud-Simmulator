@@ -32,7 +32,10 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('LabeledContent', 'view', [[null, 'value']], false, '16.0'),
   capability('Link', 'view', [[null, 'destination']], false, '14.0'),
   capability('ProgressView', 'view', [[], [null], ['value'], ['value', 'total'], [null, 'value'], [null, 'value', 'total']], true, '14.0'),
-  capability('GroupBox', 'view', [[], [null]], true, '14.0'),
+  // Titled with its label, a Text, before iOS 15 (Wave 4c).
+  capability('GroupBox', 'view', [[], ['label']], true, '14.0'),
+  // A title written as words is iOS 15's, for a card and a section alike (Wave 4c).
+  { ...capability('GroupBox', 'view', [[null]], true, '15.0'), id: 'view.GroupBox.title' },
   capability('Form', 'view', [[]], true),
   capability('LazyVGrid', 'view', optionalForms(['alignment', 'spacing', 'pinnedViews']).map(f => ['columns', ...f]), true, '14.0'),
   capability('LazyHGrid', 'view', optionalForms(['alignment', 'spacing', 'pinnedViews']).map(f => ['rows', ...f]), true, '14.0'),
@@ -52,6 +55,8 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('RadialGradient', 'view', ['colors', 'stops', 'gradient'].map(label => [label, 'center', 'startRadius', 'endRadius'])),
   capability('AngularGradient', 'view', ['colors', 'stops', 'gradient'].flatMap(label => [[label, 'center'], [label, 'center', 'angle'], [label, 'center', 'startAngle', 'endAngle']])),
   capability('TabView', 'view', [[]], true),
+  // A colour as a view, `Color.blue` standing as a call with nothing in it (Wave 4c).
+  capability('Color', 'view', [[], [null], ['red', 'green', 'blue'], ['red', 'green', 'blue', 'opacity'], ['white'], ['white', 'opacity']]),
   capability('Capsule', 'view', [[]]),
   capability('Rectangle', 'view', [[]]), capability('Circle', 'view', [[]]),
   capability('RoundedRectangle', 'view', [['cornerRadius'], ['cornerRadius', 'style']]),
@@ -64,7 +69,8 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('ScrollView', 'view', [[], [null], ['showsIndicators'], [null, 'showsIndicators']], true),
   capability('List', 'view', [[], [null], [null, 'id']], true),
   capability('ForEach', 'view', [[null], [null, 'id']], true),
-  capability('Section', 'view', [[], [null], ['header'], ['footer'], ['header', 'footer']], true),
+  capability('Section', 'view', [[], ['header'], ['footer'], ['header', 'footer']], true),
+  { ...capability('Section', 'view', [[null]], true, '15.0'), id: 'view.Section.title' },
   capability('Button', 'view', [[], [null], ['role'], [null, 'role']], false),
   // `Button("Add", systemImage: "plus") { }`, and with a role as well (Wave 4a).
   { ...capability('Button', 'view', [[null, 'systemImage'], [null, 'systemImage', 'role']], false, '14.0'), id: 'view.Button.systemImage' },
@@ -151,6 +157,14 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   // A screen's search field (Wave 4b).
   capability('searchable', 'modifier', [['text'], ['text', 'prompt'], ['text', 'placement'], ['text', 'placement', 'prompt']], false, '15.0'),
   { ...capability('searchable', 'modifier', [['text', 'isPresented'], ['text', 'isPresented', 'prompt'], ['text', 'isPresented', 'placement'], ['text', 'isPresented', 'placement', 'prompt']], false, '17.0'), id: 'modifier.searchable.presented' },
+  // Under the bars, which a view's Safe area sets (Wave 4c).
+  capability('ignoresSafeArea', 'modifier', [[], [null], ['edges'], [null, 'edges']], false, '14.0'),
+  // A row's or a tab's count, and a bar pinned to the foot of a view, whose views are a slot of their own (Wave 4c).
+  capability('badge', 'modifier', [[null]], false, '15.0'),
+  capability('safeAreaInset', 'modifier', optionalForms(['alignment', 'spacing']).map(f => ['edge', ...f]), true, '15.0'),
+  capability('trim', 'modifier', optionalForms(['from', 'to'])),
+  capability('tabViewStyle', 'modifier', [[null]], false, '14.0'),
+  capability('indexViewStyle', 'modifier', [[null]], false, '14.0'),
   capability('listRowSpacing', 'modifier', [[null]], false, '17.0'),
   capability('listSectionSpacing', 'modifier', [[null]], false, '17.0'),
   // The v1 modifier catalog: what the Add menu writes and every card can edit.
@@ -179,4 +193,19 @@ for (const capability of AUTHORING_CAPABILITIES) {
 
 export function authoringCapability(name: string, kind: AuthoringCapability['kind'], labels: readonly (string | null)[]): AuthoringCapability | undefined {
   return BY_NAME.get(name)?.find(c => c.kind === kind && c.forms.some(f => f.length === labels.length && f.every((label, i) => label === labels[i])))
+}
+
+const BY_ID = new Map(AUTHORING_CAPABILITIES.map(capability => [capability.id, capability]))
+/** A capability by its id, as a property read under it names it (Wave 4c). */
+export const authoringCapabilityById = (id: string): AuthoringCapability | undefined => BY_ID.get(id)
+
+/**
+ * A Section or a GroupBox titled `title`, the Swift for its words, in the form the app's
+ * deployment target has (Wave 4c): `Section("Title")` where `view.Section.title` says it is
+ * there, iOS 15, and `Section(header: Text("Title"))` or `GroupBox(label: Text("Title"))`
+ * before it.
+ */
+export function titledContainer(name: 'Section' | 'GroupBox', title: string, version: number): string {
+  const titled = authoringCapability(name, 'view', [null])
+  return titled && version >= Number.parseFloat(titled.minimumIOS) ? `${name}(${title})` : `${name}(${name === 'Section' ? 'header' : 'label'}: Text(${title}))`
 }

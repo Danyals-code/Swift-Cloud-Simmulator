@@ -399,6 +399,8 @@ export interface ScrollPayload {
   readonly axis: 'vertical' | 'horizontal'
   readonly content: Size
   readonly showsIndicators: boolean
+  /** `.scrollTargetBehavior(.paging)` (iOS 17): the browser snaps the scroll by the scroller's own size (Wave 4c). */
+  readonly paging?: boolean
 }
 
 export interface A11y {

@@ -22,7 +22,7 @@ export * from './swift-rules'
 export * from './off-markers'
 export { HIDDEN_MARKER } from './studio-markers'
 export {
-  viewSiteAt, deleteView, moveView, moveViewTo, insertView, copyView,
+  viewSiteAt, deleteView, moveView, moveViewTo, insertView, copyView, unwrapView, UNWRAP_REFUSAL,
   hideView, showView, hiddenViewsIn,
   type ViewSite, type SourceEdit, type HiddenView, type RefusalReason,
 } from './edits'

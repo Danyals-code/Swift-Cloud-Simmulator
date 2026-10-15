@@ -511,6 +511,29 @@ export function moveViewTo(
   }
 }
 
+/** Why what is no container written as a statement of its own can't be unwrapped (Wave 4c). */
+export const UNWRAP_REFUSAL = 'Only a container’s views can be put in its place.'
+
+/**
+ * Puts the views of the container at `offset` in its place (Wave 4c): its content, one step
+ * further out, and nothing of the container, its arguments or its braces. Whether its parent
+ * can take them all, and whether anything of the container would be lost, is the caller's to
+ * say; this only refuses what is no container written as a statement of its own.
+ */
+export function unwrapView(text: string, file: FileId, offset: number, refuse?: RefusalReason): SourceEdit | null {
+  const found = siteAt(text, file, offset)
+  if (!found) return refused(refuse, partOfCode('unwrapped'))
+  const content = contentBlockOf(found.stmt)
+  const call = viewCallOf(found.stmt)
+  if (!content || call?.kind !== 'call' || call.trailingClosure?.params.length) return refused(refuse, UNWRAP_REFUSAL)
+  // From the view itself: a `return` before it stays, giving its one view.
+  const start = viewStartOf(found.stmt) ?? found.stmt.span.start, end = extentOf(text, found.stmt).end, cut = cutOf(text, found.stmt), unit = indentUnit(text)
+  // The lines inside its braces, less the rest of the line the brace opens and the space before the one that closes.
+  const inside = text.slice(content.span.start + 1, content.span.end - 1).replace(/^[ \t]*\r?\n/, '').replace(/\s+$/, '')
+  const views = inside.split('\n').map(line => line.startsWith(cut.indent + unit) ? cut.indent + line.slice(cut.indent.length + unit.length) : line).join('\n').replace(/^[ \t]+/, '')
+  return { text: text.slice(0, start) + views + text.slice(end), offset: start }
+}
+
 /** The Swift that draws the view at `offset`, for a copy that a paste can place anywhere. */
 export function copyView(text: string, file: FileId, offset: number, refuse?: RefusalReason): string | null {
   const found = siteAt(text, file, offset)

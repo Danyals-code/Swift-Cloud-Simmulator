@@ -1,8 +1,8 @@
-import type { AuthoringNode, AuthoringSnapshot, DesignControl, PagePreview, PreviewScenario } from '@studio/shared'
+import type { AuthoringNode, AuthoringSnapshot, ContainerLayout, DesignControl, PagePreview, PreviewScenario } from '@studio/shared'
 import { settingsVisualChildren } from './authoringSettings'
 
 export interface DesignScreen { view: string; name: string }
-export type ScreenCommand = { kind: 'create'; name: string; layout: 'VStack' | 'HStack' | 'ZStack' } | { kind: 'rename'; view: string; name: string } | { kind: 'duplicate' | 'remove' | 'up' | 'down'; view: string }
+export type ScreenCommand = { kind: 'create'; name: string; layout: ContainerLayout } | { kind: 'rename'; view: string; name: string } | { kind: 'duplicate' | 'remove' | 'up' | 'down'; view: string }
 /**
  * The view a page is drawn by, when it is that view's own page.
  *

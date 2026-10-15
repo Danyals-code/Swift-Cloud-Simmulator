@@ -122,9 +122,13 @@ export type PaintSpec =
       readonly axis: 'vertical' | 'horizontal'
       readonly content: Size
       readonly showsIndicators: boolean
+      readonly paging?: boolean
     }
   | { readonly kind: 'placeholder'; readonly placeholder: PlaceholderPayload }
   | { readonly kind: 'hit' }
+
+/** A scroll view's paint, built once per scroll view and given `paging` only when it pages (Wave 4c). */
+type ScrollPaint = Extract<PaintSpec, { readonly kind: 'scroll' }>
 
 export interface PlacedNode {
   readonly cornerStyle?: CornerStyle
@@ -1022,6 +1026,15 @@ export class LayoutEngine {
       ? { width: bounds.width, height: Math.max(content.height, bounds.height) }
       : { width: Math.max(content.width, bounds.width), height: bounds.height }
 
+    const paint: { -readonly [K in keyof ScrollPaint]: ScrollPaint[K] } = {
+      kind: 'scroll',
+      axis: element.axis,
+      content: contentSize,
+      contentInsets: element.contentInsets,
+      showsIndicators: element.showsIndicators,
+    }
+    // A ScrollView that pages, `.scrollTargetBehavior(.paging)`, says so to the renderer (Wave 4c).
+    if (element.paging) paint.paging = true
     out.push({
       id: element.id,
       frame: bounds,
@@ -1029,13 +1042,7 @@ export class LayoutEngine {
       opacity: env.opacity,
       cornerRadius: env.cornerRadius,
       clip: true,
-      paint: {
-        kind: 'scroll',
-        axis: element.axis,
-        content: contentSize,
-        contentInsets: element.contentInsets,
-        showsIndicators: element.showsIndicators,
-      },
+      paint,
       ...debugInfo(element),
       ...decorations(env, parent),
       ...(element.origin ? { origin: element.origin } : {}),

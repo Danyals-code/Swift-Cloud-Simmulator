@@ -1,6 +1,6 @@
 import { customizeCard, editsCardSurface } from './authoring-card'
 import { followCorners } from './authoring-border'
-import { editModifier, isRow } from './authoring-modifiers'
+import { editModifier, isRow, isTab } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
 import { PRESENTATION_PARTS, TOOLBAR_CONTENT, VIEW_PARTS, argumentLayerProblem, canvasDropProblem, deploymentVersion, isHelperDefinition, isNonView, type AuthoringNode, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
 import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, viewSiteAt, type Node } from '@studio/swift-syntax'
@@ -11,14 +11,15 @@ import { applyPatches, layerById, lineIndent, namedStruct, type FeatureContext }
 import { pastedValues } from './authoring-clipboard'
 import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
 import { liveControl } from './authoring-behavior'
-import { TAPPABLE_WRAPPER, wrapperOf } from './authoring-structure'
+import { TAPPABLE_WRAPPER, wrappersOf } from './authoring-structure'
 import { designControlRecipes, spreadRoomProblem, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
 import { nextTag, retagDuplicate, tagProblem } from './authoring-picker-tags'
 import { callAt, layerContext, layerProject, writeLayer } from './layer'
+import { pagesThrough } from './page-style'
 
 /** The operations that act on a view's whole statement - its place, its copies, whether it is there at all - as the structural check knows them. */
-const STRUCTURAL: Partial<Record<DesignEditRequest['operation']['kind'], StructuralKind>> = { delete: 'delete', move: 'move', moveTo: 'moveTo', insert: 'insert', paste: 'insert', hide: 'hide', show: 'show', 'layer-duplicate': 'duplicate', 'layer-wrap': 'wrap', 'layer-reparent': 'reparent', 'make-tappable': 'wrap' }
+const STRUCTURAL: Partial<Record<DesignEditRequest['operation']['kind'], StructuralKind>> = { delete: 'delete', move: 'move', moveTo: 'moveTo', insert: 'insert', paste: 'insert', hide: 'hide', show: 'show', 'layer-duplicate': 'duplicate', 'layer-wrap': 'wrap', 'layer-reparent': 'reparent', 'make-tappable': 'wrap', 'layer-unwrap': 'unwrap' }
 
 /** The operations only a view takes (Wave 4b): a layer, a modifier, a tap, a transition, a wrapper or being a component, which what is no view (`isNonView`) is refused. */
 const VIEW_ONLY: ReadonlySet<DesignEditRequest['operation']['kind']> = new Set(['layer-set', 'modifier-add', 'make-tappable', 'behavior', 'guided-action', 'bind-state', 'transition', 'card-customize', 'extract-component', 'make-component', 'layer-wrap'])
@@ -83,7 +84,8 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       const shadowToken = model.styles?.find(style => style.kind === 'shadow' && style.form === 'token')?.name
       // A border takes the view's new corners in the same step (D8).
       const byId = (id: string | undefined) => model.nodes.find(n => n.id === id)
-      const text = followCorners(file.text, editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget, { shadowToken, row: isRow(node, byId), presented: node.presented }), file.id, node.source.start)
+      const pages = (tabView: AuthoringNode) => { const call = callAt(ast, tabView.source), chain = call && viewCallChain(call); return !!chain && pagesThrough(chain.modifiers) }
+      const text = followCorners(file.text, editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget, { shadowToken, row: isRow(node, byId), tab: isTab(node, byId, pages), presented: node.presented }), file.id, node.source.start)
       return finish(request.files.map(f => f.id === file.id ? { ...f, text } : f), { file: file.id, offset: node.source.start })
     } catch (error) { return reject(error instanceof Error ? error.message : 'This modifier change could not be planned.') }
   }
@@ -93,8 +95,8 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       const after = result.files.find(f => f.id === file.id)?.text
       const kind = STRUCTURAL[operation.kind]
       const toward = operation.kind === 'layer-reparent' ? model.nodes.find(n => n.id === operation.destination)?.source.start : undefined
-      const adds = operation.kind === 'layer-wrap' ? `${wrapperOf(context, node, operation.layout)} { }` : operation.kind === 'make-tappable' ? TAPPABLE_WRAPPER : undefined
-      const problem = kind && after !== undefined && structuralEditProblem({ file: file.id, before: file.text, after, kind, view: node.source, adds, toward, inside: kind === 'reparent', landed: result.offset })
+      const adds = operation.kind === 'layer-wrap' ? wrappersOf(context, node, operation.layout, operation.ids.length > 1).map(head => `${head} { }`).join(' ') : operation.kind === 'make-tappable' ? TAPPABLE_WRAPPER : undefined
+      const problem = kind && after !== undefined && structuralEditProblem({ file: file.id, before: file.text, after, kind, view: node.source, adds, removes: result.removes, toward, inside: kind === 'reparent', landed: result.offset })
       if (problem) return reject(problem)
       // Checked as an exact copy, a Picker option's copy then takes a tag of its own.
       if (operation.kind === 'layer-duplicate') return finish(retagDuplicate(context, node, result), { file: file.id, offset: result.offset })
