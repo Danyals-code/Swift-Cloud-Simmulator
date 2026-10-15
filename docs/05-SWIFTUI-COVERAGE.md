@@ -96,7 +96,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Form` | ✅ | 6 | the grouped-list form |
 | `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included, given the place of the element the row was drawn for; `perform:` takes a closure or a named function, as do `.onAppear`, `.task` and `.onTapGesture` |
 | `.onMove` | ⬜ | - | warns; no reorder UI or modifier callback. The array move helper is separate |
-| `.swipeActions` | ⬜ | - | warns; custom actions are ignored. Standard delete requires `.onDelete` |
+| `.swipeActions` | ✅ | Wave 4a | leading and trailing actions drawn as iOS 27 draws them: tints, roles, icons, titles and full swipe; a tap runs the action and closes the row. `.onDelete` is one case of it. The Design canvas draws a row open while one of its actions is selected |
 | `.searchable` | ✅ | 7 | a field with its magnifying glass, writing its binding. On a phone it is at the bottom of the screen, or under the title in a tab app, and on iPad in the toolbar. Written on the NavigationStack, it searches the stack's root screen only, and on a TabView without a search tab it draws nothing, as in iOS 27 |
 | `.refreshable` | ⬜ | - | pull-to-refresh callback is not implemented |
 | `DisclosureGroup` | ✅ | 7 | opens and closes; `isExpanded:` is read where the user gave one |

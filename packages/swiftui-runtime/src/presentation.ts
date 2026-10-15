@@ -38,9 +38,11 @@ import {
   type EnvironmentFrame,
   type ModifierValue,
   type RuntimeFailure,
+  type SwipeActions,
   type ViewArg,
   type ViewIntent,
   type ViewValue,
+  TOKEN_TYPE,
 } from './view-value'
 
 /**
@@ -150,6 +152,11 @@ export interface Overlay {
   readonly dismiss: ViewIntent | null
   /** The handler id the dim layer reports, so the layout does not have to derive it. */
   readonly dismissId: string | null
+  /**
+   * A view's `.contextMenu`, drawn as iOS 27 draws one rather than as a Menu's options, by
+   * the path of the view it is open on, which it is placed beside (Wave 4a).
+   */
+  readonly contextMenu?: string
 }
 
 /**
@@ -198,6 +205,25 @@ export interface ResolvedUI {
   readonly notDrawn?: readonly NotDrawn[]
   /** What resolving the screen found that the checker can't see, such as a Picker that can't select. */
   readonly warnings?: readonly Diagnostic[]
+  /**
+   * For a page of the Design canvas (Wave 4a): the swipe and context-menu modifiers it met,
+   * each once for where it is written, and whether the selection drew one of them open.
+   */
+  readonly reveal?: { readonly modifiers: readonly Revealable[]; readonly drawn: boolean }
+}
+
+/** A `.swipeActions` or `.contextMenu` the Design canvas can draw open (Wave 4a): where it is written, and its closure. */
+export type Revealable = Pick<ModifierValue, 'span' | 'closure'>
+
+/**
+ * Whether the Design canvas's selection is in a `.swipeActions` or a `.contextMenu` (Wave 4a):
+ * its closure, a view in it, or its slot, from the modifier's name on. The call's span starts
+ * with the view it is written on, so that view, or a view inside it, ends before the closure
+ * starts and reveals nothing.
+ */
+export function reveals(target: SourceSpan | null | undefined, modifier: Revealable): boolean {
+  const span = modifier.span, closure = modifier.closure?.span
+  return !!target && !!closure && target.file === span.file && target.start > span.start && target.end <= span.end && target.end > closure.start
 }
 
 /**
@@ -348,7 +374,11 @@ export class UIState {
     this.months.set(control, this.monthOffset(control) + by)
   }
 
-  /** How far a list row has been swiped open, in points. */
+  /**
+   * How far the list row that is swiped is open, in points, positive towards its trailing
+   * actions; infinite once let go open. One row at a time, as in iOS: swiping another
+   * shuts it.
+   */
   private swipes = new Map<string, number>()
 
   swipeOffset(row: string): number {
@@ -356,8 +386,8 @@ export class UIState {
   }
 
   setSwipeOffset(row: string, offset: number): void {
-    if (offset <= 0) this.swipes.delete(row)
-    else this.swipes.set(row, offset)
+    if (offset === 0) this.swipes.delete(row)
+    else { this.swipes.clear(); this.swipes.set(row, offset) }
   }
 
   closeSwipes(): void {
@@ -385,6 +415,13 @@ export interface ResolveContext {
   /** Extra gallery images reuse the live pass’s authoring hierarchy. */
   readonly includeViewHierarchy?: boolean
   readonly state: UIState
+  /**
+   * The view the Design canvas has selected, when this draws a page of the canvas, or null
+   * for none there (Wave 4a). A selection in a row's `.swipeActions` draws that row swiped
+   * open, and one in a `.contextMenu` draws that menu up, as the gallery draws an alert's
+   * page up; the running preview has no `reveal` and is never drawn so.
+   */
+  readonly reveal?: SourceSpan | null
   /**
    * Runs a view-builder closure, returning the views it produced.
    *
@@ -530,6 +567,15 @@ class Resolver {
   private readonly buttonStyles: SwiftValue[] = []
   private visualStyle: readonly ModifierValue[] = []
   private contextMenuPath: string | undefined
+  /** The context menu the canvas's selection is in, drawn up; once the first is met, the others stay down. */
+  private revealedMenu: string | null = null
+  /** Whether a row is drawn swiped open for the selection: only its first instance is. */
+  private revealedRow = false
+  /**
+   * The swipe and context-menu modifiers met on a page of the canvas, for it to know when a
+   * selection reveals one: by where each is written, so a ForEach's rows add it once.
+   */
+  private readonly revealable = new Map<SourceSpan, Revealable>()
   private previewScope: readonly ViewValue[] = []
   /** The containers the screen was cut out of (see `containersAbove`). */
   private around: readonly ViewValue[] = []
@@ -573,7 +619,8 @@ class Resolver {
     // A menu sits above everything, including a sheet: it is the thing the user just
     // opened, and it is the only one they can interact with while it is up.
     const overlay = this.forced ? this.findOverlay(screen.content, 0, this.around)
-      : this.basePage ? null : this.findOverlay(screen.content, 0, this.around) ?? this.menuOverlay(screen.content)
+      : this.basePage ? this.menuOverlay(screen.content, this.revealedMenu)
+      : this.findOverlay(screen.content, 0, this.around) ?? this.menuOverlay(screen.content, this.revealedMenu ?? this.ctx.state.openMenu())
 
     const screenLayers = (content: readonly ViewValue[], bar: NavigationBar | null | undefined): ViewLayer[] => [
       ...viewLayers(content),
@@ -621,6 +668,7 @@ class Resolver {
       lifecycle: this.lifecycle,
       ...(this.notDrawn.length ? { notDrawn: this.notDrawn } : {}),
       ...(this.warnings.length ? { warnings: this.warnings } : {}),
+      ...(this.ctx.reveal !== undefined ? { reveal: { modifiers: [...this.revealable.values()], drawn: this.revealedRow || !!this.revealedMenu && overlay?.kind === 'menu' } } : {}),
     }
   }
 
@@ -806,14 +854,17 @@ class Resolver {
     })
   }
 
-  private stamp(view: ViewValue, path: string): ViewValue {
+  private stamp(view: ViewValue, path: string, row?: RowActions): ViewValue {
     view = inheritVisualStyle(view, this.visualStyle)
     view = this.applyControlStyle(view) ?? view
     const outerStyle = this.visualStyle
     const outerContextMenu = this.contextMenuPath
-    if (view.modifiers.some(m => m.name === 'contextMenu' && m.closure)) {
+    const menu = view.modifiers.find(m => m.name === 'contextMenu' && m.closure)
+    if (menu) {
       this.contextMenuPath = path
       this.register(`${path}/context-menu`, { kind: 'openMenu', menu: `${path}/context-menu` })
+      this.meet(menu)
+      if (reveals(this.ctx.reveal, menu)) this.revealedMenu ??= `${path}/context-menu`
     }
     this.visualStyle = visualModifiers(view)
     const onDelete = view.modifiers.find((m) => m.name === 'onDelete')?.action ?? null
@@ -829,6 +880,7 @@ class Resolver {
       const children = restyled.childKeys
         ? this.stampRows(restyled, path, onDelete)
         : this.stampList(restyled.children, path)
+      const swipe = row || restyled.modifiers.some(m => m.name === 'swipeActions') ? this.swipeActions(restyled, path, row) : undefined
 
       const intent = this.intentFor(restyled)
       // `Button { … } label: { … }` keeps what it is drawn with among its arguments, as
@@ -844,7 +896,8 @@ class Resolver {
             ? { ...arg, value: opaque('View', this.stamp(layer, `${path}-layer-${m}-${a}`)) } : arg
         }) }
       })
-      const stamped: ViewValue = { ...restyled, path, args, children, modifiers, contextMenuPath: this.contextMenuPath, ...(intent ? { intent } : {}) }
+      const stamped: { -readonly [K in keyof ViewValue]: ViewValue[K] } = { ...restyled, path, args, children, modifiers, contextMenuPath: this.contextMenuPath, ...(intent ? { intent } : {}) }
+      if (swipe) stamped.swipe = swipe
 
       if (intent) this.handlers.set(handlerIdFor(path), intent)
       this.collectLifecycle(restyled, path)
@@ -971,6 +1024,8 @@ class Resolver {
    * row was drawn for. SwiftUI warns about a shared id at run time, and so does this.
    */
   private stampRows(view: ViewValue, path: string, onDelete: ActionValue | null): ViewValue[] {
+    // `.swipeActions` on the ForEach gives each of its rows the same actions.
+    const swipes = view.modifiers.filter(m => m.name === 'swipeActions' && m.closure)
     const keys = view.childKeys!
     const holders = new Map<string, number[]>()
     const firstRow = new Map<number, number>()
@@ -986,7 +1041,7 @@ class Resolver {
       const repeat = holding.indexOf(offset)
       if (repeat > 0) shared ??= key
       const segment = `${keySegment(key, i)}${repeat > 0 ? `~${repeat + 1}` : ''}${place > 0 ? `.${place}` : ''}`
-      return this.stampRow(child, `${path}-${segment}`, onDelete, offset)
+      return this.stamp(child, `${path}-${segment}`, onDelete || swipes.length ? { onDelete, offset, swipes } : undefined)
     })
     if (shared !== undefined) {
       this.warnings.push({
@@ -1000,24 +1055,62 @@ class Resolver {
   }
 
   /**
-   * Stamps one row of a collection, wiring up its delete action if it has one.
-   *
-   * `.onDelete` is written on the `ForEach`, not on the row - but it is the *row*
-   * that gets swiped, and the closure needs to know which offset was deleted. Both
-   * facts are only available here, where the parent and the index are in hand.
+   * A list row's swipe actions (Wave 4a). `.onDelete` is written on the `ForEach`, and gives
+   * each row a Delete at its trailing edge, which iOS 27 offers beside leading actions and
+   * not beside trailing ones. Only the edge the row is open towards, swiped or revealed on
+   * the canvas, has its closures built and its buttons stamped under the row's path, the
+   * outermost first: a shut row builds none, and its drag needs only to know which edges
+   * have actions and which button a full swipe runs, by the path it is stamped at. A tap on
+   * any of them closes the row, as its drag opens it.
    */
-  private stampRow(
-    view: ViewValue,
-    path: string,
-    onDelete: ActionValue | null,
-    offset: number,
-  ): ViewValue {
-    const stamped = this.stamp(view, path)
-    if (!onDelete) return stamped
+  private swipeActions(view: ViewValue, path: string, row?: RowActions): SwipeActions | undefined {
+    const own = view.modifiers.filter(m => m.name === 'swipeActions' && m.closure)
+    const written = row?.swipes.length ? own.concat(row.swipes) : own
+    const edgeOf = (modifier: ModifierValue) => tokenName(labelled(modifier.args, 'edge')) === 'leading' ? 'leading' : 'trailing'
+    const has = { leading: false, trailing: false }
+    const fullSwipe = { leading: true, trailing: true }
+    let reveal: 'leading' | 'trailing' | null = null
+    for (const modifier of written) {
+      const edge = edgeOf(modifier)
+      const full = labelled(modifier.args, 'allowsFullSwipe')
+      if (full) fullSwipe[edge] = truthy(full)
+      has[edge] = true
+      this.meet(modifier)
+      if (!reveal && !this.revealedRow && reveals(this.ctx.reveal, modifier)) reveal = edge
+    }
+    const onDelete: ViewIntent | null = row?.onDelete && !has.trailing ? { kind: 'delete', action: row.onDelete, offset: row.offset, row: path } : null
+    if (!has.leading && !has.trailing && !onDelete) return undefined
+    if (onDelete) this.register(`${path}/delete`, onDelete)
+    if (reveal) this.revealedRow = true
 
-    this.register(`${path}/swipe`, { kind: 'swipe', row: path })
-    this.register(`${path}/delete`, { kind: 'delete', action: onDelete, offset, row: path })
-    return { ...stamped, swipe: { offset: this.ctx.state.swipeOffset(path), path } }
+    const full: { leading?: string; trailing?: string } = {}
+    if (fullSwipe.leading && has.leading) full.leading = `${path}/swipe-leading-0`
+    if (fullSwipe.trailing && (has.trailing || onDelete)) full.trailing = onDelete ? `${path}/delete` : `${path}/swipe-trailing-0`
+    const close: ViewIntent = { kind: 'swipe', row: path, edges: { leading: has.leading, trailing: has.trailing || !!onDelete }, full }
+    this.register(`${path}/swipe`, close)
+
+    const offset = reveal === 'leading' ? -Infinity : reveal ? Infinity : this.ctx.state.swipeOffset(path)
+    const leading: ViewValue[] = [], trailing: ViewValue[] = []
+    const open = offset < 0 ? 'leading' : offset > 0 ? 'trailing' : null
+    if (open) {
+      const buttons = open === 'leading' ? leading : trailing
+      for (const modifier of written) {
+        if (edgeOf(modifier) !== open) continue
+        for (const button of flattenForEach(this.ctx.build(modifier.closure!, [], modifier.environment, 'Swipe actions'))) {
+          buttons.push(this.stamp(button, `${path}/swipe-${open}-${buttons.length}`))
+        }
+      }
+      if (open === 'trailing' && onDelete) trailing.push({ name: 'Button', args: DELETE_ACTION, children: [], modifiers: [], action: null, span: view.span, path: `${path}/delete`, intent: onDelete })
+      for (const button of buttons) {
+        if (button.intent?.kind === 'run') this.handlers.set(handlerIdFor(button.path!), { kind: 'run', action: button.intent.action, dismiss: close })
+      }
+    }
+    return { offset, path, leading, trailing, fullSwipe }
+  }
+
+  /** Notes a swipe or context-menu modifier on a page of the canvas, which can draw it open (Wave 4a). */
+  private meet(modifier: ModifierValue): void {
+    if (this.ctx.reveal !== undefined && modifier.closure) this.revealable.set(modifier.span, modifier)
   }
 
   /**
@@ -1428,8 +1521,7 @@ class Resolver {
    * a form - an approximation of position, never of content, and recorded as one in
    * the coverage matrix.
    */
-  private menuOverlay(views: readonly ViewValue[]): Overlay | null {
-    const open = this.ctx.state.openMenu()
+  private menuOverlay(views: readonly ViewValue[], open: string | null): Overlay | null {
     if (!open) return null
 
     const isContextMenu = open.endsWith('/context-menu')
@@ -1484,13 +1576,16 @@ class Resolver {
 
     return {
       kind: 'menu',
-      anchorId: handlerIdFor(ownerPath),
+      // A context menu is placed beside its view by the layout, and named by the handler that
+      // opens it, which that view carries, for the renderer to keep it there when a list scrolls.
+      anchorId: handlerIdFor(isContextMenu ? open : ownerPath),
       views: rows,
       detent: 0,
       title: stringArg(control.args.find((a) => a.label === null)?.value) ?? '',
       message: '',
       dismiss,
       dismissId,
+      ...(isContextMenu ? { contextMenu: ownerPath } : {}),
     }
   }
 
@@ -1922,7 +2017,7 @@ class Resolver {
         background: collectModifier(overlayViews, 'presentationBackground')?.args[0]?.value,
         backgroundInteraction: backgroundInteractionOf(overlayViews),
         ...(kind === 'dialog' && view.intent && view.path ? { anchorId: handlerIdFor(view.path) } : {}),
-        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content, searchAround) },
+        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content, this.ctx.state.openMenu()), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content, searchAround) },
         ...(legacy ? this.alertWords(legacy, path) : this.wordsOf(kind, modifier, shown, path)),
         dismiss,
         dismissId,
@@ -2162,6 +2257,20 @@ function tagFits(tag: SwiftValue, binding: ProjectionPayload | null): boolean {
 
 /** Declared names the preview holds as another type: a `CGFloat` is a `Double` here. */
 const DECLARED_AS_RUNTIME: Readonly<Record<string, string>> = { CGFloat: 'Double', Float: 'Double' }
+
+/** What a `ForEach` gives each of its rows to swipe: its `.onDelete`, at the row's place, and its `.swipeActions`. */
+interface RowActions {
+  readonly onDelete: ActionValue | null
+  readonly offset: number
+  readonly swipes: readonly ModifierValue[]
+}
+
+/** The Delete `.onDelete` makes, as iOS 27 draws it: `Button("Delete", systemImage: "trash", role: .destructive)`. */
+const DELETE_ACTION: readonly ViewArg[] = [
+  { label: null, value: str('Delete') },
+  { label: 'systemImage', value: str('trash') },
+  { label: 'role', value: opaque(TOKEN_TYPE, { name: 'destructive' }) },
+]
 
 /** A `ForEach`'s rows are siblings of whatever surrounds it, never a nested container. */
 function flattenForEach(views: readonly ViewValue[]): ViewValue[] {

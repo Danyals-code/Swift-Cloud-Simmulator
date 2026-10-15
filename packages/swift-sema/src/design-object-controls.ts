@@ -1,7 +1,8 @@
-import { authoringCapability, type AuthoringNode } from '@studio/shared'
+import { MODIFIER_SLOTS, PRESENTATION_PARTS, authoringCapability, type AuthoringNode } from '@studio/shared'
 import type { CallExpr, Expr } from '@studio/swift-syntax'
-import { swiftString, type ControlKind, type ControlRecipe } from './design-controls'
+import { buttonLabel, buttonRole, literalText, swiftString, symbolNameProblem, viewCallChain, type ControlKind, type ControlRecipe } from './design-controls'
 import type { AddControl, ReplaceControl } from './design-advanced-controls'
+import { indentAt } from './authoring-context'
 
 type Insert = (call: CallExpr, label: string | null, value: string, order?: readonly (string | null)[]) => ReturnType<ControlRecipe['patch']>
 type Param = (call: CallExpr, id: string, title: string, label: string | null, kind: ControlKind, fallback: string, options?: readonly string[], min?: number, max?: number, prefix?: string, order?: readonly (string | null)[]) => void
@@ -10,8 +11,23 @@ const vertical = ['top', 'center', 'bottom', 'firstTextBaseline', 'lastTextBasel
 const gradients = ['LinearGradient', 'RadialGradient', 'AngularGradient']
 const literalNumber = (expr: Expr, text: string) => ['integerLiteral', 'floatLiteral', 'unary'].includes(expr.kind) && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text.slice(expr.span.start, expr.span.end)) ? Number(text.slice(expr.span.start, expr.span.end)) : undefined
 
-/** Constructor and overload controls edit literal leaves, preserving their bindings and neighbors. */
-export function objectControls(node: AuthoringNode, base: CallExpr, modifiers: readonly CallExpr[], text: string, target: number, colors: readonly string[], add: AddControl, replace: ReplaceControl, param: Param, insert: Insert): void {
+/** A Button's Icon takes a well-formed symbol name, or nothing, which takes it away (Wave 4a). */
+const iconProblem = (value: string) => value ? symbolNameProblem(value) : null
+
+/**
+ * Whether a Button is one of an alert's or a dialog's actions (Wave 4a), which iOS draws as
+ * its words alone. `byId` finds a layer.
+ */
+function presentationAction(node: AuthoringNode, byId: (id: string | undefined) => AuthoringNode | undefined): boolean {
+  const slot = byId(node.parentId), presentation = slot?.kind === 'branch' && slot.name === PRESENTATION_PARTS.actions ? byId(slot.parentId) : undefined
+  return presentation?.kind === 'branch' && (presentation.name === MODIFIER_SLOTS.alert || presentation.name === MODIFIER_SLOTS.confirmationDialog)
+}
+
+/**
+ * Constructor and overload controls edit literal leaves, preserving their bindings and neighbors.
+ * `byId` finds the layers around the view, which say whether a Button is an alert's.
+ */
+export function objectControls(node: AuthoringNode, base: CallExpr, modifiers: readonly CallExpr[], text: string, target: number, colors: readonly string[], add: AddControl, replace: ReplaceControl, param: Param, insert: Insert, byId?: (id: string | undefined) => AuthoringNode | undefined): void {
   const named = (call: CallExpr, label: string | null) => call.args.find(a => a.label === label)?.value
   const uncommented = (expr: Expr) => !/\/\/|\/\*/.test(text.slice(expr.span.start, expr.span.end))
   const name = (call: CallExpr) => call.callee.kind === 'identifier' ? call.callee.name : call.callee.kind === 'memberAccess' ? call.callee.member : ''
@@ -110,11 +126,117 @@ export function objectControls(node: AuthoringNode, base: CallExpr, modifiers: r
       else if (!description) add('empty:description', 'Description', 'text', '', v => insert(base, 'description', `Text(${swiftString(v)})`))
     }
     if (gradients.includes(node.name)) gradientControls(base, 'gradient', true)
+    if (node.name === 'Button') buttonControls()
+    if (node.name === 'Section') sectionControls()
+  }
+  /** The words of a string with no values or comments in it. */
+  function wordsOf(e: Expr): string | undefined {
+    return uncommented(e) ? literalText(e) : undefined
+  }
+  /** A value worked out in code, shown as the code writes it, read only. */
+  function shownAsWritten(id: string, label: string, value: Expr): void {
+    const written = text.slice(value.span.start, value.span.end)
+    add(id, label, 'text', written, () => ({ ...value.span, text: written }), undefined, undefined, undefined, 'Shown as the code writes it.', value.span, 'This value is worked out in code. Change it in Code.')
+  }
+  /** Takes an argument out of a call with what joins it to the others: its parentheses, when it is the only one in them. */
+  function dropArgument(call: CallExpr, arg: CallExpr['args'][number]): ReturnType<ControlRecipe['patch']> {
+    const action = call.trailingClosure?.span.start ?? call.span.end, after = arg.span.start > action
+    const list = call.args.filter(a => a.span.start > action === after), at = list.indexOf(arg)
+    if (after || at > 0) return { start: at > 0 ? list[at - 1]!.span.end : call.trailingClosure!.span.end, end: arg.span.end, text: '' }
+    if (list[at + 1]) return { start: arg.span.start, end: list[at + 1]!.span.start, text: '' }
+    return { start: call.callee.span.end, end: text.indexOf(')', arg.span.end) + 1, text: '' }
+  }
+  /**
+   * A Section's Header and Footer as text (Wave 4a): its title, or a header or footer that is one
+   * Text, as an argument or a closure, edited in place, and taken away when emptied. A title
+   * chosen by a condition offers each of its words, as any title does. One that is more than a
+   * Text is shown read only. There is no initializer for a title and a footer, so a footer added
+   * to a titled section writes both as closures.
+   */
+  function sectionControls() {
+    const content = base.trailingClosure
+    if (!content) return
+    const { indent, unit } = indentAt(text, base.span.start)
+    const closure = (view: string) => `{\n${indent}${unit}${view}\n${indent}}`
+    const title = base.args[0]?.label === null ? base.args[0] : undefined
+    const header = base.args.find(a => a.label === 'header'), footer = base.args.find(a => a.label === 'footer')
+    /** The one Text a part is, written as a view or as a closure that returns it, and its words; undefined for anything else. */
+    const single = (part: Expr) => {
+      const [only, more] = part.kind === 'closure' ? part.body.statements : []
+      const view = part.kind !== 'closure' ? part : !more && only?.kind === 'exprStmt' ? only.expression : undefined
+      const call = view && viewCallChain(view)?.base
+      const literal = call && name(call) === 'Text' && call.args.length === 1 && call.args[0]!.label === null ? call.args[0]!.value : undefined
+      const words = literal && wordsOf(literal)
+      return words !== undefined ? { literal: literal!, words } : undefined
+    }
+    const part = (id: string, label: string, written: CallExpr['args'][number] | undefined, added: (words: string) => ReturnType<ControlRecipe['patch']>) => {
+      const chosen = written && written === title && written.value.kind === 'ternary' ? written.value : undefined
+      if (chosen && (literalText(chosen.then) !== undefined || literalText(chosen.else) !== undefined)) return replace(id, label, chosen, 'text')
+      const found = written && (written === title ? wordsOf(written.value) !== undefined ? { literal: written.value, words: wordsOf(written.value)! } : undefined : single(written.value))
+      if (written && !found) return add(id, label, 'text', '', () => ({ ...written.span, text: text.slice(written.span.start, written.span.end) }), undefined, undefined, undefined, undefined, written.span, written === title ? 'This header is worked out in code. Change it in Code.' : `This ${label.toLowerCase()} is more than a text. Change it in Code.`)
+      add(id, label, 'text', found?.words ?? '', v => !found ? added(v) : v ? { ...found.literal.span, text: swiftString(v) } : dropArgument(base, written!), undefined, undefined, undefined, 'Empty takes it away.', found?.literal.span)
+    }
+    part('title', 'Header', title ?? header, v => target >= 15 && !footer ? { start: base.callee.span.end, end: base.callee.span.end, text: `(${swiftString(v)})` }
+      : footer && footer.value.kind !== 'closure' ? insert(base, 'header', `Text(${swiftString(v)})`, ['header', 'footer'])
+        : { start: content.span.end, end: content.span.end, text: ` header: ${closure(`Text(${swiftString(v)})`)}` })
+    part('section:footer', 'Footer', footer, v => title ? { start: base.callee.span.end, end: content.span.end, text: ` ${text.slice(content.span.start, content.span.end)} header: ${closure(`Text(${text.slice(title.value.span.start, title.value.span.end)})`)} footer: ${closure(`Text(${swiftString(v)})`)}` }
+      : header && header.value.kind !== 'closure' ? insert(base, 'footer', `Text(${swiftString(v)})`, ['header', 'footer'])
+        : { start: (header ?? { span: content.span }).span.end, end: (header ?? { span: content.span }).span.end, text: ` footer: ${closure(`Text(${swiftString(v)})`)}` })
+  }
+  /**
+   * A Button's Icon and Role (Wave 4a). The icon is a titled button's `systemImage:`, or the
+   * symbol of the Label a button with a label shows, which a label of one Text becomes; the
+   * role is written in its parentheses. A button whose action is an argument keeps both as
+   * written, and an alert's or a dialog's has no Icon, as iOS draws none there.
+   */
+  function buttonControls() {
+    const action = base.trailingClosure?.span.start ?? base.span.end, inParens = base.args.filter(a => a.span.start < action)
+    const title = inParens[0]?.label === null ? inParens[0] : undefined, symbol = named(base, 'systemImage'), role = named(base, 'role')
+    if (named(base, 'action') || !base.trailingClosure) return
+    if (!byId || !presentationAction(node, byId)) buttonIcon(title, symbol)
+    const current = buttonRole(role && text.slice(role.span.start, role.span.end))
+    if (target < 15 || !current || !title && inParens.some(a => a.label !== 'role')) return
+    const roleArg = base.args.find(a => a.label === 'role')
+    add('role', 'Role', 'select', current[0]!.toUpperCase() + current.slice(1), v => {
+      const value = '.' + v.toLowerCase()
+      if (v !== 'None') return roleArg ? { ...roleArg.value.span, text: value } : inParens.length ? { start: inParens.at(-1)!.span.end, end: inParens.at(-1)!.span.end, text: `, role: ${value}` } : { start: base.callee.span.end, end: base.callee.span.end, text: `(role: ${value})` }
+      return roleArg ? dropArgument(base, roleArg) : { start: base.callee.span.end, end: base.callee.span.end, text: '' }
+    }, ['None', 'Destructive', 'Cancel'], undefined, undefined, 'Destructive draws it in red; Cancel puts it where iOS puts a way out.', roleArg?.span)
+  }
+  /** A Button's Icon, from its `systemImage:` or its label's: `title` and `symbol` are its own arguments. */
+  function buttonIcon(title: CallExpr['args'][number] | undefined, symbol: Expr | undefined) {
+    const label = !title ? buttonLabel(base, text)?.view : undefined, labelled = label && viewCallChain(label), shown = labelled?.base
+    const labelSymbol = shown && name(shown) === 'Label' && shown.args.length === 2 && shown.args[0]!.label === null ? named(shown, 'systemImage') : undefined
+    const written = (expr: Expr) => text.slice(expr.span.start, expr.span.end)
+    if (title && !symbol && target >= 14) add('icon', 'Icon', 'text', '', v => insert(base, 'systemImage', swiftString(v), [null, 'systemImage', 'role']), undefined, undefined, undefined, undefined, undefined, undefined, iconProblem)
+    else if (title && symbol && wordsOf(symbol) !== undefined) add('icon', 'Icon', 'text', wordsOf(symbol)!, v => v ? { ...symbol.span, text: swiftString(v) } : { start: title.span.end, end: symbol.span.end, text: '' }, undefined, undefined, undefined, undefined, symbol.span, undefined, iconProblem)
+    // A Label with no symbol is its title alone, which is a Text.
+    else if (labelSymbol && wordsOf(labelSymbol) !== undefined) add('icon', 'Icon', 'text', wordsOf(labelSymbol)!, v => v ? { ...labelSymbol.span, text: swiftString(v) } : { ...shown!.span, text: `Text(${written(shown!.args[0]!.value)})` }, undefined, undefined, undefined, undefined, labelSymbol.span, undefined, iconProblem)
+    // And a label of one Text with nothing else becomes a Label to take one, with the same words.
+    else if (shown && name(shown) === 'Text' && !labelled!.modifiers.length && shown.args.length === 1 && shown.args[0]!.label === null && shown.args[0]!.value.kind === 'stringLiteral' && !shown.trailingClosure && uncommented(shown) && target >= 14) {
+      const words = shown.args[0]!.value
+      add('icon', 'Icon', 'text', '', v => ({ ...shown.span, text: v ? `Label(${written(words)}, systemImage: ${swiftString(v)})` : written(shown) }), undefined, undefined, undefined, undefined, shown.span, undefined, iconProblem)
+    }
   }
   for (const [i, m] of modifiers.entries()) {
     const modifier = name(m), id = `modifier:${i}:detail`
     const cap = authoringCapability(modifier, 'modifier', m.args.map(a => a.label))
     if (!cap || target < Number.parseFloat(cap.minimumIOS)) continue
+    // Which side of a row its swipe actions are on, and whether a full swipe runs the first (Wave 4a).
+    if (modifier === 'swipeActions') {
+      param(m, id + ':edge', 'Edge', 'edge', 'select', 'trailing', ['leading', 'trailing'], undefined, undefined, '.', ['edge', 'allowsFullSwipe'])
+      param(m, id + ':fullSwipe', 'Full swipe', 'allowsFullSwipe', 'toggle', 'true', undefined, undefined, undefined, '', ['edge', 'allowsFullSwipe'])
+    }
+    // A row's insets, each edge a field of its own, `EdgeInsets(…)` or `.init(…)` (Wave 4a).
+    // An edge, or insets, worked out in code is shown as written, read only.
+    const insets = modifier === 'listRowInsets' ? named(m, null) : undefined
+    const edges = insets?.kind === 'call' && !insets.trailingClosure && (name(insets) === 'EdgeInsets' || insets.callee.kind === 'memberAccess' && !insets.callee.base && insets.callee.member === 'init') && insets.args.map(a => a.label).join() === 'top,leading,bottom,trailing' ? insets.args : undefined
+    for (const edge of edges ?? []) {
+      const label = edge.label![0]!.toUpperCase() + edge.label!.slice(1)
+      if (literalNumber(edge.value, text) !== undefined) replace(`${id}:${edge.label}`, label, edge.value, 'pt')
+      else shownAsWritten(`${id}:${edge.label}`, label, edge.value)
+    }
+    if (insets && !edges) shownAsWritten(`${id}:value`, 'Row insets', insets)
     if (modifier === 'lineLimit') {
       const limit = named(m, null)
       if (limit && literalNumber(limit, text) !== undefined) {

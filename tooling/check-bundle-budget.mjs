@@ -119,8 +119,13 @@ const KB = 1024
  *              values, view-model states, and alerts, dialogs and previews as
  *              screens, estimated at 10 to 15 KB. Raised to 860 KB by
  *              decision, for 3b and the start of Wave 4.
+ *   System UI - 843.3 KB actual after Wave 3b. Wave 4 adds toolbar items,
+ *              search, sheet settings, swipe actions, context menus, list
+ *              rows, a paging carousel and the missing Add palette views,
+ *              estimated at 25 to 34 KB over three PRs. Raised to 880 KB by
+ *              decision, for all of Wave 4.
  */
-const BUDGET_KB = 860
+const BUDGET_KB = 880
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.

@@ -5,10 +5,12 @@ import { resolve, join } from 'node:path'
 
 // Capture only: run the exported fixture and select its state in Simulator first.
 // No boot, install, appearance change, or selection of an arbitrary device.
-const [udid, state, output, textSize] = process.argv.slice(2)
+// A fixture other than the screens one names its own states, `-screen` names such as swipe-leading.
+const [udid, state, output, textSize, fixturePath = 'tests/fixtures/ios27-screens.swift'] = process.argv.slice(2)
 const states = ['library', 'scrolled-library', 'details', 'settings', 'sheet', 'alert', 'menu']
-if (!udid || !states.includes(state) || !output || !['large', 'accessibility3'].includes(textSize)) {
-  throw new Error('Usage: node tooling/capture-ios27.mjs <simulator-UUID> <library|scrolled-library|details|settings|sheet|alert|menu> <output-directory> <large|accessibility3>\nSet the fixture screen and text size in Simulator before capturing. Text size is recorded as operator-declared.')
+const known = process.argv[6] ? /^[a-z0-9-]+$/.test(state ?? '') : states.includes(state)
+if (!udid || !known || !output || !['large', 'accessibility3'].includes(textSize)) {
+  throw new Error('Usage: node tooling/capture-ios27.mjs <simulator-UUID> <library|scrolled-library|details|settings|sheet|alert|menu> <output-directory> <large|accessibility3> [fixture.swift]\nSet the fixture screen and text size in Simulator before capturing. Text size is recorded as operator-declared. With a fixture, the state is its screen name.')
 }
 const run = (command, args) => execFileSync(command, args, { encoding: 'utf8', timeout: 30_000 }).trim()
 const devices = JSON.parse(run('xcrun', ['simctl', 'list', 'devices', '--json'])).devices
@@ -23,11 +25,11 @@ mkdirSync(out, { recursive: true })
 const image = `${state}-${Date.now()}.png`
 run('xcrun', ['simctl', 'io', udid, 'screenshot', join(out, image)])
 const bytes = readFileSync(join(out, image))
-const fixture = readFileSync(new URL('../tests/fixtures/ios27-screens.swift', import.meta.url))
+const fixture = readFileSync(new URL(`../${fixturePath}`, import.meta.url))
 const hash = data => createHash('sha256').update(data).digest('hex')
 const metadata = {
   profile: 'ios-27', status: 'captured-unmeasured', image, sha256: hash(bytes),
-  fixtureSha256: hash(fixture), state, device: match.name, udid, runtime: match.runtime,
+  fixture: fixturePath, fixtureSha256: hash(fixture), state, device: match.name, udid, runtime: match.runtime,
   sdk, xcode: run('xcodebuild', ['-version']), appearance, textSize, textSizeSource: 'operator-declared',
   pixels: { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }, capturedAt: new Date().toISOString(),
   measurements: null,

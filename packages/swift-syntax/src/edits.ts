@@ -30,7 +30,7 @@ const CONTAINERS = new Set([
   'VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'LazyVGrid', 'LazyHGrid',
   'List', 'ScrollView', 'Form', 'Section', 'Group', 'GroupBox', 'ForEach',
   'NavigationStack', 'NavigationView', 'NavigationSplitView', 'TabView', 'Grid', 'GridRow',
-  'VSplitView', 'HSplitView', 'ViewThatFits', 'AnyLayout',
+  'VSplitView', 'HSplitView', 'ViewThatFits', 'AnyLayout', 'Picker', 'Menu',
 ])
 
 export interface ViewSite {
@@ -308,53 +308,61 @@ export function moveView(text: string, file: FileId, offset: number, direction: 
  *
  * A container takes it as its last child, because selecting a stack and pressing Add
  * means "put one in here"; anything else takes it as its next sibling, and so does a
- * container `beside` it, as a paste goes. The snippet is re-indented to wherever it
- * lands, so a multi-line one arrives formatted rather than flattened against the left margin.
+ * container `beside` it, as a paste goes. A `slot` at `offset` written as a closure takes it
+ * as its last view. The snippet is re-indented to wherever it lands, so a multi-line one
+ * arrives formatted rather than flattened against the left margin.
  */
-export function insertView(text: string, file: FileId, offset: number, snippet: string, refuse?: RefusalReason, options: { readonly asListRow?: boolean; readonly beside?: boolean } = {}): SourceEdit | null {
+export function insertView(text: string, file: FileId, offset: number, snippet: string, refuse?: RefusalReason, options: { readonly asListRow?: boolean; readonly beside?: boolean; readonly slot?: boolean } = {}): SourceEdit | null {
+  const slot = options.slot ? closureAt(text, file, offset) : undefined
+  if (slot) return appendTo(text, slot, offset, snippet, refuse)
   const found = siteAt(text, file, offset)
   if (!found) return refused(refuse, 'A view can’t go beside this one, which is part of the code around it. Select what holds it instead.')
   const list = options.asListRow ? dataList(found.stmt) : null
   if (list) return insertListRow(text, list, snippet, refuse)
 
   const content = options.beside ? null : contentBlockOf(found.stmt)
-  const last = content?.statements[content.statements.length - 1]
+  if (content) return appendTo(text, content, found.stmt.span.start, snippet, refuse)
+  return spliceStatement(text, cutOf(text, found.stmt), snippet)
+}
+
+/**
+ * The views of the closure that starts at `offset`: a slot written as a closure, a toolbar's,
+ * a section's header or an alert's actions, which Add selected in Layers fills (Wave 4a).
+ */
+function closureAt(text: string, file: FileId, offset: number): Block | undefined {
+  let found: Block | undefined
+  walk(Parser.parse(text, file).sourceFile, (node: Node) => { if (node.kind === 'closure' && node.span.start === offset) found ??= node.body })
+  return found
+}
+
+/** Puts a snippet in `content` as its last statement, indented one step in from the line `owner` starts on. */
+function appendTo(text: string, content: Block, owner: number, snippet: string, refuse?: RefusalReason): SourceEdit | null {
+  const last = content.statements[content.statements.length - 1]
   // A last child written in a `#if` clause has the block's `#endif` after it, and a view
   // put straight after it would be in that clause too, shown only by the builds it names.
-  const reference = last && !CLAUSE_EDGE.test(text.slice(extentOf(text, last).end, content!.span.end - 1)) ? last : undefined
-
-  if (content && reference) {
-    // Last child of the container.
-    const cut = cutOf(text, reference)
-    return spliceStatement(text, cut, snippet)
+  if (last && !CLAUSE_EDGE.test(text.slice(extentOf(text, last).end, content.span.end - 1))) return spliceStatement(text, cutOf(text, last), snippet)
+  // A container with no statements can still hold text the parser does not turn
+  // into one - a hidden view, a comment, a ForEach's `item in` - so the new view
+  // goes in front of the closing brace and everything before it stays.
+  const open = content.span.start
+  const close = content.span.end - 1
+  if (open === -1 || close === -1 || close < open) return refused(refuse, 'There’s no room for a view here. Add it in Code.')
+  const outer = /^[ \t]*/.exec(text.slice(lineStartAt(text, owner), owner))?.[0] ?? ''
+  const inner = outer + indentUnit(text)
+  const closeLine = lineStartAt(text, close)
+  if (closeLine > open && /^[ \t]*$/.test(text.slice(closeLine, close))) {
+    // Lined up with what is already inside, when a line of it comes before the brace.
+    const lastLine = lineStartAt(text, closeLine - 1)
+    const indent = (lastLine > open ? /^[ \t]*(?=\S)/.exec(text.slice(lastLine, closeLine))?.[0] : undefined) ?? inner
+    return { text: text.slice(0, closeLine) + `${indentSnippet(snippet, indent)}\n` + text.slice(closeLine), offset: closeLine + indent.length }
   }
-
-  if (content) {
-    // A container with no statements can still hold text the parser does not turn
-    // into one - a hidden view, a comment, a ForEach's `item in` - so the new view
-    // goes in front of the closing brace and everything before it stays.
-    const open = content.span.start
-    const close = content.span.end - 1
-    if (open === -1 || close === -1 || close < open) return refused(refuse, 'There’s no room for a view here. Add it in Code.')
-    const outer = /^[ \t]*/.exec(text.slice(lineStartAt(text, found.stmt.span.start), found.stmt.span.start))?.[0] ?? ''
-    const inner = outer + indentUnit(text)
-    const closeLine = lineStartAt(text, close)
-    if (closeLine > open && /^[ \t]*$/.test(text.slice(closeLine, close))) {
-      // Lined up with what is already inside, when a line of it comes before the brace.
-      const lastLine = lineStartAt(text, closeLine - 1)
-      const indent = (lastLine > open ? /^[ \t]*(?=\S)/.exec(text.slice(lastLine, closeLine))?.[0] : undefined) ?? inner
-      return { text: text.slice(0, closeLine) + `${indentSnippet(snippet, indent)}\n` + text.slice(closeLine), offset: closeLine + indent.length }
-    }
-    // A brace on a shared line - `VStack { }` - opens onto its own lines, which is
-    // where nested content stays readable.
-    const end = open + 1 + text.slice(open + 1, close).trimEnd().length
-    return {
-      text: text.slice(0, end) + `\n${indentSnippet(snippet, inner)}\n${outer}` + text.slice(close),
-      offset: end + 1 + inner.length,
-    }
+  // A brace on a shared line - `VStack { }` - opens onto its own lines, which is
+  // where nested content stays readable.
+  const end = open + 1 + text.slice(open + 1, close).trimEnd().length
+  return {
+    text: text.slice(0, end) + `\n${indentSnippet(snippet, inner)}\n${outer}` + text.slice(close),
+    offset: end + 1 + inner.length,
   }
-
-  return spliceStatement(text, cutOf(text, found.stmt), snippet)
 }
 
 /** `List(items) { item in … }`: a list whose rows come from data, its closure being each row. */

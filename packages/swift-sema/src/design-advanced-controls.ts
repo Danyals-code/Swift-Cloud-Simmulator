@@ -25,10 +25,10 @@ export function materialThickness(value: Expr): string | undefined {
   if (!value.base) return MATERIALS.find(thickness => value.member === thickness + 'Material')
   return value.base.kind === 'identifier' && value.base.name === 'Material' && MATERIALS.includes(value.member) ? value.member : undefined
 }
-export type AddControl = (id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description?: string, origin?: SourceSpan) => void
+export type AddControl = (id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description?: string, origin?: SourceSpan, disabledReason?: string, problem?: ControlRecipe['problem']) => void
 export type ReplaceControl = (id: string, label: string, value: Expr, kind: ControlKind, options?: readonly string[], min?: number, max?: number, prefix?: string) => void
 /** Literal-only editors. Existing expressions, comments, bindings and linked tokens remain owned by their source. */
-export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers: readonly CallExpr[], text: string, target: number, colors: readonly string[], add: AddControl, replace: ReplaceControl): void {
+export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers: readonly CallExpr[], text: string, target: number, colors: readonly string[], add: AddControl, replace: ReplaceControl, byId?: (id: string | undefined) => AuthoringNode | undefined): void {
   const raw = (span: SourceSpan) => text.slice(span.start, span.end)
   const nameOf = (call: CallExpr) => call.callee.kind === 'memberAccess' ? call.callee.member : ''
   const safe = (span: SourceSpan) => !/\/\/|\/\*/.test(raw(span))
@@ -49,7 +49,7 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
     else if (arg) replace(id, title, arg.value, kind, options, min, max, prefix)
     else add(id, title, kind, fallback, v => insert(call, label, kind === 'select' ? prefix + v : v, order), options, min, max)
   }
-  objectControls(node, base, modifiers, text, target, colors, add, replace, param, insert)
+  objectControls(node, base, modifiers, text, target, colors, add, replace, param, insert, byId)
   if (node.kind !== 'component' && node.name === 'ScrollView' && authoringCapability(node.name, 'view', base.args.map(a => a.label)) && !base.args.some(a => a.label === 'showsIndicators')) param(base, 'scroll:indicators', 'Show indicators', 'showsIndicators', 'toggle', 'true')
   if (node.kind !== 'component' && node.name === 'Image') {
     // `.aspectRatio(contentMode: .fit)` is `.scaledToFit()` spelled out. One with a ratio of its own sets

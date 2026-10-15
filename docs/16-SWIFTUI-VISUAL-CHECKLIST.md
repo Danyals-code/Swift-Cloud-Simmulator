@@ -117,7 +117,7 @@ of the requested behavior, even if a name or placeholder is recognized.
 | Bottom toolbar | Missing | `.bottomBar` placement warns and is omitted |
 | Navigation title / display mode | Works | Large/inline and browser scroll collapse; limited native reference verified |
 | `List` / `Form` / `Section` | Partial | Common grouped/plain forms, headers/footers/insets; binding collections and all list styles incomplete |
-| `.swipeActions` | Missing | User-provided actions are not executed; now warns. Standard delete comes from `.onDelete` instead |
+| `.swipeActions` | Works | Leading and trailing actions, tints, roles, icons and full swipe, measured against iOS 27 (`native/iphone18pro-system-ui`); `.onDelete` is one case of it |
 | `.onDelete` | Works | Standard delete gesture/action updates the collection |
 | `.onMove` | Missing | Array move helper exists, but this modifier has no reorder UI/callback path; now warns |
 | `.refreshable` | Missing | Warns; no pull-to-refresh callback |

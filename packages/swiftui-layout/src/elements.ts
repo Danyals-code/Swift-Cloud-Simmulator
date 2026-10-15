@@ -410,6 +410,15 @@ export type LayoutModifier =
       readonly y: number
     }
   | { readonly kind: 'offset'; readonly x: number; readonly y: number }
+  /**
+   * A list row's swipe actions on one edge (Wave 4a), laid out as iOS 27 lays them out
+   * rather than as a stack: `content` is a stack of the actions, outermost first, each as
+   * wide as it draws or, `equal`, as the widest of them, `gap` apart and from the row and
+   * the edge, as tall as the row. The row slides off them by `offset`, or by as far as they
+   * take when it is null, which is what the layout alone knows. Dragged further, the
+   * outermost grows into the room, and the others fade.
+   */
+  | { readonly kind: 'swipe'; readonly edge: 'leading' | 'trailing'; readonly content: LayoutElement; readonly equal: boolean; readonly gap: number; readonly offset: number | null }
   /** `.position(x:y:)` - the child's *centre* goes here, in the parent's space. */
   | { readonly kind: 'position'; readonly x: number; readonly y: number }
   /**

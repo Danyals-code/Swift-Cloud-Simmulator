@@ -253,7 +253,8 @@ for (const [name, body] of catalogFixtures) {
    const actualName = item.name === 'frameFlexible' ? 'frame' : item.name
    const modifier = find(changed, name).modifiers?.find(m => m.name === actualName)
    expect(modifier, changed).toBeDefined()
-   if (!['bold','italic','underline','strikethrough','clipped'].includes(actualName)) expect(modifier!.controls.length, changed).toBeGreaterThan(0)
+   // A context menu's buttons are edited in its slot, as layers of their own (Wave 4a).
+   if (!['bold','italic','underline','strikethrough','clipped','contextMenu'].includes(actualName)) expect(modifier!.controls.length, changed).toBeGreaterThan(0)
    render(changed)
  })
 }

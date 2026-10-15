@@ -45,7 +45,7 @@ export const visualCases: VisualCase[] = [
   test('page-tabs', 'TabView { Text("First"); Text("Second") }.tabViewStyle(.page)', 'First'),
   test('list', 'List { Section("Section") { Text("Row") } }', 'Row'),
   test('form', 'Form { Section("Section") { Toggle("Flag", isOn: $flag); TextField("Name", text: $text) } }', 'Flag'),
-  test('swipeActions', 'List { Text("Row").swipeActions { Button("Archive") {} } }', 'Row', 'swipeActions'),
+  test('swipeActions', 'List { Text("Row").swipeActions { Button("Archive") {} } }', 'Row'),
   test('onDelete', 'List { ForEach(0..<3) { Text("Row \\($0)") }.onDelete { offsets in count = offsets.count } }', 'Row 0'),
   test('onMove', 'List { ForEach(0..<3) { Text("Row \\($0)") }.onMove { _, _ in } }', 'Row 0', 'onMove'),
   test('refreshable', 'List { Text("Row") }.refreshable { count += 1 }', 'Row', 'refreshable'),

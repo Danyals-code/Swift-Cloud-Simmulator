@@ -1,7 +1,7 @@
 import { validDesignValue } from '@studio/shared'
 import type { AuthoringNode, ComponentDescription, DesignValue, PreviewColorAsset, RecordField, SourceFile, SourceSpan } from '@studio/shared'
 import { forEachChild, Lexer, type CallExpr, type Decl, type Expr, type ExtensionDecl, type Node, type SourceFileNode, type StructDecl, type TypeRef, type VarDecl } from '@studio/swift-syntax'
-import { isViewBase, swiftString, viewCallChain } from './design-controls'
+import { isViewBase, literalText, swiftString, viewCallChain } from './design-controls'
 
 export interface SourcePatch { readonly file: string; readonly start: number; readonly end: number; readonly text: string }
 export interface FeatureContext {
@@ -18,7 +18,10 @@ export const raw = (ctx: FeatureContext, span: SourceSpan): string => ctx.files.
 
 /** The whitespace the line holding `offset` starts with, and one level of indent more: a tab where it uses tabs, or four spaces. */
 export function lineIndent(ctx: FeatureContext, file: string, offset: number): { readonly indent: string; readonly unit: string } {
-  const text = ctx.files.find(f => f.id === file)?.text ?? ''
+  return indentAt(ctx.files.find(f => f.id === file)?.text ?? '', offset)
+}
+/** `lineIndent` in a file's text: the whitespace the line holding `offset` starts with, and one level more. */
+export function indentAt(text: string, offset: number): { readonly indent: string; readonly unit: string } {
   const indent = /^[\t ]*/.exec(text.slice(text.lastIndexOf('\n', offset - 1) + 1))![0]
   return { indent, unit: indent.includes('\t') ? '\t' : '    ' }
 }
@@ -157,7 +160,8 @@ export function scalarType(type: TypeRef | null, initial?: Expr | null): { type:
 }
 export function literal(ctx: FeatureContext, expr: Expr | null): DesignValue | undefined {
   if (!expr) return undefined
-  if (expr.kind === 'stringLiteral' && expr.segments.every(s => s.kind === 'text')) return expr.segments.map(s => s.kind === 'text' ? s.value : '').join('')
+  const words = literalText(expr)
+  if (words !== undefined) return words
   if (expr.kind === 'nilLiteral') return null
   const text = raw(ctx, expr.span)
   if (expr.kind === 'booleanLiteral') return text === 'true'

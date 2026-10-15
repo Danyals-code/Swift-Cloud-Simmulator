@@ -629,6 +629,7 @@ export class LayoutEngine {
       // stacks.
       case 'background':
       case 'overlay':
+      case 'swipe':
         return this.measure(element.child, proposal, inner)
 
       case 'fixedSize': {
@@ -1411,6 +1412,26 @@ export class LayoutEngine {
           next,
           parent,
         )
+      }
+
+      case 'swipe': {
+        // The actions first, so the row that slides off them paints over them.
+        const actions = modifier.content.kind === 'stack' ? modifier.content.children : [modifier.content]
+        const drawn = actions.map(action => this.measure(action, { width: null, height: bounds.height }, inner).width)
+        const widths = modifier.equal ? drawn.map(() => Math.max(...drawn)) : drawn
+        const open = widths.reduce((sum, width) => sum + width + modifier.gap, modifier.gap)
+        const shift = modifier.offset ?? open
+        const grown = Math.max(0, shift - open)
+        const trailing = modifier.edge === 'trailing'
+        let edge = trailing ? bounds.x + bounds.width - modifier.gap : bounds.x + modifier.gap
+        let next = z
+        actions.forEach((action, i) => {
+          const width = widths[i]! + (i === 0 ? grown : 0)
+          const x = trailing ? edge - width : edge
+          edge = trailing ? x - modifier.gap : x + width + modifier.gap
+          next = this.place(action, { x, y: bounds.y, width, height: bounds.height }, i > 0 && grown > 0 ? { ...inner, opacity: inner.opacity * 0.5 } : inner, out, next, parent)
+        })
+        return this.place(element.child, { ...bounds, x: bounds.x + (trailing ? -shift : shift) }, inner, out, next, parent)
       }
 
       case 'offset':

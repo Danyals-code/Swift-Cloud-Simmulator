@@ -8,6 +8,7 @@ import {
   pageViews,
   rgba,
   sameStart,
+  screenOrigin,
   viewsDrawing,
   type CompileRequest,
   type AuthoringSnapshot,
@@ -41,6 +42,7 @@ import {
   type LayoutEnvironment,
   type MeasuredFont,
   type RunMeasurer,
+  type PlaceObserver,
   type PlacedNode,
 } from '@studio/swiftui-layout'
 import { AppRuntime, type EvaluationResult } from './app-runtime'
@@ -48,7 +50,7 @@ import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } from './style'
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
-import { shownView, stoppedFailures, type NestedPage, type NotDrawn, type OverlayKind } from './presentation'
+import { reveals, shownView, stoppedFailures, type NestedPage, type NotDrawn, type OverlayKind, type ResolvedUI, type Revealable } from './presentation'
 import { runnableProgram, setAsideRan, type Runnable } from './set-aside'
 import { exhausts, toFailure } from './failures'
 import type { GeometryPayload, RuntimeFailure, ViewValue } from './view-value'
@@ -83,6 +85,13 @@ let lastAnalysis: { request: CompileRequest; analysis: Analysis } | null = null
  * page brings the handles along.
  */
 let measureTarget: SourceSpan | null = null
+/**
+ * The swipe-action and context-menu modifiers the canvas's last drawing met, each once for
+ * where it is written, and the selection it was drawn for (Wave 4a): a new selection that
+ * reveals another, or none, draws the pages again from the program rather than only laying
+ * them out.
+ */
+let galleryReveal: { readonly target: SourceSpan | null; readonly modifiers: Map<SourceSpan, Revealable> } | null = null
 /** Where its drag's values go in its chain, worked out once for each analysis. */
 let sitesFor: { readonly analysis: Analysis; readonly target: SourceSpan; readonly sites: LayerDraftSites | null } | null = null
 /**
@@ -209,6 +218,7 @@ export function endLayerDraft(revision: number): CompileResult {
 export function resetPipelineState(): void {
   runtime.reset()
   lastEvaluation = null
+  galleryReveal = null
   lastGood = null
   keptAsFound = null
 }
@@ -437,7 +447,11 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
   // A view reaches out of the safe area on its own, where it touches an edge, and
   // `.ignoresSafeArea()` on one view no longer makes the whole screen full-bleed.
   const screenRect: Rect = { x: 0, y: 0, width: canvas.width, height: canvas.height }
-  const placed = engine.layout(content, contentBounds, { ...env, safeArea: { inner: contentBounds, outer: screenRect } }, CENTER, passOptions(pass))
+  const options = passOptions(pass)
+  // A context menu goes beside the view it is open on (Wave 4a), so where that is placed is watched.
+  const owner = screen.overlay?.contextMenu
+  const pressed: Pressed = {}
+  const placed = engine.layout(content, contentBounds, { ...env, safeArea: { inner: contentBounds, outer: screenRect } }, CENTER, owner === undefined ? options : { ...options, observer: watchPressed(owner, pressed, options.observer) })
   let tree = placedToRenderTree(placed, canvas, ++revision, screen.background)
   // At rest the bar has no colour of its own in iOS 27, so what reaches under it shows
   // through. Where nothing does, it keeps the screen's colour, which looks the same.
@@ -469,7 +483,10 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
     const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? bottomBarsEnd - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER, passOptions(pass))
     tree = appendPlaced(tree, search, BAR_Z + 2000)
   }
-  if (screen.overlay) tree = { ...tree, nodes: [...tree.nodes.map(n => n.parent || allowsBackgroundInteraction(screen.overlay!, canvas, safeArea) ? n : { ...n, inert: true }), ...presentOverlay(engine, screen.overlay, canvas, safeArea, env, pass).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }
+  if (screen.overlay) {
+    const view = pressed.at && onScreen(pressed.at, tree)
+    tree = { ...tree, nodes: [...tree.nodes.map(n => n.parent || allowsBackgroundInteraction(screen.overlay!, canvas, safeArea) ? n : { ...n, inert: true }), ...presentOverlay(engine, screen.overlay, canvas, safeArea, env, pass, view).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }
+  }
   return { ...tree, ...(scroll && collapseDistance ? { chrome: { scrollId: scroll.id, collapseDistance } } : {}) }
 }
 
@@ -481,7 +498,33 @@ function withAnimation(
   return animation ? { ...env, animation } : env
 }
 
-/** Places a presentation: a dimming layer, then the presented surface over it. */
+/** Where the view a context menu is open on was placed, and in which node's space (Wave 4a). */
+interface Pressed { at?: { readonly rect: Rect; readonly space: string | null } }
+
+/**
+ * Notes in `pressed` where the view a context menu is open on is placed (Wave 4a), as iOS
+ * lifts it: a list's row as a whole, by the frame the list gives it, or else the view's tap
+ * target. `inner` is told of every element, as it was before.
+ */
+function watchPressed(owner: string, pressed: Pressed, inner: PlaceObserver | undefined): PlaceObserver {
+  const row = `${owner}rowsize`, target = `${owner}hit`
+  return (element, rect, space) => {
+    inner?.(element, rect, space)
+    if (element.id === row || !pressed.at && element.id === target) pressed.at = { rect, space }
+  }
+}
+
+/** Where an element was placed, in a tree's own space, as the screen has it before anything scrolls. */
+function onScreen(placed: NonNullable<Pressed['at']>, tree: RenderTree): Rect {
+  const space = placed.space === null ? undefined : tree.nodes.find(node => node.id === placed.space)
+  const origin = space ? screenOrigin(space, new Map(tree.nodes.map(node => [node.id, node]))) : { x: 0, y: 0 }
+  return { x: placed.rect.x + origin.x, y: placed.rect.y + origin.y, width: placed.rect.width, height: placed.rect.height }
+}
+
+/**
+ * Places a presentation: a dimming layer, then the presented surface over it. A context
+ * menu's panel goes beside `pressed`, the view it is open on (Wave 4a).
+ */
 function presentOverlay(
   engine: LayoutEngine,
   overlay: NonNullable<ReturnType<typeof screenToLayout>['overlay']>,
@@ -489,6 +532,7 @@ function presentOverlay(
   safeArea: { top: number; leading: number; bottom: number; trailing: number },
   env: LayoutEnvironment,
   pass: LayoutPass = PLAIN,
+  pressed?: Rect,
 ): RenderNode[] {
   const nodes: PlacedNode[] = []
   const interactiveBackground = allowsBackgroundInteraction(overlay, canvas, safeArea)
@@ -501,7 +545,7 @@ function presentOverlay(
     z: 0,
     opacity: 1,
     cornerRadius: 0,
-    paint: { kind: 'fill', fill: { kind: 'solid', color: rgba(0, 0, 0, overlay.kind === 'dialog' || overlay.kind === 'menu' ? 0 : 0.2) } },
+    paint: { kind: 'fill', fill: { kind: 'solid', color: rgba(0, 0, 0, overlay.contextMenu ? SURFACES.contextMenu.dim : overlay.kind === 'dialog' || overlay.kind === 'menu' ? 0 : 0.2) } },
     ...(overlay.dismissId
       ? {
           hitTarget: {
@@ -553,7 +597,8 @@ function presentOverlay(
     const x = Math.min(...roots.map(n => n.frame.x)), y = Math.min(...roots.map(n => n.frame.y))
     const width = Math.max(...roots.map(n => n.frame.x + n.frame.width)) - x
     const height = Math.max(...roots.map(n => n.frame.y + n.frame.height)) - y
-    const panel: RenderNode = { id: 'overlay-menu', kind: 'layer', frame: { x, y, width, height }, z: 1, opacity: 1, anchorId: overlay.anchorId }
+    const at = overlay.contextMenu !== undefined && pressed ? contextMenuOrigin(pressed, { width, height }, canvas, safeArea) : { x, y }
+    const panel: RenderNode = { id: 'overlay-menu', kind: 'layer', frame: { x: at.x, y: at.y, width, height }, z: 1, opacity: 1, anchorId: overlay.anchorId }
     const arrow: RenderNode[] = overlay.kind === 'dialog' ? [{ id: 'overlay-dialog-arrow', kind: 'path',
       parent: panel.id, frame: { x: width / 2 - 14, y: height - 0.5, width: 28, height: 14 }, z: 2, opacity: 1,
       path: { d: 'M 0 0 L 11 11 Q 14 14 17 11 L 28 0', fill: { kind: 'solid', color: overlay.light ? rgba(250, 250, 252) : rgba(38, 38, 40) }, fillRule: 'nonzero' },
@@ -561,6 +606,28 @@ function presentOverlay(
     return [...dimNodes, panel, ...painted.map(n => n.parent ? n : { ...n, parent: panel.id, frame: { ...n.frame, x: n.frame.x - x, y: n.frame.y - y } }), ...arrow]
   }
   return [...dimNodes, ...painted]
+}
+
+/**
+ * Where a context menu's panel goes (Wave 4a), as iOS 27 puts it (iphone18pro-system-ui):
+ * centred `gap` under the view it is open on, or, where centred it would leave the screen,
+ * lined up with the view's edge on the screen's nearer side; never nearer the screen's edges
+ * than `margin`, and above the view when there is no room under it.
+ */
+function contextMenuOrigin(
+  view: Rect,
+  panel: { width: number; height: number },
+  canvas: { width: number; height: number },
+  safeArea: { top: number; bottom: number },
+): { x: number; y: number } {
+  const { gap, margin } = SURFACES.contextMenu
+  const centred = view.x + (view.width - panel.width) / 2
+  const lined = view.x + view.width / 2 <= canvas.width / 2 ? view.x : view.x + view.width - panel.width
+  const fits = centred >= margin && centred + panel.width <= canvas.width - margin
+  const x = Math.max(margin, Math.min(canvas.width - margin - panel.width, fits ? centred : lined))
+  const below = view.y + view.height + gap
+  const y = below + panel.height <= canvas.height - safeArea.bottom ? below : Math.max(safeArea.top, view.y - gap - panel.height)
+  return { x, y }
 }
 
 /**
@@ -618,7 +685,7 @@ function overlayRect(
   }
 
   if (overlay.kind === 'menu') {
-    const width = Math.min(SURFACES.menu.width, canvas.width - SURFACES.menu.margin * 2)
+    const width = Math.min(overlay.contextMenu ? SURFACES.contextMenu.width : SURFACES.menu.width, canvas.width - SURFACES.menu.margin * 2)
     return { x: canvas.width - width - SURFACES.menu.margin, y: safeArea.top, width, height: canvas.height - safeArea.top - safeArea.bottom - SURFACES.menu.margin }
   }
 
@@ -783,6 +850,7 @@ function geometryOf(result: CompileResult, instancesOf: (tree: RenderTree) => re
  */
 function redraw(revision: number): CompileResult {
   if (!drawn || !lastAnalysis) return relayout(revision)
+  if (!draft && galleryReveal && revealing(galleryReveal.target) !== revealing(measureTarget)) return rerender(revision)
   const startedAt = performance.now()
   // A draft is drawn at the revision on screen; a newer one the worker has seen stays its own.
   if (revision > lastAnalysis.request.revision) lastAnalysis = { ...lastAnalysis, request: { ...lastAnalysis.request, revision } }
@@ -810,6 +878,13 @@ function redraw(revision: number): CompileResult {
   }
   const geometry = geometryOf(result, tree => instances.get(tree))
   return geometry ? { ...result, geometry } : result
+}
+
+/** Which of the drawing's swipe actions or context menus a selection reveals, if any. */
+function revealing(target: SourceSpan | null): Revealable | null {
+  if (!target || !galleryReveal) return null
+  for (const modifier of galleryReveal.modifiers.values()) if (reveals(target, modifier)) return modifier
+  return null
 }
 
 /** Whether every frame in a tree is a size the canvas can draw. */
@@ -962,6 +1037,7 @@ function finish(
   appeared = false,
 ): CompileResult {
   drawing = []
+  galleryReveal = null
   const result = draw(request, analysis, evaluation, startedAt, evaluateMs, appeared)
   const byTree = new Map(drawing.map(laidOut => [laidOut.tree, laidOut]))
   drawing = []
@@ -1095,7 +1171,13 @@ function renderPages(
   }
   const screen = (name: string) => `"${name}" isn't drawn`
   const limit = Number.isFinite(request.galleryLimit) ? Math.max(1, Math.min(128, Math.floor(request.galleryLimit!))) : GALLERY_LIMIT
-  const drawing = runtime.previewRuntime()
+  // What the selection reveals is drawn on the pages, by the runtimes that draw them.
+  const reveal = galleryReveal = { target: measureTarget, modifiers: new Map<SourceSpan, Revealable>() }
+  const met = (ui: ResolvedUI) => {
+    for (const modifier of ui.reveal?.modifiers ?? []) reveal.modifiers.set(modifier.span, modifier)
+    return ui
+  }
+  const drawing = runtime.previewRuntime(measureTarget)
   const preview = drawing && !drawing.evaluation.failure ? drawing : null
   let remainingChildren = limit
   for (const [index, page] of pages.slice(0, limit).entries()) {
@@ -1105,8 +1187,8 @@ function renderPages(
       const ui = preview?.runtime.resolvePage(preview.evaluation.views, index, true)
         ?? (isActive ? evaluation.ui : runtime.resolvePage(evaluation.views, index))
       if (!ui) continue
-      warnings.push(...ui.warnings ?? [])
-      const isLiveRoot = isActive && !evaluation.ui?.navigationBar?.canGoBack && !evaluation.ui?.overlay
+      warnings.push(...met(ui).warnings ?? [])
+      const isLiveRoot = isActive && !evaluation.ui?.navigationBar?.canGoBack && !evaluation.ui?.overlay && !ui.reveal?.drawn
       const tree = isLiveRoot ? active : drawable(render(request, { ...evaluation, ui }, true, preview?.runtime))
       const layers = ui.viewHierarchy?.filter(layer => layer.id === page.id)
       out.push({
@@ -1138,7 +1220,7 @@ function renderPages(
       if (!out.some(parent => parent.id === child.parentId)) continue
       if (spent || 'notDrawn' in child) { skip(screen(child.name), child.source, 'notDrawn' in child ? child.notDrawn : null); continue }
       try {
-        const childTree = drawable(render(request, { ...preview.evaluation, ui: child.ui }, true, preview.runtime))
+        const childTree = drawable(render(request, { ...preview.evaluation, ui: met(child.ui) }, true, preview.runtime))
         warnings.push(...child.ui.warnings ?? [])
         out.push({
           id: child.id, parentId: child.parentId, rootId: child.rootId,
@@ -1168,7 +1250,7 @@ function renderPages(
         return false
       }
       if (!detached.evaluation.ui) return false
-      const tree = drawable(render(request, detached.evaluation, true, detached.runtime))
+      const tree = drawable(render(request, { ...detached.evaluation, ui: met(detached.evaluation.ui) }, true, detached.runtime))
       warnings.push(...detached.evaluation.ui.warnings ?? [])
       out.push({ id, rootId: id, kind, standalone: true, name, active: false, source,
         viewHierarchy: detached.evaluation.ui.viewHierarchy?.map(layer => ({ ...layer, id })), tree })
@@ -1198,7 +1280,7 @@ function renderPages(
     }
     // A view holding tabs or sheets written in place is on the canvas already, around them.
     if (out.some(page => viewsDrawing(page).some(view => view.name === design.view))) continue
-    drawStandalone(design.name, definition.source, 'screen:' + design.view, 'root', left => runtime.previewRuntime(design.view, left))
+    drawStandalone(design.name, definition.source, 'screen:' + design.view, 'root', left => runtime.previewRuntime(measureTarget, design.view, left))
   }
   // Each `#Preview` the app doesn't run, named by its title, or after the one view it shows
   // where no other is named the same, or by its place.
@@ -1213,7 +1295,7 @@ function renderPages(
   })
   for (const { macro, index, title, name } of previews) {
     const named = title ?? (name && previews.filter(other => other.name === name).length === 1 ? name : `Preview ${index + 1}`)
-    if (drawStandalone(named, macro.span, `preview:${index + 1}`, 'preview', left => runtime.previewRuntime(undefined, left, index))) warnings.push(...previewTraits(macro, request))
+    if (drawStandalone(named, macro.span, `preview:${index + 1}`, 'preview', left => runtime.previewRuntime(measureTarget, undefined, left, index))) warnings.push(...previewTraits(macro, request))
   }
   return {
     pages: out.map(page => {

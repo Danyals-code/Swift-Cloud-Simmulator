@@ -98,6 +98,11 @@ export class AppRuntime {
   private readonly ui = new UIState()
 
   private previewPrefix?: string
+  /**
+   * For a runtime drawing the Design canvas's pages, the view the canvas has selected, which
+   * its swipe actions and context menus reveal (Wave 4a); the running preview has none.
+   */
+  private reveal: SourceSpan | null | undefined
   /** Which of the program's `#Preview`s this runtime runs as its root, for one drawn on its own page. */
   private previewIndex?: number
   private entryTypeName: string | null = null
@@ -314,6 +319,7 @@ export class AppRuntime {
 
       const ui = resolveUI(views, {
         state: this.ui,
+        reveal: this.reveal,
         build: (closure, args, environment, name) => this.buildViews(closure, args, environment, name),
         styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
         styleBody: (style, protocol, configuration) => this.styleBody(style, protocol, configuration),
@@ -367,6 +373,7 @@ export class AppRuntime {
       views,
       {
         state: this.ui,
+        reveal: this.reveal,
         includeViewHierarchy: basePage,
         build: (closure, args, environment, name) => this.buildViews(closure, args, environment, name),
         styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
@@ -384,13 +391,16 @@ export class AppRuntime {
    * object into the app being edited. Actions and lifecycle callbacks never run.
    *
    * The evaluation comes back whether or not it stopped, so the gallery can say why a
-   * screen isn't drawn; `stepBudget` is what the gallery has left to give it.
+   * screen isn't drawn; `stepBudget` is what the gallery has left to give it, and `reveal`
+   * the view the canvas has selected, which draws the swipe actions or the context menu it
+   * is in open (Wave 4a).
    */
-  previewRuntime(screen?: string, stepBudget?: number, macro?: number): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
+  previewRuntime(reveal: SourceSpan | null, screen?: string, stepBudget?: number, macro?: number): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
     const loaded = this.loadedProgram
     if (!loaded) return null
     const preview = new AppRuntime()
     preview.stepBudget = stepBudget
+    preview.reveal = reveal
     if (screen) preview.previewPrefix = 'design:' + screen
     // A `#Preview` of its own: its body is the root, whatever the app's is.
     if (macro !== undefined) { preview.previewIndex = macro; preview.previewPrefix = `preview${macro + 1}` }
@@ -429,6 +439,7 @@ export class AppRuntime {
   resolveNestedPages(views: readonly ViewValue[], tab: number, rootId: string, limit: number): readonly NestedPage[] {
     return resolveNestedPages(views, {
       state: new UIState(),
+      reveal: this.reveal,
       // The canvas opens these with the state the app has now, so one that stops,
       // `Text(selected!)` while nothing is selected, is a screen the app can't show
       // yet rather than one that is broken: it is left out, not drawn as stopped.
@@ -682,14 +693,18 @@ export class AppRuntime {
         return
 
       case 'swipe': {
-        // Dragging a row leftwards reveals its actions; letting go snaps to open or
-        // closed rather than leaving the row half-way, which is what iOS does.
-        if (event.kind !== 'drag') return
-        const revealed = Math.max(0, Math.min(SWIPE_WIDTH, -event.translation.x))
-        this.ui.setSwipeOffset(
-          intent.row,
-          event.phase === 'ended' ? (revealed > SWIPE_WIDTH / 2 ? SWIPE_WIDTH : 0) : revealed,
-        )
+        // Dragging a row sideways reveals the actions on the edge it moves away from; let
+        // go, it snaps open or shut rather than staying half-way, which is what iOS does,
+        // and past most of the row runs that edge's first action, a full swipe. Any other
+        // event, a tap on one of its actions, shuts it.
+        if (event.kind !== 'drag') { this.ui.setSwipeOffset(intent.row, 0); return }
+        const edge = event.translation.x < 0 ? 'trailing' : 'leading'
+        const pulled = intent.edges[edge] ? -event.translation.x : 0
+        if (event.phase !== 'ended') { this.ui.setSwipeOffset(intent.row, pulled); return }
+        const first = intent.full[edge]
+        const action = first && Math.abs(pulled) > (this.host.defaultGeometry.width - 32) * FULL_SWIPE ? this.handlers.get(handlerIdFor(first)) : undefined
+        if (action) { this.perform(action, { kind: 'tap', handlerId: handlerIdFor(first!), location: event.location }); this.ui.setSwipeOffset(intent.row, 0); return }
+        this.ui.setSwipeOffset(intent.row, Math.abs(pulled) > SWIPE_OPENS ? Math.sign(pulled) * Infinity : 0)
         return
       }
 
@@ -1315,8 +1330,14 @@ function keyPathArgument(attribute: { args: readonly { value: unknown }[] }): Sw
   return { kind: 'opaque', typeName: 'KeyPath', payload: { components: first.components } }
 }
 
-/** How far a list row slides to reveal its delete action. */
-const SWIPE_WIDTH = 88
+/** How far a list row has to be dragged to stay open when let go. */
+const SWIPE_OPENS = 40
+/**
+ * How much of a row's width a full swipe passes. iOS 27 runs the first action once the
+ * row is between 73% and 92% open (docs/parity/native/iphone18pro-system-ui), here
+ * reckoned against an inset list's row, the screen's width less its margins.
+ */
+const FULL_SWIPE = 0.8
 
 /**
  * The deepest chain of custom views the preview will expand.

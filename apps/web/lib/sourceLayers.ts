@@ -1,4 +1,4 @@
-import { CONTENT_SLOT_NAMES, LAYOUT_WORDS, helperPlaces, isHelperCall, isHelperDefinition, nameInWords, reconcileAuthoringSelection, type AuthoringNode, type AuthoringSelection, type AuthoringSnapshot, type HiddenViewInfo, type SourceFile, type SourceSpan, type ViewLayer } from '@studio/shared'
+import { CONTENT_SLOT_NAMES, CONTEXT_MENU_PREVIEW, LAYOUT_WORDS, MODIFIER_SLOTS, helperPlaces, isHelperCall, isHelperDefinition, nameInWords, reconcileAuthoringSelection, type AuthoringNode, type AuthoringSelection, type AuthoringSnapshot, type HiddenViewInfo, type SourceFile, type SourceSpan, type ViewLayer } from '@studio/shared'
 import { PAGE_SLOTS } from './pageKinds'
 
 export interface SourceLayerNavigation {
@@ -136,9 +136,40 @@ function smallestAround(snapshot: AuthoringSnapshot | undefined, span: SourceSpa
     .sort((a, b) => (a.source.end - a.source.start) - (b.source.end - b.source.start))[0]
 }
 
+/**
+ * The slots the canvas draws open only while they, or a view in them, are selected (Wave 4a): a
+ * row's swipe actions, and a view's context menu and the preview above it. Each is a layer of
+ * its own, listed whether it is drawn or not, so it can be selected and Add puts a view into it.
+ */
+const OPENED_SLOTS: ReadonlySet<string> = new Set([MODIFIER_SLOTS.swipeActions!, MODIFIER_SLOTS.contextMenu!, CONTEXT_MENU_PREVIEW])
+
+/** A slot the Design canvas draws open while it is selected (Wave 4a): a row's Swipe actions, a Context menu, or the Preview it lifts. */
+export function sourceLayerOpens(node: Pick<AuthoringNode, 'kind' | 'name'>): boolean {
+  return node.kind === 'branch' && OPENED_SLOTS.has(node.name)
+}
+
+/**
+ * Whether selecting `node` draws something open on the canvas (Wave 4a): it is an opened slot,
+ * or a view in one. Only then does leaving it need the page redrawn, to close it again.
+ */
+export function sourceLayerRevealing(snapshot: AuthoringSnapshot, node: AuthoringNode): boolean {
+  if (sourceLayerOpens(node)) return true
+  const nodes = new Map(snapshot.nodes.map(item => [item.id, item]))
+  return sourceLayerAncestors(nodes, node.id).some(id => { const ancestor = nodes.get(id); return !!ancestor && sourceLayerOpens(ancestor) })
+}
+
+/**
+ * The slot a selection is, which Add puts a view into as its last (Wave 4a): a Toolbar, an
+ * alert's Actions, Swipe actions, a Header. A page's slot, such as a Sheet, is a screen of its
+ * own, where Add goes into its content as on any screen.
+ */
+export function sourceLayerSlot(node: AuthoringNode | undefined): AuthoringNode | undefined {
+  return node?.kind === 'branch' && !PAGE_SLOTS.has(node.name) && CONTENT_SLOT_NAMES.has(node.name) ? node : undefined
+}
+
 /** A branch can be absent from the current preview while remaining selectable. */
 export function sourceLayerNotShown(snapshot: AuthoringSnapshot, node: AuthoringNode, visibleRuntimeIds?: ReadonlySet<string>): boolean {
-  if (!Object.keys(snapshot.runtimeToSource).length) return false
+  if (!Object.keys(snapshot.runtimeToSource).length || sourceLayerOpens(node)) return false
   const nodes = new Map(snapshot.nodes.map(item => [item.id, item]))
   /** Whether a layer, or the helper it calls, which is drawn in its place, is drawn. */
   const drawn = (item: AuthoringNode, seen: ReadonlySet<string> = new Set()): boolean => item.runtimeIds.some(id => !visibleRuntimeIds || visibleRuntimeIds.has(id))
@@ -167,9 +198,10 @@ export const friendlyComponentName = (name: string) => name.replace(/View$/, '')
 
 /** These rows represent visible design elements, never source-control scaffolding. */
 export function sourceLayerIsVisual(node: AuthoringNode): boolean {
-  if (node.kind === 'component') return true
+  if (node.kind === 'component' || sourceLayerOpens(node)) return true
   if (!['view', 'collection', 'opaque'].includes(node.kind)) return false
-  if (node.name === 'Section') return node.controls?.some(control => control.id === 'title') === true
+  // Every Section offers a Header to fill in (Wave 4a); one with words in it is titled.
+  if (node.name === 'Section') return node.controls?.some(control => control.id === 'title' && !!control.value) === true
   if (STRUCTURAL_VIEWS.has(node.name)) return false
   // A titled link is itself visible. A link with a label builder contributes its label views.
   if (node.name === 'NavigationLink') return node.children.length === 0 || node.controls?.some(control => control.id === 'title') === true || node.properties.some(property => property.name === 'argument 1')

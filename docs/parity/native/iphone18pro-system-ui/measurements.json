@@ -1,0 +1,103 @@
+{
+  "source": "Built from tests/fixtures/ios27-system-ui-4a.swift with swiftc for arm64-apple-ios27.0-simulator (Xcode 27.0, 27A266a, SDK 27.0, warnings as errors) and run on a new iPhone 18 Pro simulator (ECD19CCB-2BD2-4361-804C-7496085499F9, iOS 27.0), light appearance forced with simctl ui, status bar overridden to 9:41; one launch per screen with -screen <name>. Swipes and the long press were made with simulated touches (a drag of about 140 pt for 0.4 s, held 0.2 s, then released; a held drag for the full swipe; a 1.5 s press), on 2026-10-15. 1206x2622 pixels / 402x874 points at 3x. Captures marked tool were taken with tooling/capture-ios27.mjs and the fixture as it is now; the others with simctl io screenshot, the command the tool runs, the titles one before the swipe-widths screen was added to the fixture (no other screen changed). The context-menu-leading, context-menu-inset, context-menu-bottom and swipe-tint screens were added after those captures, and captured with the tool the same day (no other screen changed).",
+  "fixtureSha256": "af836d8fc67f0e7374c584011e054ca7bddf38dc811da6c5e7b86582a0cce404",
+  "captures": [
+    { "file": "list-rows.png", "screen": "list-rows", "tool": true, "sha256": "772a5fd6687e0f88c4bb2f1b2662f4e27a706de5ee2f295050a039f08fd93091" },
+    { "file": "swipe-trailing-labels.png", "screen": "swipe-trailing", "row": "Labels, swiped left", "tool": true, "sha256": "6502f92f2e542f22e29c921a5f888d315a4bbfb3592491b7c0702b19aa922f51" },
+    { "file": "swipe-trailing-icons.png", "screen": "swipe-trailing", "row": "Icons, swiped left", "tool": true, "sha256": "698cbc2912aa69d762a93cea5fb477b622aa734bb2bf1559eeb617c02fa87612" },
+    { "file": "swipe-trailing-titles.png", "screen": "swipe-trailing", "row": "Titles, swiped left", "sha256": "acae3186237fee705466df6167972cfe2c51838308de6674fceba021c487bfbd" },
+    { "file": "swipe-leading.png", "screen": "swipe-leading", "row": "Leading, swiped right", "tool": true, "sha256": "94404e3a9a302307ad98a75f5a54edb143b2d1bfbd9d98b4613a5cd52ebb0a6e" },
+    { "file": "swipe-widths-one-trailing.png", "screen": "swipe-widths", "row": "One short, swiped left", "sha256": "164a389e18f142b1a1f8d5f145f7c70f91c8248e481f4351f9506e3e327eb4e9" },
+    { "file": "swipe-widths-two-trailing.png", "screen": "swipe-widths", "row": "Short and long, swiped left", "sha256": "e93c797b2c66d191e4e4d537ba84e7e0ab233568c4b2d8c42d617c1b93665e39" },
+    { "file": "swipe-widths-leading-icons.png", "screen": "swipe-widths", "row": "Leading icons, swiped right", "sha256": "bc7d6efbcccc6189d10bcb503fef39fad9c85afbb772c91b710a7083d844d0b8" },
+    { "file": "swipe-widths-leading-titles.png", "screen": "swipe-widths", "row": "Leading mixed, swiped right", "sha256": "e307c57375a7615dc6ba1c25312395a785ff301e0b2a107f1f2ba6e5f24944a3" },
+    { "file": "swipe-ondelete-with-leading.png", "screen": "swipe-ondelete", "row": "With leading, swiped left", "sha256": "ecc772abb0e4996580a83a707050afcfc89b5fafbb80b5434b3527810dcf1eb4" },
+    { "file": "swipe-full-stretched.png", "screen": "swipe-full", "row": "Full swipe, held about 241 pt open", "tool": true, "sha256": "a57b382e90796c1f2a538b1a8790ba5ebad21f4ba7bad1d262948f3175ad05d8" },
+    { "file": "swipe-full-not-armed.png", "screen": "swipe-full", "row": "Full swipe, held about 270 pt open", "sha256": "a41309c2762d634e184c45956cbf475df57b052865a8946fe0eaa4002c769f50" },
+    { "file": "swipe-full-armed.png", "screen": "swipe-full", "row": "Full swipe, held about 341 pt open", "sha256": "e293b20bf87ba479ca75c286bc67fc446ec1e9664ffa12ed34d2b45506670c6a" },
+    { "file": "context-menu.png", "screen": "context-menu", "row": "Hold me, pressed 1.5 s", "tool": true, "sha256": "6705a15a081033dd41595846bd710c1a1675313c071caed8b537961cfdc7851a" },
+    { "file": "context-menu-leading.png", "screen": "context-menu-leading", "row": "Hold me, 16 in, pressed 1.5 s", "tool": true, "sha256": "bd40ec77e138f41df15923f1273272b065fcc4cb08cdd7fdf803a17f86535c88" },
+    { "file": "context-menu-inset.png", "screen": "context-menu-inset", "row": "Hold me, 48 in, pressed 1.5 s", "tool": true, "sha256": "c373d81f36c04dbe4a9780bf3b1602007fc12d3cb0b20f27ba286cd3af1f9934" },
+    { "file": "context-menu-bottom.png", "screen": "context-menu-bottom", "row": "Hold me, at the bottom, pressed 1.5 s", "tool": true, "sha256": "cc7fab2d6976e80aeec4ef6df5d1d410c19af58a63dc1c6aba8fa29b901a1d6c" },
+    { "file": "swipe-tint.png", "screen": "swipe-tint", "row": "Both rows, swiped left", "tool": true, "sha256": "e85099f537f603d9ed80ab64c3f1d0f18f8f47b38a51febee4aefd1ea1466534" }
+  ],
+  "measured": {
+    "units": "Points. x from the screen's leading edge, y from its top. Every list is the default inset grouped style: its card runs from x 16 to 386, and its first row from y 97 to 149, each row 52 tall. Edges are read along a line through a shape's middle; a capsule's height down its middle.",
+    "swipeActions": {
+      "openRow": {
+        "fill": [229, 229, 234],
+        "cornerRadius": 26,
+        "note": "The open row slides by the width of its actions with its content, filled systemGray5 and rounded at the end facing the actions; the card behind it shows the grouped background, and the separators above and below the open row are not drawn."
+      },
+      "action": {
+        "height": 44,
+        "inset": 4,
+        "gap": 10,
+        "edgeMargin": 10,
+        "titleColor": [255, 255, 255],
+        "titleCapHeight": 9.33,
+        "iconToTitle": 6,
+        "padding": 13,
+        "iconOnlyWidth": 60,
+        "radius": { "withIcon": 22, "titleOnly": 15 },
+        "note": "Each action is a capsule 44 tall, 4 in from the row's top and bottom, 10 from the next action, from the open row and from the card's edge. A title is white at about 13 pt; an icon and a title sit side by side, 6 apart, the pair centred. An action with an icon is a full capsule; a title alone has corners of about 15. Widths are the content and 13 each side, an icon alone 60, and actions of one kind on one edge all take the widest's width: titles alone, icons alone, or icons with titles. Pin beside Unread kept their own widths."
+      },
+      "trailing": {
+        "labels": { "row": [16.33, 181.33], "actions": [{ "title": "Flag", "x": [191.33, 278.33], "fill": [255, 141, 40] }, { "title": "Delete", "x": [288.67, 375.67], "fill": [255, 56, 60] }], "y": [101, 145], "flagContent": [214.67, 255.67], "deleteContent": [304.33, 359.67] },
+        "icons": { "row": [16, 236], "actions": [{ "icon": "flag", "x": [246, 306], "fill": [255, 141, 40] }, { "icon": "trash", "x": [316, 376], "fill": [255, 56, 60] }], "y": [153.33, 196.67], "trashGlyph": [337.67, 354.33] },
+        "titles": { "row": [16, 216.67], "actions": [{ "title": "More", "x": [226.67, 295.67], "fill": [199, 199, 204], "note": "no tint: systemGray3" }, { "title": "Archive", "x": [306.33, 375.33], "fill": [0, 136, 255] }], "y": [205, 249], "moreText": [247, 275.67], "archiveText": [318.67, 362.67] },
+        "oneShort": { "actions": [{ "title": "Pin", "x": [333.67, 375.33], "fill": [255, 204, 0] }] },
+        "shortAndLong": { "row": [16, 168.33], "actions": [{ "title": "Longer title", "x": [180.67, 272.33], "fill": [203, 48, 224] }, { "title": "A", "x": [283.67, 375.33], "fill": [52, 199, 89] }] },
+        "order": "The first button written is the outermost, next to the card's trailing edge."
+      },
+      "leading": {
+        "pinAndUnread": { "row": [180, 385.67], "actions": [{ "title": "Pin", "x": [26.33, 68.67], "fill": [255, 204, 0] }, { "title": "Unread", "icon": "envelope.badge", "x": [79.33, 169.67], "fill": [0, 136, 255] }], "pinText": [39.33, 55.67], "unreadContent": [92.67, 156.33] },
+        "icons": { "row": [166, 386], "actions": [{ "icon": "trash", "x": [26, 86] }, { "icon": "flag", "x": [96, 156] }] },
+        "titles": { "row": [233.67, 385.67], "actions": [{ "title": "A", "x": [26.67, 118.33] }, { "title": "Longer title", "x": [129.67, 221.33] }] },
+        "order": "The first button written is the outermost, next to the card's leading edge."
+      },
+      "fullSwipe": {
+        "stretched": { "open": 241, "first": [215, 375.33], "other": { "x": [155, 204], "opacity": 0.5 } },
+        "notArmed": { "open": 270, "first": [190.67, 375.33], "contentCentred": true },
+        "armed": { "open": 341, "first": [114.67, 375.33], "content": [132, 187.33], "other": { "x": [56.33, 102.67], "opacity": 0.25 } },
+        "note": "Dragged past its open width, the row's first action grows with the drag and the others shrink to about 49 and fade. Between about 270 and 341 open (73% and 92% of the 370 row) the first action's content moves to its leading edge, 16 in: released there, the action runs. allowsFullSwipe: false stops at the open width."
+      },
+      "tint": {
+        "listTint": [52, 199, 89],
+        "listAccentColor": [199, 199, 204],
+        "note": "An action with no tint of its own, in a list written .tint(.green), is systemGreen; in a list written .accentColor(.green) it stays systemGray3."
+      },
+      "onDelete": {
+        "withLeadingActions": { "row": [18.67, 278.67], "action": { "x": [288.67, 375.67], "fill": [255, 56, 60], "icon": "trash", "title": "Delete" } },
+        "note": "A row whose ForEach has .onDelete and which has only leading actions still swipes left to the Delete .onDelete makes: a trash icon and Delete, destructive red, 87 wide, as the trailing Labels row's Delete."
+      }
+    },
+    "contextMenu": {
+      "backdrop": { "dim": 0.2, "screen": [194, 194, 198], "card": [204, 204, 204], "note": "Black at 0.2 over everything but the pressed view, which is blurred too." },
+      "pressedView": { "frame": [16, 149, 370, 52], "fill": [255, 255, 255], "cornerRadius": 13, "note": "The pressed row stays where it is, undimmed, with all four corners rounded and a shadow." },
+      "panel": { "frame": [76, 217, 250, 146], "gapBelowView": 16, "cornerRadius": 32, "fill": [232, 232, 235], "paddingY": 10, "note": "Centred under the pressed view, with a light rim along its top." },
+      "placement": {
+        "margin": 16,
+        "leading": { "panel": [16, 117.33, 250, 104] },
+        "inset": { "panel": [43.33, 117.33, 250, 104] },
+        "bottom": { "panel": [76.33, 638.33, 250, 146] },
+        "note": "A Text 16 or 48 in from the leading edge, under a 62 pt safe area and 16 of padding, and one at the bottom, 16 above the safe area. Centred under the pressed view, the panel would leave the screen beside the first two: it lines up with the pressed view's leading edge instead, kept 16 from the screen's. Below the bottom one there is no room, so it goes above it. A view as small as these is drawn about 16% larger while pressed, and the panel is 16 from that, about 3 pt further than from the view at rest, and lines up with its larger edge, 43.33 for the view at 48; a row as wide as the list (the context-menu screen) is not. These menus have no icons, and their titles start 36 nearer the panel's edge than in a menu where any row has one, 29 in (Rename's ink at 29.67, where it is 65.67 beside icons)."
+      },
+      "rows": { "height": 42, "separators": false, "iconCentreFromPanel": 40, "titleFromPanel": 65, "titleFromPanelWithoutIcons": 29, "titleCapHeight": 12, "destructive": [246, 50, 54], "rows": [{ "title": "Copy", "icon": [107.67, 124.67], "text": [141, 179.33] }, { "title": "Rename", "text": [141.67, 201] }, { "title": "Delete", "icon": [108, 124], "text": [141.67, 188.33] }] }
+    },
+    "listRows": {
+      "rows": [97, 149, 201, 253, 305, 357, 409],
+      "background": { "row": [16, 97, 370, 52], "fill": [255, 204, 0], "separatorOver": [232, 187, 8], "note": "A row background fills the whole row, its separator drawn over it in the usual translucent colour." },
+      "insets": { "text": [57.67, 169.33], "leading": 40, "height": 52, "note": "EdgeInsets(top: 8, leading: 40, bottom: 8, trailing: 16): the text starts 40 in from the card and stays centred in a 52 row; its separator below starts at 56." },
+      "separators": [
+        { "y": [148, 149], "x": [32, 370], "colour": "separator" },
+        { "y": [200, 201], "x": [56, 370], "colour": [255, 56, 60], "note": "Insets above, Red separator below: the lower row's tint, for all edges." },
+        { "y": [252, 253], "x": [32, 370], "colour": [255, 56, 60], "note": "Red separator above, blue for .top below: the upper row's bottom tint wins." },
+        { "y": [304, 305], "drawn": false, "note": "No separator below hides its top edge." },
+        { "y": [356, 357], "drawn": false }
+      ],
+      "separatorThickness": 1,
+      "tintOpaque": true
+    }
+  }
+}

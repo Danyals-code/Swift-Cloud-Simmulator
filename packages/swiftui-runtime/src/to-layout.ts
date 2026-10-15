@@ -160,6 +160,8 @@ export interface ScreenLayout {
     readonly detent: number
     readonly detents?: readonly number[]
     readonly anchorId?: string
+    /** A view's context menu, by the path of the view it is open on (Wave 4a). */
+    readonly contextMenu?: string
     readonly dismissId: string | null
     readonly cornerRadius?: number
     readonly showsDragIndicator?: boolean
@@ -211,9 +213,6 @@ const ROW_INSET = IOS_27.metrics.rowInset
 
 /** A row in an alert or confirmation dialog, which iOS sizes like a list row. */
 const ALERT_BUTTON_HEIGHT = SURFACES.alert.buttonHeight
-
-/** Must match the runtime's swipe width, or the action would not line up. */
-const SWIPE_WIDTH = 88
 
 /** The same text, keeping its half-leading above and below as the system's own labels do. */
 function keptLeading(element: LayoutElement): LayoutElement {
@@ -331,6 +330,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
         detent: ui.overlay.detent,
         detents: ui.overlay.detents,
         anchorId: ui.overlay.anchorId,
+        ...(ui.overlay.contextMenu ? { contextMenu: ui.overlay.contextMenu } : {}),
         backgroundInteraction: ui.overlay.backgroundInteraction,
         dismissId: ui.overlay.dismissId,
         cornerRadius: ui.overlay.cornerRadius,
@@ -2186,55 +2186,67 @@ class Converter {
   }
 
   /**
-   * A row that can be swiped to reveal a delete action.
-   *
-   * The action sits *behind* the row and the row slides over it, which is how iOS
-   * does it and why the offset is a paint-time translation rather than a layout
-   * change: the row keeps its place in the list while it moves.
+   * A list row with swipe actions (Wave 4a), as iOS 27 draws one: dragged, or let go
+   * open, the whole row slides away from the edge it is swiped towards, filled systemGray5
+   * and rounded on that side, off its actions (`swipeAction`). Actions of one kind take
+   * the widest's width; a title beside an icon kept its own (iphone18pro-system-ui). A
+   * shut row is only the target its drag starts on.
    */
-  private swipeableRow(view: ViewValue, content: LayoutElement, path: string): LayoutElement {
+  private swipeableRow(view: ViewValue, row: LayoutElement, path: string): LayoutElement {
     const swipe = view.swipe!
-    const offset = swipe.offset
-
-    const action = this.withHitTarget(
-      this.background(
-        {
-          kind: 'modified',
-          id: `${path}delframe`,
-          modifier: { kind: 'frame', width: SWIPE_WIDTH, alignment: CENTER },
-          child: {
-            kind: 'modified',
-            id: `${path}delcolor`,
-            modifier: { kind: 'foregroundStyle', color: rgba(255, 255, 255) },
-            child: { kind: 'text', id: `${path}deltext`, text: 'Delete' },
-          },
+    const edge = swipe.offset < 0 ? 'leading' : 'trailing'
+    let element = row
+    if (swipe.offset !== 0 && swipe[edge].length) {
+      const m = SURFACES.swipeAction
+      const actions = swipe[edge].map(action => this.swipeAction(action, path))
+      const r = SURFACES.list.corner, side = edge === 'trailing'
+      const cornerRadii = { topLeading: side ? 0 : r, bottomLeading: side ? 0 : r, bottomTrailing: side ? r : 0, topTrailing: side ? r : 0 }
+      element = { kind: 'modified', id: `${path}swipeclip`, modifier: { kind: 'clip', shape: 'roundedRectangle', cornerRadius: r, cornerRadii, style: 'circular' }, child: this.background(row, `${path}swipebg`, this.color('systemGray5')) }
+      element = {
+        kind: 'modified', id: `${path}swipe`,
+        modifier: {
+          kind: 'swipe', edge, gap: m.gap, equal: actions.every(action => action.kind === actions[0]!.kind),
+          content: { kind: 'stack', id: `${path}swipeactions`, axis: 'horizontal', spacing: m.gap, alignment: CENTER, children: actions.map(action => action.element) },
+          offset: Number.isFinite(swipe.offset) ? Math.abs(swipe.offset) : null,
         },
-        `${path}delbg`,
-        this.color('red'),
-      ),
-      `${swipe.path}/delete`,
-      'button',
-      'Delete',
-    )
-
-    const sliding: LayoutElement = {
-      kind: 'modified',
-      id: `${path}swipeoffset`,
-      modifier: { kind: 'offset', x: -offset, y: 0 },
-      child: content,
+        child: element,
+      }
     }
+    return this.withHitTarget(element, `${swipe.path}/swipe`, 'drag', 'Swipe row')
+  }
 
-    return this.withHitTarget(
-      {
-        kind: 'zstack',
-        id: `${path}swipe`,
-        alignment: { horizontal: 'trailing', vertical: 'center' },
-        children: offset > 0 ? [action, sliding] : [sliding],
-      },
-      `${swipe.path}/swipe`,
-      'drag',
-      'Swipe row',
-    )
+  /**
+   * One swipe action, as iOS 27 draws it (`SURFACES.swipeAction`): its icon, its title or
+   * both, side by side, white in a capsule in from the row's top and bottom, of its tint, red
+   * for `.destructive`, or systemGray3. An icon alone has a width of its own; anything else
+   * is padded each side of what it draws, and a title alone has smaller corners. Its kind
+   * says which of the three it is.
+   *
+   * Not `buttonTint`: an action no `.tint` reaches is systemGray3 in iOS 27, not the accent
+   * other buttons fall back to, and an `.accentColor` around the list leaves it so, as
+   * measured. A `.tint` written on the row or around the list reaches each action as one of
+   * its own modifiers, passed down when the action is stamped, and is read here.
+   */
+  private swipeAction(button: ViewValue, row: string): { element: LayoutElement; kind: SwipeActionKind } {
+    const m = SURFACES.swipeAction
+    const path = button.path ?? `${row}action`
+    const { shown, title, icon } = actionParts(button)
+    const style = tokenName(modifierArg(button, 'labelStyle', 0)) ?? tokenName(modifierArg(shown, 'labelStyle', 0)) ?? this.styles.label
+    const showsIcon = !!icon && style !== 'titleOnly', showsTitle = !!title && !(showsIcon && style === 'iconOnly')
+    const kind: SwipeActionKind = showsIcon && showsTitle ? 'both' : showsIcon ? 'icon' : 'title'
+    const white = rgba(255, 255, 255)
+    const symbol = (font: string): LayoutElement => ({ kind: 'modified', id: `${path}iconfont`, modifier: { kind: 'font', font: fontForToken(font, this.typeScale)! }, child: { kind: 'modified', id: `${path}iconcolor`, modifier: { kind: 'foregroundStyle', color: white }, child: this.symbolImage(`${path}icon`, icon!) } })
+    const words: LayoutElement = { kind: 'modified', id: `${path}titlecolor`, modifier: { kind: 'foregroundStyle', color: white }, child: this.styledText(`${path}title`, title ?? '', 'footnote', 'label') }
+    const content: LayoutElement = kind === 'icon' ? symbol('body') : kind === 'title' ? words
+      : { kind: 'stack', id: `${path}content`, axis: 'horizontal', spacing: m.iconToTitle, alignment: CENTER, children: [symbol('footnote'), words] }
+    const sized: LayoutElement = kind === 'icon'
+      ? { kind: 'modified', id: `${path}frame`, modifier: { kind: 'frame', width: m.iconOnlyWidth, maxHeight: Infinity, alignment: CENTER }, child: content }
+      : { kind: 'modified', id: `${path}frame`, modifier: { kind: 'frame', maxWidth: Infinity, maxHeight: Infinity, alignment: CENTER },
+          child: { kind: 'modified', id: `${path}pad`, modifier: { kind: 'padding', insets: insets(0, m.padding, 0, m.padding) }, child: content } }
+    const fill = tokenName(labelled(button.args, 'role')) === 'destructive' ? this.color('red') : resolveColorArg(modifierArg(button, 'tint', 0), this.scheme, this.styles.tint) ?? this.color('systemGray3')
+    const capsule = this.withHitTarget(this.background(sized, `${path}capsule`, fill, kind === 'title' ? m.titleRadius : m.radius, 'circular'), path, 'button', title ?? icon ?? labelOf(button), button)
+    this.onView?.(button, path, capsule)
+    return { element: { kind: 'modified', id: `${path}inset`, modifier: { kind: 'padding', insets: insets(m.inset, 0, m.inset, 0) }, child: capsule }, kind }
   }
 
   private grid(view: ViewValue, path: string, origin: object): LayoutElement {
@@ -3148,6 +3160,7 @@ class Converter {
    * here is invented, which is the same rule the rest of the compositor follows.
    */
   private menuSurface(overlay: Overlay): LayoutElement {
+    if (overlay.contextMenu) return this.contextMenuSurface(overlay)
     const rows = overlay.views.map((option, index) => {
       if (option.name === DATE_EDITOR || option.name === COLOUR_EDITOR) return this.convert(option, `ov-${index}`, 'vertical')
       // Embedded editors keep their own text/range event role and binding.
@@ -3230,6 +3243,37 @@ class Converter {
       this.color('secondarySystemGroupedBackground'),
       SURFACES.menu.radius,
     )
+  }
+
+  /**
+   * A view's context menu, as iOS 27 draws one (iphone18pro-system-ui): a glass panel with
+   * corners of 32 and unseparated rows 42 tall, 10 in from its top and bottom, each title 65
+   * in and its icon centred 40 in, red for a destructive action. In a menu with no icons at
+   * all, the titles start 29 in (Wave 4a).
+   */
+  private contextMenuSurface(overlay: Overlay): LayoutElement {
+    const m = SURFACES.contextMenu
+    const parts = overlay.views.map(actionParts)
+    const icons = parts.some(part => part.icon !== null)
+    const rows = overlay.views.map((option, index): LayoutElement => {
+      const { title, icon } = parts[index]!
+      const colour = this.color(tokenName(labelled(option.args, 'role')) === 'destructive' ? 'red' : 'label')
+      const words: LayoutElement = { kind: 'text', id: `ov-${index}-title`, text: title ?? '' }
+      const column: LayoutElement = { kind: 'modified', id: `ov-${index}-iconcol`, modifier: { kind: 'frame', width: (m.iconCentre - m.inset) * 2, alignment: CENTER }, child: icon ? this.symbolImage(`ov-${index}-icon`, icon) : { kind: 'empty', id: `ov-${index}-noicon` } }
+      const content: LayoutElement = title === null && !icon ? this.convert({ ...option, intent: undefined }, `ov-${index}`, 'horizontal')
+        : { kind: 'modified', id: `ov-${index}-colour`, modifier: { kind: 'foregroundStyle', color: colour },
+            child: icons ? { kind: 'stack', id: `ov-${index}-row`, axis: 'horizontal', spacing: m.title - (m.iconCentre - m.inset) * 2 - m.inset, alignment: CENTER, children: [column, words] } : words }
+      const row: LayoutElement = { kind: 'modified', id: `ov-${index}-frame`, modifier: { kind: 'frame', maxWidth: Infinity, height: m.row, alignment: { horizontal: 'leading', vertical: 'center' } },
+        child: { kind: 'modified', id: `ov-${index}-pad`, modifier: { kind: 'padding', insets: insets(0, icons ? m.inset : m.titleWithoutIcons, 0, 16) }, child: content } }
+      const drawn = option.path && option.intent ? this.withHitTarget(row, option.path, 'button', labelOf(option)) : row
+      if (option.path) this.onView?.(option, option.path, drawn)
+      return drawn
+    })
+    const panel: LayoutElement = { kind: 'modified', id: 'ov-pad', modifier: { kind: 'padding', insets: insets(m.paddingY, 0, m.paddingY, 0) }, child: { kind: 'stack', id: 'ov-stack', axis: 'vertical', spacing: 0, alignment: { horizontal: 'leading', vertical: 'center' }, children: rows, debugName: MENU } }
+    return {
+      kind: 'modified', id: 'ov-bgr', modifier: { kind: 'cornerRadius', radius: m.radius, style: 'continuous' },
+      child: { kind: 'modified', id: 'ov-bg', modifier: { kind: 'material', ...MATERIALS.thickMaterial!, light: this.scheme === 'light' }, child: this.fill(panel, 'ov-fill', CENTER, false) },
+    }
   }
 
   private disclosureGroup(view: ViewValue, path: string, origin: object): LayoutElement {
@@ -4214,6 +4258,19 @@ class Converter {
 }
 
 // -------------------------------------------------------------------- helpers
+
+/** Which of the three ways iOS 27 draws a swipe action one is (Wave 4a): an icon alone, a title alone, or both. */
+type SwipeActionKind = 'icon' | 'title' | 'both'
+
+/**
+ * What an action button shows (Wave 4a): its title and SF Symbol, from `Button("Pin",
+ * systemImage:)`, or from the `Label`, `Text` or `Image` it is drawn with.
+ */
+function actionParts(button: ViewValue): { readonly shown: ViewValue; readonly title: string | null; readonly icon: string | null } {
+  const shown = button.args.flatMap(arg => arg.label === 'label' ? asView(arg.value) ?? [] : [])[0] ?? button.children[0] ?? button
+  const image = shown.name === 'Image'
+  return { shown, title: image ? null : stringArg(shown.args.find(arg => arg.label === null || arg.label === 'title')?.value), icon: stringArg(labelled(shown.args, image ? 'systemName' : 'systemImage')) }
+}
 
 /**
  * Whether a view contributes its children to the enclosing container.

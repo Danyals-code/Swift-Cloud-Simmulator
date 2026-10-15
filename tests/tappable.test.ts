@@ -356,5 +356,5 @@ struct PlaceRow: View {
         execFileSync('xcrun', ['--sdk', 'iphonesimulator', 'swiftc', '-typecheck', '-parse-as-library', '-sdk', sdk, '-target', 'arm64-apple-ios27.0-simulator', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
       }
     } finally { rmSync(root, { recursive: true, force: true }) }
-  })
+  }, 300_000)
 })

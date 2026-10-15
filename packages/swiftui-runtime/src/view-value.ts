@@ -66,12 +66,30 @@ export interface ViewValue {
    */
   readonly geometryKey?: string
   /**
-   * How far this list row is swiped open, and the path its actions are keyed by.
-   *
-   * Set by the resolver for rows in a `ForEach` that has `.onDelete`, because the
-   * row is what gets swiped while the modifier is written on its parent.
+   * This list row's swipe actions (Wave 4a): what its `.swipeActions` build, and the
+   * Delete a `ForEach`'s `.onDelete` makes, which the resolver gives the row because the
+   * row is what gets swiped while that modifier is written on its parent.
    */
-  readonly swipe?: { readonly offset: number; readonly path: string }
+  readonly swipe?: SwipeActions
+}
+
+/** A list row's swipe actions, and how far it is swiped. */
+export interface SwipeActions {
+  /**
+   * How far the row is dragged, positive towards its trailing actions and negative towards
+   * its leading ones; `Infinity` or `-Infinity` once it is let go open, as wide as its actions.
+   */
+  readonly offset: number
+  /** The row's path, which its drag is keyed by. */
+  readonly path: string
+  /**
+   * Each edge's buttons, stamped, the outermost first, as they are written: only the edge
+   * the row is open towards is built, and a shut row has none.
+   */
+  readonly leading: readonly ViewValue[]
+  readonly trailing: readonly ViewValue[]
+  /** Whether a swipe all the way across runs an edge's first button, `allowsFullSwipe:`. */
+  readonly fullSwipe: { readonly leading: boolean; readonly trailing: boolean }
 }
 
 /**
@@ -96,8 +114,11 @@ export type ViewIntent =
   | { readonly kind: 'run'; readonly action: ActionValue; readonly dismiss?: ViewIntent }
   /** A gesture attached with `.gesture(…)`; the event decides which handlers run. */
   | { readonly kind: 'gesture'; readonly gesture: SwiftValue }
-  /** Dragging a list row sideways to reveal its actions. */
-  | { readonly kind: 'swipe'; readonly row: string }
+  /**
+   * Dragging a list row sideways to reveal its actions, any other event closing it. A
+   * full swipe runs the edge's first button, by its path, where `full` names one.
+   */
+  | { readonly kind: 'swipe'; readonly row: string; readonly edges: { readonly leading: boolean; readonly trailing: boolean }; readonly full: { readonly leading?: string; readonly trailing?: string } }
   /** Opening or closing a `DisclosureGroup`, which nothing in the user's code holds. */
   | { readonly kind: 'expand'; readonly group: string }
   /** Paging a `DatePicker`'s calendar, which changes what is shown and not the value. */

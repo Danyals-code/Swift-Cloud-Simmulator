@@ -46,7 +46,10 @@ ${declarations}`
 const files = (body: string, declarations = '') => project(app(body, declarations))
 const textOf = (body: string, declarations = '') => node(files(`        ${body}`, declarations), 'Text')
 
-/** Apple modifiers the preview applies, each with a form the capabilities table has no reading of. */
+/**
+ * Apple modifiers the preview applies, whether the capabilities table reads their form or not,
+ * as it reads a context menu's, a row's background and insets and swipe actions (Wave 4a).
+ */
 const APPLIED = [
   '.onTapGesture { count += 1 }', '.task { }', '.onAppear { }', '.toolbar { Button("Done") { } }', '.environmentObject(model)',
   '.sheet(item: $selection) { item in Text(item.name) }', '.alert("Saved", isPresented: $shown) { }',
@@ -55,11 +58,11 @@ const APPLIED = [
   '.animation(.default, value: count)', '.transition(.opacity)', '.id(count)', '.badge(3)', '.listRowBackground(Color.yellow)',
   '.listRowInsets(EdgeInsets())', '.ignoresSafeArea()', '.mask { Circle() }', '.monospacedDigit()',
   '.safeAreaInset(edge: .bottom) { Text("Bar") }', '.searchable(text: .constant(""))', '.presentationDetents([.medium])',
-  '.shadow(color: .black, radius: 4, y: 2)',
+  '.shadow(color: .black, radius: 4, y: 2)', '.swipeActions { Button("Delete") { } }',
 ]
 /** Apple modifiers the preview names and does not draw, and real ones it has no list of. */
 const NOT_DRAWN = [
-  '.swipeActions { Button("Delete") { } }', '.refreshable { }', '.contentShape(Rectangle())', '.symbolRenderingMode(.hierarchical)',
+  '.refreshable { }', '.contentShape(Rectangle())', '.symbolRenderingMode(.hierarchical)',
   '.zIndex(1)', '.fontWidth(.condensed)', '.scrollTransition { content, phase in content }',
   '.sensoryFeedback(.success, trigger: count)', '.labelsHidden()', '.contentTransition(.numericText())',
 ]
@@ -97,7 +100,6 @@ describe('an image’s sizing', () => {
 
 describe('what a known Apple modifier reads as', () => {
   it.each([
-    ['.swipeActions { Button("Delete") { } }', 'behavior'],
     ['.refreshable { }', 'behavior'],
     ['.contentShape(Rectangle())', 'behavior'],
     ['.symbolRenderingMode(.hierarchical)', 'appearance'],

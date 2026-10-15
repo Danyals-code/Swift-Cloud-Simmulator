@@ -3,7 +3,7 @@ import { describe, type SwiftValue } from '@studio/swift-runtime'
 import { CENTER, insets, type EdgeInsets, type LayoutElement, type ScrollElement } from '@studio/swiftui-layout'
 import { SURFACES, listAppearance } from '../appearance/surfaces'
 import { asView, payloadOf, EDGE_INSETS_TYPE, TOKEN_TYPE, type TokenPayload, type ViewValue } from '../view-value'
-import { numberArg, resolveFillArg, stringArg, type ColorScheme } from '../style'
+import { numberArg, resolveColorArg, resolveFillArg, stringArg, type ColorScheme } from '../style'
 import { inheritVisualStyle, visualModifiers } from '../inherited-style'
 
 interface Context {
@@ -49,11 +49,16 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
   }
   if (loose.length) sections.push({ rows: loose })
 
-  const hiddenSeparator = (row: ViewValue, edge: 'top' | 'bottom') => {
-    const modifier = row.modifiers.find(m => m.name === 'listRowSeparator')
+  /** The `.listRowSeparator` or `.listRowSeparatorTint` a row writes for one of its edges, `edges:` all of them by default. */
+  const separatorSetting = (row: ViewValue, name: string, edge: 'top' | 'bottom') => {
+    const modifier = row.modifiers.find(m => m.name === name)
     const edges = token(modifier?.args.find(a => a.label === 'edges')?.value)
-    return token(modifier?.args[0]?.value) === 'hidden' && (!edges || edges === 'all' || edges === edge)
+    return !edges || edges === 'all' || edges === edge ? modifier?.args[0]?.value : undefined
   }
+  const hiddenSeparator = (row: ViewValue, edge: 'top' | 'bottom') => token(separatorSetting(row, 'listRowSeparator', edge)) === 'hidden'
+  // Between two rows, the upper row's bottom tint wins over the lower row's top, as in iOS 27.
+  const separatorTint = (row: ViewValue, next: ViewValue) =>
+    resolveColorArg(separatorSetting(row, 'listRowSeparatorTint', 'bottom') ?? separatorSetting(next, 'listRowSeparatorTint', 'top'), c.scheme, c.tint)
   const rowInsets = (row: ViewValue) => {
     const custom = payloadOf<EdgeInsets>(arg(row, 'listRowInsets'), EDGE_INSETS_TYPE)
     if (custom) return custom
@@ -102,23 +107,24 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
           raw = raw.kind === 'modified' && raw.modifier.kind === 'hitTarget' ? { ...raw, child: decorate(raw.child) } : decorate(raw)
         }
       }
-      if (row.swipe) raw = c.swipe(row, raw, rid)
       const next = visibleRows[i + 1]?.row
       const edges = { ...rowInsets(row), leading: rowInsets(row).leading + indent }
-      const separator = next && style !== 'sidebar' && !hiddenSeparator(row, 'bottom') && !hiddenSeparator(next, 'top')
+      // A row swiped open has no separators beside it, as in iOS 27.
+      const separator = next && style !== 'sidebar' && !hiddenSeparator(row, 'bottom') && !hiddenSeparator(next, 'top') && !row.swipe?.offset && !next.swipe?.offset
       const wrap = (content: LayoutElement): LayoutElement => {
         let result = frame(`${rid}rowsize`, pad(`${rid}rowpad`, content, edges), m.row)
         const fill = resolveFillArg(arg(row, 'listRowBackground'), c.scheme, c.tint)
         if (fill) result = { kind: 'modified', id: `${rid}rowbg`, modifier: { kind: 'background', content: { kind: 'fill', id: `${rid}rowbgf`, fill } }, child: result }
         return result
       }
-      const item = raw.kind === 'modified' && raw.modifier.kind === 'hitTarget' && ['button', 'toggle'].includes(raw.modifier.role) ? { ...raw, child: wrap(raw.child) } : wrap(raw)
+      let item = raw.kind === 'modified' && raw.modifier.kind === 'hitTarget' && ['button', 'toggle'].includes(raw.modifier.role) ? { ...raw, child: wrap(raw.child) } : wrap(raw)
+      if (row.swipe) item = c.swipe(row, item, rid)
       rows.push(i > 0 && spacing !== 0 ? pad(`${rid}spacing`, item, insets(spacing, 0, 0, 0)) : item)
       if (separator) {
         // It starts under the row's first text, as iOS 27 draws it: a Label's title, in a
         // NavigationLink too, or the text beside an icon. A row with no text starts it at
         // the row's inset.
-        const rule = pad(`${id}r${i}sep`, { kind: 'modified', id: `${id}r${i}sepf`, modifier: { kind: 'frame', height: c.separatorHeight, alignment: CENTER }, child: { kind: 'fill', id: `${id}r${i}sepl`, pixelAligned: true, fill: { kind: 'solid', color: c.color('separator') } } }, insets(0, 0, 0, rowInsets(row).trailing))
+        const rule = pad(`${id}r${i}sep`, { kind: 'modified', id: `${id}r${i}sepf`, modifier: { kind: 'frame', height: c.separatorHeight, alignment: CENTER }, child: { kind: 'fill', id: `${id}r${i}sepl`, pixelAligned: true, fill: { kind: 'solid', color: separatorTint(row, next) ?? c.color('separator') } } }, insets(0, 0, 0, rowInsets(row).trailing))
         rows[rows.length - 1] = { kind: 'modified', id: `${rid}separator-overlay`, modifier: { kind: 'overlay', alignment: { horizontal: 'center', vertical: 'bottom' }, content: rule, underFirstText: { otherwise: edges.leading } }, child: rows[rows.length - 1]! }
       }
     })

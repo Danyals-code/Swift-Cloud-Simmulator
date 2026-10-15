@@ -1,10 +1,10 @@
-import { modifierModel } from './authoring-modifiers'
+import { isRow, modifierModel } from './authoring-modifiers'
 import { layerContext, layerProject, readLayer } from './layer'
 import { borderOf, cornersOf } from './authoring-border'
 import { enrichAuthoring } from './authoring-features'
 import type { ComponentDescription, PreviewColorAsset } from '@studio/shared'
 import {
-  MODIFIER_SLOTS, PRESENTATION_PARTS, VIEW_PARTS, authoringCapability,
+  CONTEXT_MENU_PREVIEW, MODIFIER_SLOTS, PRESENTATION_PARTS, VIEW_PARTS, authoringCapability,
   type AuthoringNode, type AuthoringProperty, type AuthoringSnapshot,
   type Diagnostic, type PropertyValueKind, type SourceFile, type SourceSpan,
 } from '@studio/shared'
@@ -131,6 +131,8 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   const layers = layerProject(parsed, input.deploymentTarget, input.files)
   const nodes: MutableNode[] = []
   const byId = new Map<string, MutableNode>()
+  /** A layer by its id, as the settings that depend on the layers around a view look them up. */
+  const layerOf = (id: string | undefined) => id === undefined ? undefined : byId.get(id)
   /** What `inTemplate` found for each layer. */
   const templated = new Map<MutableNode, boolean>()
   const roots: string[] = []
@@ -347,12 +349,12 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     if (!diagnostics.some(d => d.span.file === node.source.file && (isSyntaxError(d) || d.severity === 'error' && d.span.start < node.source.end && d.span.end >= node.source.start))) {
       const template = inTemplate(parent)
       // A control that keeps its scope and description is kept as it is, rather than copied.
-      const recipes = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', layers, input.deploymentTarget)
+      const recipes = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', layers, input.deploymentTarget, layerOf)
       const controls = (title ? recipes.filter(({ control }) => control.id.startsWith('content')) : recipes).map(({ control }) => template || control.id.startsWith('fill:') ? { ...control, scope: template ? 'All rows in this template' : control.scope, description: control.id.startsWith('fill:') ? `${control.description} Parent: ${parent.name}. Hug uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : control.description } : control)
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }
-    if (!title) Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', { deploymentTarget: input.deploymentTarget, allowEdits: !!node.controls }))
+    if (!title) Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', { deploymentTarget: input.deploymentTarget, allowEdits: !!node.controls, row: isRow(node, layerOf) }))
     // The same chain read as a layer: one value per Figma property (Wave 2).
     if (node.controls && !title) {
       const layer = readLayer(expr, layerContext(layers, node, parent, texts.get(node.source.file) ?? ''))
@@ -416,12 +418,13 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
         presented(modifier, add('branch', label, { file: modifier.span.file, start, end: modifier.span.end }, parent.owner, node), scope)
         continue
       }
-      const closure = modifier.trailingClosure ?? modifier.args.find(arg => arg.label === 'content' && arg.value.kind === 'closure')?.value
+      const closure = modifier.trailingClosure ?? modifier.args.find(arg => (arg.label === 'content' || arg.label === 'menuItems') && arg.value.kind === 'closure')?.value
+      // A context menu's preview is a slot of its own beside its items (Wave 4a).
+      const preview = name === 'contextMenu' ? modifier.args.find(arg => arg.label === 'preview')?.value : undefined
       if (closure?.kind === 'closure') {
         const slot = add('branch', label, closure.span, parent.owner, node)
-        const locals = new Map(scope)
-        for (const param of closure.params) locals.set(param.name.replace(/^\$/, ''), { kind: 'computed', source: param.span })
-        block(closure.body, slot, locals)
+        block(closure.body, slot, closureScope(closure, scope))
+        if (preview?.kind === 'closure') block(preview.body, add('branch', CONTEXT_MENU_PREVIEW, preview.span, parent.owner, node), closureScope(preview, scope))
       } else if (name === 'background' || name === 'overlay') {
         const argument = modifier.args.find(arg => arg.label === null)?.value
         const content = argument && viewCallChain(argument)

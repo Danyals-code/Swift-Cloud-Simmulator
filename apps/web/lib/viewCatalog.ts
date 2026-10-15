@@ -1,4 +1,5 @@
-import { LAYOUT_WORDS } from '@studio/shared'
+import { LAYOUT_WORDS, type AuthoringNode, type DesignEditRequest } from '@studio/shared'
+import { sourceLayerSlot } from './sourceLayers'
 
 /**
  * Visual building blocks and their SwiftUI source. Controls start with sample
@@ -9,13 +10,18 @@ export interface ViewSnippet {
   readonly id: string
   readonly name: string
   readonly swiftName?: string
-  readonly group: 'Layout' | 'Content' | 'Controls' | 'Shapes' | 'Navigation'
+  readonly group: 'Layout' | 'Content' | 'Controls' | 'Shapes' | 'Navigation' | 'System'
   /** What it does, shown beside the name. */
   readonly hint: string
   /** Extra words the search should match, for the names people reach for. */
   readonly keywords?: string
   readonly snippet: string
-  readonly action?: 'image'
+  /**
+   * Not inserted as written: chosen in a picker of its own (`image`), or a modifier added to
+   * the selected view with a starter button inside (Wave 4a), where `on` is what it goes on,
+   * in the words its refusal uses.
+   */
+  readonly action?: 'image' | { readonly modifier: string; readonly on: 'row' | 'view' }
 }
 
 export const VIEW_CATALOG: readonly ViewSnippet[] = [
@@ -63,7 +69,29 @@ export const VIEW_CATALOG: readonly ViewSnippet[] = [
   { id: 'navstack', name: 'Navigation container', swiftName: 'NavigationStack', group: 'Navigation', hint: 'A screen you can push from', keywords: 'navigation title bar', snippet: 'NavigationStack {\n    Text("Screen")\n        .navigationTitle("Title")\n}' },
   { id: 'navlink', name: 'Screen link', swiftName: 'NavigationLink', group: 'Navigation', hint: 'Pushes another screen', keywords: 'push detail', snippet: 'NavigationLink("Details") {\n    Text("Details")\n}' },
   { id: 'tabview', name: 'Tabs', swiftName: 'TabView', group: 'Navigation', hint: 'Tabs along the bottom', keywords: 'tabs pages', snippet: 'TabView {\n    Text("First")\n        .tabItem { Label("First", systemImage: "1.circle") }\n    Text("Second")\n        .tabItem { Label("Second", systemImage: "2.circle") }\n}' },
+
+  // --------------------------------------------------------------- System
+  { id: 'swipe-action', name: 'Swipe action', swiftName: 'swipeActions', group: 'System', hint: 'A button a row shows when swiped', keywords: 'delete pin flag row leading trailing', snippet: '', action: { modifier: 'swipeActions', on: 'row' } },
+  { id: 'context-menu', name: 'Context menu', swiftName: 'contextMenu', group: 'System', hint: 'A menu shown by a long press', keywords: 'long press hold menu copy share', snippet: '', action: { modifier: 'contextMenu', on: 'view' } },
 ]
+
+/**
+ * What choosing `snippet` asks for, and of which layer (Wave 4a). A swipe action or a context
+ * menu is added to the selected view, when the modifiers it is offered hold it, or says why
+ * not: not a row, or an iOS too old. A view goes into a selected slot as its last view;
+ * anywhere else it goes where Add always puts it, and `on` is left out.
+ */
+export function paletteEdit(snippet: ViewSnippet, selected: AuthoringNode | undefined): { readonly operation: DesignEditRequest['operation']; readonly on?: AuthoringNode; readonly problem?: string } {
+  if (typeof snippet.action === 'object') {
+    const { modifier: name, on } = snippet.action, operation = { kind: 'modifier-add', name } as const
+    const offered = selected?.modifierCatalog?.find(entry => entry.name === name)
+    if (selected && offered?.available) return { operation, on: selected }
+    const added = snippet.name.toLowerCase()
+    return { operation, problem: offered?.reason || (selected && on === 'row' ? `A ${added} goes on a row of a List, Form or Section.` : `Select the ${on} to add a ${added} to.`) }
+  }
+  const operation = { kind: 'insert', snippet: snippet.snippet } as const, slot = sourceLayerSlot(selected)
+  return slot ? { operation, on: slot } : { operation }
+}
 
 /**
  * Ranks the catalog against what has been typed.

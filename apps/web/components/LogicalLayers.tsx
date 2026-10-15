@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { argumentLayerProblem, groupLayoutOf, helperPlaces, isHelperCall, isHelperDefinition, isStructuralLayer, layerMoveProblem, tappableProblem, LAYER_MOVE_CONTAINERS, LAYOUT_WORDS } from '@studio/shared'
+import { argumentLayerProblem, groupLayoutOf, helperPlaces, isHelperCall, isHelperDefinition, isStructuralLayer, layerMoveProblem, tappableProblem, CONTEXT_MENU_PREVIEW, LAYER_MOVE_CONTAINERS, LAYOUT_WORDS, MODIFIER_SLOTS } from '@studio/shared'
 import type { AuthoringNode, AuthoringSelection, AuthoringSnapshot, DesignEditRequest, HiddenViewInfo, SourceFile, SourceSpan, ViewLayer } from '@studio/shared'
 import { rebaseSourceLayers, sourceLayerHelperReach, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from '../lib/sourceLayers'
 import { Icon, type IconName } from './ui/Icon'
@@ -63,6 +63,8 @@ const ICONS: Readonly<Record<string, IconName>> = {
   Toggle: 'button', TextField: 'button', SecureField: 'button', Slider: 'button', Picker: 'button',
   List: 'list-rows', ForEach: 'rows', ScrollView: 'scroll', NavigationStack: 'nav', NavigationLink: 'nav',
   TabView: 'screens', Group: 'section', Section: 'section', Grid: 'grid', Spacer: 'spacer',
+  // The slots drawn open only while selected (`sourceLayerOpens`, Wave 4a).
+  [MODIFIER_SLOTS.swipeActions!]: 'swipe', [MODIFIER_SLOTS.contextMenu!]: 'list-rows', [CONTEXT_MENU_PREVIEW]: 'eye',
 }
 
 /** Layers selected together with Shift- or ⌘-click, for the files they were selected in. */

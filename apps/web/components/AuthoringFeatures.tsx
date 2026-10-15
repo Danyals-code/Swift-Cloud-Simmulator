@@ -56,6 +56,7 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
   const helper = isHelperDefinition(node)
   const reusableOwner = snapshot?.nodes.some(n => n.kind === 'component' && n.name === node.owner && snapshot.nodes.find(parent => parent.id === n.parentId)?.name !== 'WindowGroup')
   const textInput = node.controls?.find(c => ['content', 'title'].includes(c.id) && c.kind === 'text')
+  const icon = node.controls?.find(c => c.id === 'icon')
   // Text rows written alike, or the library's Repeat over a range, become records (D13).
   const collectionForm = <details><summary>Use a collection</summary><p>Text rows written alike, or a Repeat over a range, can become a typed collection: one record for each row. Rows that differ stay static.</p><label>Collection name<input value={collectionName} onChange={e => setCollectionName(e.target.value)} /></label><label>Record type<input value={recordType} onChange={e => setRecordType(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'collection-convert', name: collectionName, recordType })}>Convert to collection</button></details>
   return <div className={styles.features}>
@@ -66,6 +67,10 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
       <p>Creates a left-aligned Column with editable title, content, spacing and padding. Undo restores the original card.</p>
     </section>}
     {section === 'basics' && node.controls?.some(c => c.id === 'image' && c.label === 'System symbol') && onNodeChange && <SymbolPicker selected={node.controls.find(c => c.id === 'image')?.value ?? ''} onChoose={value => onNodeChange(node, 'image', value)} />}
+    {/* A Button's Icon is a symbol beside its title, `Button("Add", systemImage:)` (Wave 4a). */}
+    {section === 'basics' && icon && !icon.disabledReason && onNodeChange && <SymbolPicker selected={icon.value} onChoose={value => onNodeChange(node, 'icon', value)} />}
+    {/* An option inserted into a Picker takes the next tag, so choosing it selects it (Wave 4a). */}
+    {section === 'basics' && node.name === 'Picker' && <button type="button" disabled={busy} onClick={() => void command({ kind: 'insert', snippet: 'Text("Option")' })}>Add option</button>}
 
     {section === 'basics' && node.name === 'Image' && node.properties.some(p => ['argument 1', 'systemName'].includes(p.name) && p.valueKind === 'literal') && !!assets?.length && <label>Bundled image<select aria-label="Bundled image" disabled={busy} value={node.properties.find(p => p.name === 'argument 1')?.expression.replace(/^"|"$/g, '') ?? ''} onChange={e => void command({ kind: 'asset-use', name: e.target.value })}><option value="" disabled>Choose image</option>{assets.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}</select></label>}
     {section === 'basics' && node.component && <section><h3>Copy of {node.name}</h3><p>The fields above change only this copy. Everything else comes from its Main.</p>

@@ -81,7 +81,7 @@ describe('a run', () => {
     expect(available('padding')).toMatchObject({ available: false, reason: 'Part of joined text takes text styles only. Put the joined text in parentheses in Code to give all of it padding.' })
     expect(run.controls!.map(control => control.id).filter(id => id.startsWith('add:') || id.startsWith('fill:'))).toEqual([])
     expect(edit(text, 'Text(" items")', { kind: 'modifier-add', name: 'underline' })).toEqual({ text: text.replace('Text(" items")', 'Text(" items").underline()') })
-    expect(edit(text, 'Text(" items")', { kind: 'modifier-add', name: 'padding' })).toEqual({ refused: 'This modifier cannot be added to the selected view.' })
+    expect(edit(text, 'Text(" items")', { kind: 'modifier-add', name: 'padding' })).toEqual({ refused: available('padding').reason })
   })
 
   it('shows its Text section alone, and writes its colour as a Text keeps it before iOS 17', () => {

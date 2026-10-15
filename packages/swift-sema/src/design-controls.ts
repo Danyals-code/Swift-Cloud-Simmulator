@@ -7,6 +7,8 @@ import { isAppleCall } from './builtins'
 import type { LayerProject } from './layer/context'
 import { LENGTH_HOSTS, constantNumber, declarationOf, literalNumber, resolveConstant } from './layer/tokens'
 import { isConstantToken } from './layer/values'
+import { enumCases } from './authoring-context'
+import { pickerAbove } from './authoring-picker-tags'
 
 interface Patch { readonly start: number; readonly end: number; readonly text: string }
 export interface ControlRecipe {
@@ -92,6 +94,22 @@ export function swiftString(value: string): string {
   return '"' + Array.from(value, c => c === '\\' ? '\\\\' : c === '"' ? '\\"' : c === '\n' ? '\\n' : c === '\r' ? '\\r' : c === '\t' ? '\\t' : c.codePointAt(0)! < 32 || c.codePointAt(0) === 127 ? `\\u{${c.codePointAt(0)!.toString(16)}}` : c).join('') + '"'
 }
 
+/** The words of a string literal with no values in it, as Swift reads them; undefined for anything else. */
+export function literalText(expr: Expr | null | undefined): string | undefined {
+  return expr?.kind === 'stringLiteral' && expr.segments.every(s => s.kind === 'text') ? expr.segments.map(s => s.kind === 'text' ? s.value : '').join('') : undefined
+}
+
+/**
+ * A Button's role from the Swift of its `role:` argument (Wave 4a): `none` when it has none,
+ * and undefined for one other than Destructive and Cancel, such as iOS 26's `.confirm`, which
+ * only Code changes.
+ */
+export function buttonRole(written: string | undefined): 'none' | 'destructive' | 'cancel' | undefined {
+  if (written === undefined) return 'none'
+  const role = /^(?:ButtonRole)?\.(destructive|cancel)$/.exec(written.replace(/\s/g, ''))?.[1]
+  return role === 'destructive' || role === 'cancel' ? role : undefined
+}
+
 /** A value read from somewhere, `item.title` or `price`, rather than one a type spells: `Date.now` names a type first. */
 const reference = (expr: Expr): boolean => expr.kind === 'identifier' ? /^[a-z_]/.test(expr.name) : expr.kind === 'memberAccess' && !!expr.base && reference(expr.base)
 
@@ -172,7 +190,7 @@ function merged(text: string, patches: readonly Patch[]): Patch {
  * still builds: the panel and the checker say the preview shows a placeholder for it,
  * because the full list of Apple's names is not something the studio can ship.
  */
-function symbolNameProblem(value: string): string | null {
+export function symbolNameProblem(value: string): string | null {
   if (/^[a-z0-9]+(?:\.[a-z0-9]+)*$/.test(value)) return null
   return value.trim() ? 'An SF Symbol name is lowercase words joined by dots, such as star.fill.' : 'Enter a symbol name, such as star.fill.'
 }
@@ -321,9 +339,10 @@ export function spreadRoomProblem(nodes: readonly AuthoringNode[], node: Authori
 /**
  * Recipes are reconstructed from syntax on every request; the UI never supplies offsets.
  * `project` is the project the view is read in, as its layer is, where the constants a
- * control reads are declared.
+ * control reads are declared. `byId` finds the layers around the view, which say whether
+ * it is a Picker's option; without it, it is none.
  */
-export function designControlRecipes(node: AuthoringNode, expr: Expr, text: string, project: LayerProject, deploymentTarget = DEFAULT_DEPLOYMENT_TARGET): ControlRecipe[] {
+export function designControlRecipes(node: AuthoringNode, expr: Expr, text: string, project: LayerProject, deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, byId?: (id: string | undefined) => AuthoringNode | undefined): ControlRecipe[] {
   if (!['view', 'collection', 'component'].includes(node.kind) && node.undrawn !== 'unsupported' || node.name === 'WindowGroup') return []
   const chain = viewCallChain(expr)
   if (!chain || node.properties.some(p => p.name === 'Source')) return []
@@ -339,14 +358,18 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   const scope = node.properties.some(p => p.scope === 'template') ? 'All rows in this template' : `Defined in ${node.owner}`
   const raw = (span: SourceSpan) => text.slice(span.start, span.end)
   const ownModifier = modifiers.some(m => !isAppleCall(modName(m)))
-  function add(id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description = 'Changes this source value; existing modifier order is preserved.', origin = node.source): void {
+  /**
+   * A control, shown read only with `disabledReason` when it can't be changed here, and with
+   * the `problem` a value it is given can have beyond its kind and range.
+   */
+  function add(id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description = 'Changes this source value; existing modifier order is preserved.', origin = node.source, disabledReason?: string, problem?: ControlRecipe['problem']): void {
     // Written out for each shape of kind: spreading `controlKind` between other keys sent
     // every key after it down V8's slowest path, for every value of every view.
     const { kind: shown, unit, step } = controlKind(kind)
-    const control: DesignControl = unit === undefined ? { id, label, kind: shown, value, options, min, max, scope, description, source: origin }
-      : step === undefined ? { id, label, kind: shown, unit, value, options, min, max, scope, description, source: origin }
-      : { id, label, kind: shown, unit, step, value, options, min, max, scope, description, source: origin }
-    recipes.push({ control, patch })
+    const control: DesignControl = unit === undefined ? { id, label, kind: shown, value, options, min, max, scope, description, source: origin, disabledReason }
+      : step === undefined ? { id, label, kind: shown, unit, value, options, min, max, scope, description, source: origin, disabledReason }
+      : { id, label, kind: shown, unit, step, value, options, min, max, scope, description, source: origin, disabledReason }
+    recipes.push({ control, patch, problem })
   }
   function replace(id: string, label: string, value: Expr, kind: ControlKind, options?: readonly string[], min?: number, max?: number, prefix = '.'): void {
     // Edit the literal branches, never erase the condition or replace linked data.
@@ -359,8 +382,9 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     const property = node.properties.find(p => p.source?.start === value.span.start && p.source?.end === value.span.end)
     if (property?.declaration || property && ['unsupported', 'data-binding', 'component-argument', 'token'].includes(property.valueKind)) return
     if (kind === 'text') {
-      if (value.kind !== 'stringLiteral' || value.segments.some(s => s.kind !== 'text')) return
-      add(id, label, kind, value.segments.map(s => s.kind === 'text' ? s.value : '').join(''), v => ({ ...value.span, text: swiftString(v) }), undefined, undefined, undefined, undefined, value.span)
+      const words = literalText(value)
+      if (words === undefined) return
+      add(id, label, kind, words, v => ({ ...value.span, text: swiftString(v) }), undefined, undefined, undefined, undefined, value.span)
     } else if (controlKind(kind).kind === 'number') {
       if (!['integerLiteral', 'floatLiteral', 'unary'].includes(value.kind) || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw(value.span))) return
       add(id, label, kind, String(Number(raw(value.span))), v => ({ ...value.span, text: String(Number(v)) }), undefined, min, max, undefined, value.span)
@@ -407,8 +431,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     if (!linked) return
     // Its value at this stack alone (Detach), and the constant where it is declared, when that is in this file (Wave 3b).
     add('spacing:detach', `Detach ${linked.token}`, 'toggle', 'false', v => ({ ...written.span, text: v === 'true' ? linked.value : raw(written.span) }), undefined, undefined, undefined, `Writes ${linked.value} in place of ${linked.token}, at this stack only.`)
-    add('spacing:declaration', linked.token, 'pt', linked.value, linked.declaration ?? (() => ({ ...written.span, text: raw(written.span) })), undefined, 0, undefined, linked.description)
-    if (!linked.declaration) recipes[recipes.length - 1] = { ...recipes.at(-1)!, control: { ...recipes.at(-1)!.control, disabledReason: `${linked.token} is declared in another file, or with a comment. Change it there, in Code.` } }
+    add('spacing:declaration', linked.token, 'pt', linked.value, linked.declaration ?? (() => ({ ...written.span, text: raw(written.span) })), undefined, 0, undefined, linked.description, undefined, linked.declaration ? undefined : `${linked.token} is declared in another file, or with a comment. Change it there, in Code.`)
   }
   /**
    * A stack's spacing read through a constant (Wave 3b), `VStack(spacing: rowSpacing)` or
@@ -435,11 +458,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     const span = base.callee.kind === 'memberAccess' ? base.callee.memberSpan : base.callee.span
     add('layout', 'Layout', 'select', node.name === 'HStack' ? 'Row' : node.name === 'VStack' ? 'Column' : 'Stack', v => alignment
       ? { start: span.start, end: alignment.value.span.end, text: names[v]! + text.slice(span.end, alignment.value.span.start) + '.center' }
-      : { ...span, text: names[v]! }, choices)
-    if (!centered) {
-      const recipe = recipes.at(-1)!
-      recipes[recipes.length - 1] = { ...recipe, control: { ...recipe.control, disabledReason: 'Set Alignment to Center to change the layout.' } }
-    }
+      : { ...span, text: names[v]! }, choices, undefined, undefined, undefined, undefined, centered ? undefined : 'Set Alignment to Center to change the layout.')
     if (node.name !== 'ZStack') spacing()
     argument('alignment', 'Alignment', 'alignment', 'select', 'center', node.name === 'HStack' ? ['center', 'top', 'bottom', 'firstTextBaseline', 'lastTextBaseline'] : node.name === 'VStack' ? ['center', 'leading', 'trailing'] : ALIGNMENTS)
   }
@@ -466,9 +485,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     const property = node.properties.find(p => p.source?.start === value.span.start && p.source?.end === value.span.end)
     const parts = constructorEditable && value.kind === 'stringLiteral' && !property?.declaration && property?.valueKind !== 'unsupported' ? textPartsRecipe(value, text) : undefined
     if (parts) {
-      add('content:parts', 'Text', 'text', parts.value, parts.write, undefined, undefined, undefined, 'Changes the words around the values; each value stays as the code writes it.')
-      const recipe = recipes.at(-1)!
-      recipes[recipes.length - 1] = { ...recipe, problem: parts.problem, ...(parts.disabledReason ? { control: { ...recipe.control, disabledReason: parts.disabledReason } } : {}) }
+      add('content:parts', 'Text', 'text', parts.value, parts.write, undefined, undefined, undefined, 'Changes the words around the values; each value stays as the code writes it.', undefined, parts.disabledReason, parts.problem)
       return
     }
     if (constructorEditable) replace('content', 'Text', value, 'text')
@@ -477,10 +494,10 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       : kind === 'data-binding' || base.args.slice(1).some(arg => ['format', 'style', 'formatter'].includes(arg.label ?? '')) && reference(value) ? 'This text comes from data. Change it in Code.'
         : kind === 'component-argument' ? `This text is set where this ${property?.helperArgument ? 'helper' : 'view'} is used. Change it there.` : undefined
     if (!reason) return
-    add('content:data', 'Text', 'text', raw(value.span), () => ({ ...value.span, text: raw(value.span) }), undefined, undefined, undefined, 'Shown as the code writes it.')
-    recipes[recipes.length - 1] = { ...recipes.at(-1)!, control: { ...recipes.at(-1)!.control, disabledReason: reason } }
+    add('content:data', 'Text', 'text', raw(value.span), () => ({ ...value.span, text: raw(value.span) }), undefined, undefined, undefined, 'Shown as the code writes it.', undefined, reason)
   }
-  if (node.kind !== 'component' && constructorEditable && ['SecureField', 'Menu', 'DisclosureGroup', 'ContentUnavailableView', 'ProgressView', 'TextField', 'Toggle', 'Button', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Section', 'Stepper', 'Picker', 'DatePicker', 'ColorPicker'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
+  // A Section's title is its Header, read with its footer (Wave 4a).
+  if (node.kind !== 'component' && constructorEditable && ['SecureField', 'Menu', 'DisclosureGroup', 'ContentUnavailableView', 'ProgressView', 'TextField', 'Toggle', 'Button', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Stepper', 'Picker', 'DatePicker', 'ColorPicker'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
   /** A symbol's name, checked as it is typed: the field takes only a well-formed one. */
   function symbolName(value: Expr): void {
     const first = recipes.length
@@ -501,6 +518,18 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       const maximum = total ? Number(raw(total.span)) : 1
       replace('progress', 'Progress', value.value, 'number', undefined, 0, Number.isFinite(maximum) ? maximum : undefined)
     }
+  }
+  // A Picker's option's Value: its tag, which the Picker's selection is compared with (Wave 4a).
+  // A tab's tag, or any other, is not a value a designer sets.
+  const tag = modifiers.filter(m => modName(m) === 'tag' && m.args.length === 1 && m.args[0]!.label === null).at(-1)?.args[0]!.value
+  if (tag && byId && pickerAbove(node, byId)) {
+    const first = recipes.length, type = tag.kind === 'memberAccess' && tag.base?.kind === 'identifier' ? tag.base.name : undefined
+    const cases = type && enumCases(project.context, type)
+    if (cases && tag.kind === 'memberAccess' && cases.includes(tag.member)) add('tag', 'Value', 'select', tag.member, v => ({ ...tag.span, text: `${type}.${v}` }), cases, undefined, undefined, undefined, tag.span)
+    else replace('tag', 'Value', tag, tag.kind === 'stringLiteral' ? 'text' : 'number')
+    const recipe = recipes[first]
+    if (!recipe) add('tag', 'Value', 'text', raw(tag.span), () => ({ ...tag.span, text: raw(tag.span) }), undefined, undefined, undefined, 'Shown as the code writes it.', tag.span, 'This value is worked out in code. Change it in Code.')
+    else if (recipe.control.kind === 'number' && /^-?\d+$/.test(raw(tag.span).replace(/\s/g, ''))) recipes[first] = { ...recipe, control: { ...recipe.control, integer: true } }
   }
   const corners = cornersOf(chain, text)
   for (const [i, m] of modifiers.entries()) {
@@ -538,6 +567,12 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       if (name === 'frame' && arg.label === 'alignment') replace(id, label, arg.value, 'select', ALIGNMENTS)
       if (['accessibilityLabel', 'accessibilityIdentifier', 'navigationTitle'].includes(name) && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'text')
       if (['foregroundColor', 'foregroundStyle', 'background', 'fill', 'tint'].includes(name) && !arg.label && m.args.length === 1 && !m.trailingClosure) replace(id, label, arg.value, 'select', colors, undefined, undefined, 'Color.')
+      // A row's colour, or what the code works it out as, read only, so its card is never empty (Wave 4a).
+      if ((name === 'listRowBackground' || name === 'listRowSeparatorTint') && !arg.label) {
+        const first = recipes.length, rowLabel = name === 'listRowBackground' ? 'Row background' : 'Separator color'
+        replace(id, rowLabel, arg.value, 'select', colors, undefined, undefined, 'Color.')
+        if (recipes.length === first) add(id, rowLabel, 'text', raw(arg.value.span), () => ({ ...arg.value.span, text: raw(arg.value.span) }), undefined, undefined, undefined, 'Shown as the code writes it.', arg.value.span, 'This value is worked out in code. Change it in Code.')
+      }
       const colorArgument = ['foregroundColor', 'foregroundStyle', 'background', 'fill', 'tint', 'border'].includes(name) && j === 0 && !arg.label || name === 'shadow' && arg.label === 'color'
       const translucent = colorArgument && colorOpacityParts(arg.value)
       if (translucent) {
@@ -578,7 +613,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       }
     }
   }
-  advancedControls(node, base, modifiers, text, targetVersion, colors, add, replace)
+  advancedControls(node, base, modifiers, text, targetVersion, colors, add, replace, byId)
   const has = (name: string) => modifiers.some(m => modName(m) === name)
   if (!has('font')) append('add:font', 'Font size', 'pt', '', v => `.font(.system(size: ${Number(v)}))`, undefined, 1, 1000)
   if (!has('foregroundColor') && !has('foregroundStyle')) append('add:foreground', 'Text color', 'select', '', v => `.${targetVersion >= 15 ? 'foregroundStyle' : 'foregroundColor'}(${SYSTEM_COLORS.includes(v) ? `Color(.${v})` : `Color.${v}`})`, colors)
