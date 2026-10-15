@@ -1,5 +1,7 @@
-import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, TEXT_STYLES, authoringCapability, deploymentVersion, helperPlaces, readTextParts, stackLayoutOf, writeTextParts, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, TEXT_STYLES, TOOLBAR_ITEMS, authoringCapability, deploymentVersion, helperPlaces, readTextParts, stackLayoutOf, writeTextParts, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
 import { advancedControls } from './design-advanced-controls'
+import { toolbarItemControls } from './design-object-controls'
+import { sheetControls } from './design-sheet-controls'
 import { authoringViewMinimum } from './authoring-view'
 import { Lexer, type CallExpr, type Expr, type Stmt, type StringLiteralExpr } from '@studio/swift-syntax'
 import { BORDER_POSITIONS, borderOf, cornersOf, rewriteBorder, type BorderPosition } from './authoring-border'
@@ -351,22 +353,26 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   const constructor = authoringCapability(node.name, 'view', base.args.map(a => a.label))
   const constructorEditable = !!constructor && targetVersion >= Number.parseFloat(constructor.minimumIOS)
   const minimum = authoringViewMinimum(node)
-  if (!Number.isFinite(targetVersion) || minimum === undefined || targetVersion < minimum) return []
+  // A toolbar item is no view, but has a Placement (Wave 4b).
+  const toolbarItem = node.kind === 'view' && TOOLBAR_ITEMS.has(node.name)
+  if (!Number.isFinite(targetVersion) || minimum === undefined && !toolbarItem || minimum !== undefined && targetVersion < minimum) return []
   const colors = targetVersion >= 15 ? COLORS_FROM_15 : COLORS_BEFORE_15
   const listStyles = targetVersion >= 14 ? ['plain', 'inset', 'grouped', 'insetGrouped', 'sidebar'] : ['plain', 'grouped']
   const recipes: ControlRecipe[] = []
   const scope = node.properties.some(p => p.scope === 'template') ? 'All rows in this template' : `Defined in ${node.owner}`
   const raw = (span: SourceSpan) => text.slice(span.start, span.end)
   const ownModifier = modifiers.some(m => !isAppleCall(modName(m)))
+  if (toolbarItem) { toolbarItemControls(base, text, targetVersion, add); return recipes }
   /**
    * A control, shown read only with `disabledReason` when it can't be changed here, and with
    * the `problem` a value it is given can have beyond its kind and range.
    */
-  function add(id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description = 'Changes this source value; existing modifier order is preserved.', origin = node.source, disabledReason?: string, problem?: ControlRecipe['problem']): void {
+  function add(id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description = 'Changes this source value; existing modifier order is preserved.', origin = node.source, disabledReason?: string, problem?: ControlRecipe['problem'], placeholder?: string): void {
     // Written out for each shape of kind: spreading `controlKind` between other keys sent
     // every key after it down V8's slowest path, for every value of every view.
     const { kind: shown, unit, step } = controlKind(kind)
-    const control: DesignControl = unit === undefined ? { id, label, kind: shown, value, options, min, max, scope, description, source: origin, disabledReason }
+    const control: DesignControl = placeholder !== undefined ? { id, label, kind: shown, value, placeholder, options, min, max, scope, description, source: origin, disabledReason }
+      : unit === undefined ? { id, label, kind: shown, value, options, min, max, scope, description, source: origin, disabledReason }
       : step === undefined ? { id, label, kind: shown, unit, value, options, min, max, scope, description, source: origin, disabledReason }
       : { id, label, kind: shown, unit, step, value, options, min, max, scope, description, source: origin, disabledReason }
     recipes.push({ control, patch, problem })
@@ -614,6 +620,12 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     }
   }
   advancedControls(node, base, modifiers, text, targetVersion, colors, add, replace, byId)
+  // The view a sheet shows has the sheet's settings (Wave 4b).
+  if (node.presented) {
+    const structNamed = (name: string) => project.structs.get(name)
+    const textOf = (file: string) => project.context.files.find(f => f.id === file)?.text ?? ''
+    sheetControls({ node, expr, base, modifiers, text, target: targetVersion, colors, appendable: !ownModifier, structNamed, textOf }, add)
+  }
   const has = (name: string) => modifiers.some(m => modName(m) === name)
   if (!has('font')) append('add:font', 'Font size', 'pt', '', v => `.font(.system(size: ${Number(v)}))`, undefined, 1, 1000)
   if (!has('foregroundColor') && !has('foregroundStyle')) append('add:foreground', 'Text color', 'select', '', v => `.${targetVersion >= 15 ? 'foregroundStyle' : 'foregroundColor'}(${SYSTEM_COLORS.includes(v) ? `Color(.${v})` : `Color.${v}`})`, colors)

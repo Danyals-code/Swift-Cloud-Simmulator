@@ -190,7 +190,9 @@ export function emptyState(ctx: FeatureContext, node: AuthoringNode, message: st
   // Indented from the list's own line: the list goes two levels in, into the branch (D13).
   const { indent, unit } = lineIndent(ctx, source.file, source.start)
   const list = raw(ctx, source).replace(/\n/g, `\n${unit}${unit}`)
-  return [patch(source, `Group {\n${indent}${unit}if ${info.name}.isEmpty {\n${indent}${unit}${unit}Text(${swiftString(message)})\n${indent}${unit}} else {\n${indent}${unit}${unit}${list}\n${indent}${unit}}\n${indent}}`)]
+  // iOS's own empty view from iOS 17 (Wave 4b), with the message as its description.
+  const empty = deploymentVersion(ctx.deploymentTarget) >= 17 ? `ContentUnavailableView("No Results", systemImage: "magnifyingglass", description: Text(${swiftString(message)}))` : `Text(${swiftString(message)})`
+  return [patch(source, `Group {\n${indent}${unit}if ${info.name}.isEmpty {\n${indent}${unit}${unit}${empty}\n${indent}${unit}} else {\n${indent}${unit}${unit}${list}\n${indent}${unit}}\n${indent}}`)]
 }
 
 

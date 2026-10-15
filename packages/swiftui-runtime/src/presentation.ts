@@ -1,6 +1,6 @@
 import { LAYERED_LABEL_VIEWS, type Diagnostic, type PagePreview, type SourceSpan, type ViewLayer } from '@studio/shared'
 import { exhausts, toFailure } from './failures'
-import { labelArgView, layerLabel, tabIcon, viewLayers } from './view-hierarchy'
+import { labelArgView, layerLabel, tabIcon, unavailablePart, viewLayers } from './view-hierarchy'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import {
   asDate,
@@ -22,6 +22,7 @@ import {
   type SwiftValue,
 } from '@studio/swift-runtime'
 import type { Stmt } from '@studio/swift-syntax'
+import { HIDDEN_BARS } from '@studio/swift-sema'
 import {
   asSwiftValue,
   asView,
@@ -76,6 +77,7 @@ export const NAV_BAR = '_NavigationBar'
 export const TAB_BAR = '_TabBar'
 export const BACK_BUTTON = '_BackButton'
 export const TAB_ITEM = '_TabItem'
+export const BOTTOM_BAR = '_BottomBar'
 export const ALERT = '_Alert'
 export const DIALOG = '_ConfirmationDialog'
 export const MENU = '_Menu'
@@ -114,10 +116,35 @@ export interface NavigationBar {
   readonly back?: string
   readonly leading: readonly ViewValue[]
   readonly trailing: readonly ViewValue[]
+  /** A `.principal` item, drawn in the title's place (Wave 4b). */
+  readonly principal: readonly ViewValue[]
   readonly view: ViewValue
 }
 
 export interface TabBar {
+  readonly items: readonly ViewValue[]
+  readonly view: ViewValue
+}
+
+/** A screen's toolbar items by where they are drawn: a principal item in place of the title (Wave 4b). */
+interface Toolbar {
+  readonly leading: readonly ViewValue[]
+  readonly trailing: readonly ViewValue[]
+  readonly principal: readonly ViewValue[]
+  readonly bottom: readonly ViewValue[]
+}
+
+/** No views, shared, so a screen without a toolbar allocates nothing for one each pass (Wave 4b). */
+const NO_VIEWS: readonly ViewValue[] = Object.freeze([])
+const NO_TOOLBAR: Toolbar = Object.freeze({ leading: NO_VIEWS, trailing: NO_VIEWS, principal: NO_VIEWS, bottom: NO_VIEWS })
+
+/** Every item of a toolbar, as Layers lists them: the bar's, then the bottom bar's, in a new list only when the bar has any. */
+function toolbarViews(bar: Pick<NavigationBar, 'leading' | 'trailing' | 'principal'> | null | undefined, bottom: readonly ViewValue[] = NO_VIEWS): readonly ViewValue[] {
+  return bar && (bar.leading.length || bar.principal.length || bar.trailing.length) ? [...bar.leading, ...bar.principal, ...bar.trailing, ...bottom] : bottom
+}
+
+/** The `.bottomBar` toolbar items, drawn in glass capsules above the home indicator (Wave 4b). */
+export interface BottomBar {
   readonly items: readonly ViewValue[]
   readonly view: ViewValue
 }
@@ -141,7 +168,7 @@ export interface Overlay {
   /** Omitted disables interaction; a number enables it through that encoded detent. */
   readonly backgroundInteraction?: number
   readonly showsDragIndicator?: boolean
-  readonly screen?: Pick<ResolvedUI, 'content' | 'navigationBar' | 'tabBar' | 'search' | 'overlay'>
+  readonly screen?: Pick<ResolvedUI, 'content' | 'navigationBar' | 'bottomBar' | 'tabBar' | 'search' | 'overlay'>
   readonly title: string
   readonly message: string
   /** An alert's or a dialog's title as the layer it is drawn as, which a click on its words finds. */
@@ -193,6 +220,8 @@ export interface ResolvedUI {
   readonly content: readonly ViewValue[]
   readonly search: SearchField | null
   readonly navigationBar: NavigationBar | null
+  /** The toolbar's `.bottomBar` items (Wave 4b). */
+  readonly bottomBar?: BottomBar | null
   /** The navigation stack's visual environment: what a screen pushed onto it inherits. */
   readonly environment?: readonly ModifierValue[]
   readonly tabBar: TabBar | null
@@ -246,7 +275,7 @@ export interface NotDrawn {
  * is pushed, so a view in it that stopped says nothing before then, as iOS runs a
  * destination's body only on the push.
  */
-export function stoppedFailures(ui: Pick<ResolvedUI, 'content' | 'navigationBar' | 'tabBar' | 'overlay'> | null | undefined): RuntimeFailure[] {
+export function stoppedFailures(ui: Pick<ResolvedUI, 'content' | 'navigationBar' | 'bottomBar' | 'tabBar' | 'overlay'> | null | undefined): RuntimeFailure[] {
   const found: RuntimeFailure[] = []
   const visit = (view: ViewValue): void => {
     const halted = stopped(view)
@@ -259,10 +288,12 @@ export function stoppedFailures(ui: Pick<ResolvedUI, 'content' | 'navigationBar'
       }
     }
   }
-  const screen = (shown: Pick<ResolvedUI, 'content' | 'navigationBar' | 'tabBar' | 'overlay'>): void => {
+  const screen = (shown: Pick<ResolvedUI, 'content' | 'navigationBar' | 'bottomBar' | 'tabBar' | 'overlay'>): void => {
     shown.content.forEach(visit)
     shown.navigationBar?.leading.forEach(visit)
+    shown.navigationBar?.principal.forEach(visit)
     shown.navigationBar?.trailing.forEach(visit)
+    shown.bottomBar?.items.forEach(visit)
     shown.tabBar?.items.forEach(visit)
     if (shown.overlay?.screen) screen(shown.overlay.screen)
     else shown.overlay?.views.forEach(visit)
@@ -539,12 +570,27 @@ interface Page {
   readonly dress: (ui: ResolvedUI, resolver: Resolver, id: string) => ResolvedUI
 }
 
-/** One page drawn, and what drawing it found; `page` when the screens it opens are drawn too. */
+/** The one presentation drawn up over its screen, for its page in the gallery. */
+interface Forced {
+  /** Its modifier's, which finds it. */
+  readonly span: SourceSpan
+  /** What it shows, a sheet's `item:` when it holds none now (Wave 4b). */
+  readonly value?: SwiftValue
+  /** What its closure built, when the gallery built it already, so a sheet's views are built once (Wave 4b). */
+  readonly views?: readonly ViewValue[]
+}
+
+/**
+ * One page drawn, and what drawing it found; `page` when the screens it opens are drawn too.
+ * `ui` draws a sheet up over the screen that opens it, and `alone` is the sheet's own screen,
+ * where what it opens is found (Wave 4b).
+ */
 interface Composed {
   readonly ui: ResolvedUI
   readonly resolver: Resolver
   readonly name: string
   readonly page?: Page
+  readonly alone?: ResolvedUI
 }
 
 /** Discover real routes with real sample values; never invoke their button actions. */
@@ -584,15 +630,25 @@ class Resolver {
   private readonly warnings: Diagnostic[] = []
   /** The list the screen's navigation stack is bound to, `NavigationStack(path:)`, when it is. */
   private route: SwiftValue | undefined
+  /** The bars `.toolbar(.hidden, for:)` hides on the screen drawn, as `HIDES` bits (Wave 4b). */
+  private hidden = 0
 
   constructor(
     private readonly ctx: ResolveContext,
     private readonly forceTab?: number,
     private readonly prefix = 'v',
     private readonly basePage = false,
-    /** The one presentation drawn up, by its modifier's span, for its page in the gallery. */
-    private readonly forced?: SourceSpan,
+    /** The one presentation drawn up for its page in the gallery. */
+    private readonly forced?: Forced,
   ) {}
+
+  /**
+   * Whether `.toolbar(.hidden, for: .tabBar)` is written on the screen drawn, or on its stack:
+   * for a pushed page, drawn with a stack, under the root's tab bar (Wave 4b).
+   */
+  get hidesTabBar(): boolean {
+    return (this.hidden & HIDES.tabBar) !== 0
+  }
 
   run(views: readonly ViewValue[]): ResolvedUI {
     const stamped = this.stampList(views, this.prefix)
@@ -606,7 +662,11 @@ class Resolver {
       findView(withTabs.content, 'NavigationView') ??
       // A phone collapses a split view into a stack, so it is resolved as one.
       findView(withTabs.content, 'NavigationSplitView')
-    const screen = nav ? this.resolveNavigation(nav) : { content: withTabs.content, navigationBar: null }
+    const screen = nav ? this.resolveNavigation(nav) : { content: withTabs.content, navigationBar: null, bottomBar: null, hidden: 0 }
+    // `.toolbar(.hidden, for: .tabBar)` on the screen on top, or on its stack, hides the tab bar
+    // (Wave 4b): found in the walk that found the screen's toolbars, or in one of its own for a
+    // tab without a stack, and only where there is a tab bar to hide.
+    this.hidden = nav ? screen.hidden | hiddenBy(nav.modifiers) : withTabs.tabBar ? toolbarsOf(withTabs.content).hidden : 0
     const route = nav ? labelled(nav.args, 'path') : undefined
     this.route = route && (asProjection(route)?.get() ?? route)
     this.around = containersAbove(stamped, tabs, withTabs.content, nav)
@@ -622,14 +682,16 @@ class Resolver {
       : this.basePage ? this.menuOverlay(screen.content, this.revealedMenu)
       : this.findOverlay(screen.content, 0, this.around) ?? this.menuOverlay(screen.content, this.revealedMenu ?? this.ctx.state.openMenu())
 
-    const screenLayers = (content: readonly ViewValue[], bar: NavigationBar | null | undefined): ViewLayer[] => [
-      ...viewLayers(content),
-      ...(bar && (bar.leading.length || bar.trailing.length) ? [{
-        id: `${bar.view.path}/layers`, name: 'Toolbar', type: 'Toolbar',
-        children: viewLayers([...bar.leading, ...bar.trailing]),
-      }] : []),
-    ]
-    const activeLayers = this.ctx.includeViewHierarchy === false ? [] : screenLayers(screen.content, screen.navigationBar)
+    // A screen's toolbar items are one Toolbar layer, wherever each is drawn: a click on one
+    // in the bar, in the title's place or in the bottom bar finds it there (Wave 4b).
+    const screenLayers = (content: readonly ViewValue[], bar: NavigationBar | null | undefined, bottom: BottomBar | null | undefined): ViewLayer[] => {
+      const items = toolbarViews(bar, bottom?.items)
+      return [
+        ...viewLayers(content),
+        ...(items.length ? [{ id: `${(bar ?? bottom)!.view.path}/layers`, name: 'Toolbar', type: 'Toolbar', children: viewLayers(items) }] : []),
+      ]
+    }
+    const activeLayers = this.ctx.includeViewHierarchy === false ? [] : screenLayers(screen.content, screen.navigationBar, screen.bottomBar)
     const pageLayers: ViewLayer[] = this.ctx.includeViewHierarchy === false ? [] : withTabs.pages.length ? withTabs.pages.map((page, index) => {
       const item = withTabs.tabBar?.items[index]
       const active = index === withTabs.selected
@@ -651,7 +713,7 @@ class Resolver {
       type: 'Presentation', page: { active: true },
       children: [
         ...(overlay.titleLayer ? [overlay.titleLayer] : []), ...viewLayers(overlay.messageViews ?? []),
-        ...screenLayers(overlay.screen?.content ?? overlay.views, overlay.screen?.navigationBar),
+        ...screenLayers(overlay.screen?.content ?? overlay.views, overlay.screen?.navigationBar, overlay.screen?.bottomBar),
       ],
     })
 
@@ -660,8 +722,9 @@ class Resolver {
       content: screen.content,
       search: this.findSearchField(screen.content, searchAround),
       navigationBar: screen.navigationBar,
+      bottomBar: screen.bottomBar,
       ...(nav ? { environment: visualModifiers(nav) } : {}),
-      tabBar: withTabs.tabBar,
+      tabBar: this.hidesTabBar ? null : withTabs.tabBar,
       overlay,
       handlers: this.handlers,
       animation: this.ctx.animation,
@@ -684,7 +747,7 @@ class Resolver {
     const queue: { ui: ResolvedUI; scope: readonly ViewValue[]; around: readonly ViewValue[]; parentId: string; depth: number; page: Page; route?: SwiftValue }[] =
       [{ ui: root, scope: this.previewScope, around: this.around, parentId: rootId, depth: 0, page: { content: views, tab: this.forceTab, dress: ui => ui }, route: this.route }]
     /** A page's screen drawn on its own, or with one of its presentations up. */
-    const draw = (page: Page, id: string, forced?: SourceSpan) => {
+    const draw = (page: Page, id: string, forced?: Forced) => {
       const resolver = new Resolver(this.ctx, page.tab, `preview:${id}`, true, forced)
       return { resolver, ui: page.dress(resolver.run(page.content), resolver, id) }
     }
@@ -722,7 +785,7 @@ class Resolver {
         }
         out.push({ id, parentId: current.parentId, rootId, kind, name: made.name, source, ui: made.ui })
         // An alert is its screen with the alert up: what that screen opens is under the screen.
-        if (made.page) queue.push({ ui: made.ui, scope: made.resolver.previewScope, around: made.resolver.around, parentId: id, depth: current.depth + 1, page: made.page, route: made.resolver.route ?? (kind === 'destination' ? current.route : undefined) })
+        if (made.page) queue.push({ ui: made.alone ?? made.ui, scope: made.resolver.previewScope, around: made.resolver.around, parentId: id, depth: current.depth + 1, page: made.page, route: made.resolver.route ?? (kind === 'destination' ? current.route : undefined) })
       }
       /**
        * The page of a screen `build` builds, pushed or presented at `place`: named by its
@@ -742,11 +805,11 @@ class Resolver {
           const path = `preview:${at}/back`
           const back: ViewValue = { name: BACK_BUTTON, args: [{ label: 'title', value: { kind: 'string', value: backTitle } }], children: [], modifiers: [], action: null, span: source, path }
           const bar = ui.navigationBar
-          const tabBar = root.tabBar ? { items: root.tabBar.items.map((item, index) => resolver.stamp(item, `preview:${at}/tab-${index}`)), view: resolver.stamp(root.tabBar.view, `preview:${at}/tabs`) } : null
+          const tabBar = root.tabBar && !resolver.hidesTabBar ? { items: root.tabBar.items.map((item, index) => resolver.stamp(item, `preview:${at}/tab-${index}`)), view: resolver.stamp(root.tabBar.view, `preview:${at}/tabs`) } : null
           return { ...ui, tabBar, navigationBar: {
             title, large: bar?.large ?? false, canGoBack: true, backTitle,
-            leading: [back], trailing: bar?.trailing ?? [],
-            view: bar ? { ...bar.view, children: [back, ...bar.trailing] } : { name: NAV_BAR, args: [{ label: 'title', value: { kind: 'string', value: title } }], children: [back], modifiers: [], action: null, span: source, path: `preview:${at}/bar` },
+            leading: [back], trailing: bar?.trailing ?? NO_VIEWS, principal: bar?.principal ?? NO_VIEWS,
+            view: bar ? { ...bar.view, children: [back, ...bar.principal, ...bar.trailing] } : { name: NAV_BAR, args: [{ label: 'title', value: { kind: 'string', value: title } }], children: [back], modifiers: [], action: null, span: source, path: `preview:${at}/bar` },
           } }
         } : ui => ui }
         const { ui, resolver } = draw(page, id)
@@ -765,7 +828,7 @@ class Resolver {
           visitLinks(view.children)
         }
       }
-      const toolbar = [...(current.ui.navigationBar?.leading ?? []), ...(current.ui.navigationBar?.trailing ?? [])]
+      const toolbar = toolbarViews(current.ui.navigationBar, current.ui.bottomBar?.items)
       visitLinks([...current.ui.content, ...toolbar])
       for (const { view, modifier } of modifiersFor([...current.scope, ...toolbar], current.around)) {
         const kind = OVERLAY_KINDS[modifier.name]
@@ -776,7 +839,7 @@ class Resolver {
           add(place, id => {
             if (labelled(modifier.args, 'error')) return { notDrawn: 'the preview doesn\'t draw an alert made from an error, whose title is its description' }
             if (data?.kind === 'nil') return { notDrawn: 'it shows the data it presents, and that is nil now' }
-            const { ui, resolver } = draw(current.page, id, modifier.span)
+            const { ui, resolver } = draw(current.page, id, { span: modifier.span })
             const layer = ui.viewHierarchy?.find(item => item.type === 'Presentation')
             // An `Alert(...)` is named by the title it is given.
             const name = ui.overlay?.title || place.name
@@ -817,8 +880,30 @@ class Resolver {
         }
         // A pushed screen takes the stack's environment, a presented one the view's it is written on.
         const environment = bound ? current.ui.environment ?? [] : visualModifiers(view)
-        const built = () => this.ctx.build(modifier.closure!, shown.value ? [shown.value] : [], modifier.environment, bound ? 'Destination' : PRESENTATION_NAMES[kind!]).map(content => inheritVisualStyle(content, environment))
-        add(place, shown.why ? () => ({ notDrawn: shown.why! }) : screen(place, built, bound ? '' : place.name))
+        const build = () => this.ctx.build(modifier.closure!, shown.value ? [shown.value] : [], modifier.environment, bound ? 'Destination' : PRESENTATION_NAMES[kind!])
+        const styled = (views: readonly ViewValue[]) => views.map(content => inheritVisualStyle(content, environment))
+        if (shown.why) add(place, () => ({ notDrawn: shown.why! }))
+        else if (kind === 'sheet' || kind === 'popover') {
+          // Drawn as iOS draws it, up over the screen that opens it at its first detent, as an
+          // alert is (Wave 4b); what it opens is found in its own screen. A sheet opened from
+          // several screens is drawn once, over the first, as `seen` keeps one page a place.
+          add(place, id => {
+            // Its closure runs once, for its own screen and for the sheet over its opener.
+            const views = build()
+            const own = screen(place, () => styled(views))(id)
+            if (!own) return null
+            let over: ResolvedUI
+            try {
+              over = draw(current.page, id, { span: modifier.span, value: shown.value, views }).ui
+            } catch (error) {
+              // What its opener can't be drawn with, the sheet still is, on its own.
+              if (exhausts(error)) throw error
+              return own
+            }
+            const layer = over.viewHierarchy?.find(item => item.type === 'Presentation')
+            return over.overlay ? { ...own, alone: own.ui, ui: { ...over, viewHierarchy: layer ? [{ ...layer, type: 'Page', name: own.name }] : [] } } : own
+          })
+        } else add(place, screen(place, () => styled(build()), bound ? '' : place.name))
       }
     }
     return [...out, ...skipped]
@@ -886,7 +971,9 @@ class Resolver {
       // `Button { … } label: { … }` keeps what it is drawn with among its arguments, as
       // its content closure is the action. Those views are stamped where the layout
       // draws them, so a view in a tappable card has an identity of its own (D16).
-      const args = LAYERED_LABEL_VIEWS.has(restyled.name) ? this.stampLabel(restyled.args, path) : restyled.args
+      // The closure form of `ContentUnavailableView` keeps its description and actions there too (Wave 4b).
+      const args = LAYERED_LABEL_VIEWS.has(restyled.name) ? this.stampLabel(restyled.args, path, labelArgView)
+        : restyled.name === 'ContentUnavailableView' && restyled.children.length ? this.stampLabel(restyled.args, path, unavailablePart) : restyled.args
       // Layers are view subtrees too: register their controls and lifecycle hooks.
       const modifiers = restyled.modifiers.map((modifier, m) => {
         if (!['background', 'overlay', 'safeAreaInset'].includes(modifier.name)) return modifier
@@ -914,12 +1001,12 @@ class Resolver {
    * stamped in order under `…label` or `…icon`, the prefix the layout draws them with. A
    * label then has an identity of its own, and a click on the canvas finds it (Wave 3a).
    */
-  private stampLabel(args: readonly ViewArg[], path: string): readonly ViewArg[] {
+  private stampLabel(args: readonly ViewArg[], path: string, part: (arg: ViewArg) => ViewValue | null): readonly ViewArg[] {
     const stamped = new Map<string, ViewValue[]>()
-    for (const part of new Set(args.flatMap(arg => labelArgView(arg) ? [arg.label!] : []))) {
-      stamped.set(part, this.stampList(args.flatMap(arg => arg.label === part ? labelArgView(arg) ?? [] : []), `${path}${part}`))
+    for (const label of new Set(args.flatMap(arg => part(arg) ? [arg.label!] : []))) {
+      stamped.set(label, this.stampList(args.flatMap(arg => arg.label === label ? part(arg) ?? [] : []), `${path}${label}`))
     }
-    return args.map(arg => labelArgView(arg) ? { ...arg, value: opaque('View', stamped.get(arg.label!)!.shift()!) } : arg)
+    return args.map(arg => part(arg) ? { ...arg, value: opaque('View', stamped.get(arg.label!)!.shift()!) } : arg)
   }
 
   /**
@@ -1623,6 +1710,9 @@ class Resolver {
   private resolveNavigation(stack: ViewValue): {
     content: readonly ViewValue[]
     navigationBar: NavigationBar | null
+    bottomBar: BottomBar | null
+    /** The bars `.toolbar(.hidden, for:)` hides on the screen on top, as `HIDES` bits. */
+    hidden: number
   } {
     const stackId = stack.path ?? 'nav'
     const pushed = this.basePage ? [] : this.ctx.state.stack(stackId)
@@ -1709,7 +1799,9 @@ class Resolver {
       stringArg(explicitTitle?.args[0]?.value) ?? (depth === 0 ? titles[0]! : titles[depth]!)
 
     const backId = depth > 0 ? this.register(`${stackId}/back`, back) : null
-    const toolbar = this.resolveToolbar(screen, stackId)
+    // One walk finds the screen's toolbars and the bars it hides (Wave 4b).
+    const toolbars = toolbarsOf(screen)
+    const toolbar = this.resolveToolbar(toolbars.owners, stackId)
 
     // An untitled screen still needs a back button that says something, and "Back" is
     // what iOS itself falls back to.
@@ -1734,10 +1826,11 @@ class Resolver {
       ...(backId ? { back: backId } : {}),
       leading: backButton ? [backButton] : toolbar.leading,
       trailing: toolbar.trailing,
+      principal: toolbar.principal,
       view: {
         name: NAV_BAR,
         args: [{ label: 'title', value: { kind: 'string', value: title } }],
-        children: [...(backButton ? [backButton] : toolbar.leading), ...toolbar.trailing],
+        children: [...(backButton ? [backButton] : toolbar.leading), ...toolbar.principal, ...toolbar.trailing],
         modifiers: visualModifiers(stack),
         action: null,
         span: stack.span,
@@ -1748,9 +1841,13 @@ class Resolver {
     // A bar with nothing in it is not drawn. A toolbar counts as something in it, or
     // a screen whose only chrome is a trailing button would lose that button.
     const hasChrome =
-      title.length > 0 || depth > 0 || toolbar.leading.length > 0 || toolbar.trailing.length > 0
+      title.length > 0 || depth > 0 || toolbar.leading.length > 0 || toolbar.trailing.length > 0 || toolbar.principal.length > 0
+    const bottomBar: BottomBar | null = toolbar.bottom.length && !(toolbars.hidden & HIDES.bottomBar) ? {
+      items: toolbar.bottom,
+      view: { name: BOTTOM_BAR, args: [], children: toolbar.bottom, modifiers: visualModifiers(stack), action: null, span: stack.span, path: `${stackId}/bottom` },
+    } : null
 
-    return { content: screen, navigationBar: hasChrome && !hidesNavigationBar(screen) ? bar : null }
+    return { content: screen, navigationBar: hasChrome && !(toolbars.hidden & HIDES.navigationBar) ? bar : null, bottomBar, hidden: toolbars.hidden }
   }
 
   /**
@@ -1782,42 +1879,43 @@ class Resolver {
     return value ? builderFor(value, screen) : null
   }
 
-  private resolveToolbar(
-    screen: readonly ViewValue[],
-    stackId: string,
-  ): { leading: ViewValue[]; trailing: ViewValue[] } {
-    // The toolbar with items: `.toolbar(.hidden, for: .navigationBar)` is a toolbar
-    // modifier too, and taking it first lost the items written beside it.
-    const owner = [...allModifiers(screen)].find(({ modifier }) => modifier.name === 'toolbar' && modifier.closure)
-    const toolbar = owner?.modifier
-    if (!toolbar?.closure) return { leading: [], trailing: [] }
-
-    const items = this.ctx.build(toolbar.closure, [], toolbar.environment, 'Toolbar')
-    const leading: ViewValue[] = []
-    const trailing: ViewValue[] = []
-
-    items.forEach((item, index) => {
-      // `ToolbarItem(placement:)` wraps its content; a bare view is a trailing item.
-      const placement = tokenName(labelled(item.args, 'placement'))
-      // Unsupported placements must not appear as unrelated navigation actions.
-      if (placement && ['keyboard', 'bottomBar', 'principal'].includes(placement)) return
-      const contents = item.name === 'ToolbarItem' || item.name === 'ToolbarItemGroup'
-        ? item.children
-        : [item]
-
-      const bucket = placement && LEADING_PLACEMENTS.has(placement) ? leading : trailing
-      contents.forEach((content, inner) => {
-        bucket.push(this.stamp(inheritVisualStyle(content, visualModifiers(owner!.view)), `${stackId}/tb-${index}-${inner}`))
-      })
-    })
-
-    return { leading: this.attachPushIntents(leading, stackId), trailing: this.attachPushIntents(trailing, stackId) }
+  /**
+   * A screen's toolbar items, by where each is drawn. iOS merges every `.toolbar` written on the
+   * screen (Wave 4b), so each is built in turn, its items numbered on from the one before's. A
+   * place with no items allocates nothing, as most screens have no principal or bottom bar.
+   */
+  private resolveToolbar(owners: readonly ToolbarOwner[], stackId: string): Toolbar {
+    if (!owners.length) return NO_TOOLBAR
+    let leading: ViewValue[] | undefined, trailing: ViewValue[] | undefined, principal: ViewValue[] | undefined, bottom: ViewValue[] | undefined
+    let index = 0
+    for (const { view, modifier } of owners) {
+      const style = visualModifiers(view)
+      for (const item of toolbarItemsIn(this.ctx.build(modifier.closure!, [], modifier.environment, 'Toolbar'))) {
+        const at = index++
+        // `ToolbarItem(placement:)` wraps its content; a bare view is a trailing item.
+        const placement = tokenName(labelled(item.args, 'placement'))
+        // The keyboard's bar is up only while a field is being typed in, which a preview never is.
+        if (placement === 'keyboard') continue
+        const contents = item.name === 'ToolbarItem' || item.name === 'ToolbarItemGroup' ? item.children : [item]
+        const bucket = placement === 'principal' ? principal ??= [] : placement === 'bottomBar' ? bottom ??= []
+          : placement && LEADING_PLACEMENTS.has(placement) ? leading ??= [] : trailing ??= []
+        contents.forEach((content, inner) => {
+          bucket.push(this.stamp(inheritVisualStyle(content, style), `${stackId}/tb-${at}-${inner}`))
+        })
+      }
+    }
+    return {
+      leading: leading ? this.attachPushIntents(leading, stackId) : NO_VIEWS,
+      trailing: trailing ? this.attachPushIntents(trailing, stackId) : NO_VIEWS,
+      principal: principal ? this.attachPushIntents(principal, stackId) : NO_VIEWS,
+      bottom: bottom ? this.attachPushIntents(bottom, stackId) : NO_VIEWS,
+    }
   }
 
   /** Every item a screen's toolbar holds, for finding a link pushed from it. */
-  private toolbarItems(screen: readonly ViewValue[], stackId: string): ViewValue[] {
-    const { leading, trailing } = this.resolveToolbar(screen, stackId)
-    return [...leading, ...trailing]
+  private toolbarItems(screen: readonly ViewValue[], stackId: string): readonly ViewValue[] {
+    const toolbar = this.resolveToolbar(toolbarsOf(screen).owners, stackId)
+    return toolbarViews(toolbar, toolbar.bottom)
   }
 
   // ----------------------------------------------------------------- tabs
@@ -1948,8 +2046,8 @@ class Resolver {
 
       // An alert's `presenting:` data is what it shows, and one with none is not up.
       const data = labelled(modifier.args, 'presenting')
-      const shown = [itemValue, data].find(value => value !== undefined && value.kind !== 'nil')
-      const forced = this.forced && sameSpan(modifier.span, this.forced)
+      const forced = this.forced && sameSpan(modifier.span, this.forced.span)
+      const shown = forced && this.forced!.value ? this.forced!.value : [itemValue, data].find(value => value !== undefined && value.kind !== 'nil')
       if (this.forced && !forced) continue
       if (!forced && !(presentedValue ? truthy(presentedValue) && (!data || shown) : shown)) continue
 
@@ -1961,7 +2059,8 @@ class Resolver {
         : null
 
       const path = `${view.path ?? 'v'}/${modifier.name}`
-      const built = modifier.closure
+      const built = forced && this.forced!.views ? this.forced!.views
+        : modifier.closure
         ? this.ctx.build(
             modifier.closure,
             shown ? [shown] : [],
@@ -1999,7 +2098,7 @@ class Resolver {
       const tabs = findView(overlayViews, 'TabView')
       const tabbed = tabs ? this.resolveTabs(tabs) : { content: overlayViews, tabBar: null }
       const nav = findView(tabbed.content, 'NavigationStack') ?? findView(tabbed.content, 'NavigationView')
-      const resolved = nav ? this.resolveNavigation(nav) : { content: tabbed.content, navigationBar: null }
+      const resolved = nav ? this.resolveNavigation(nav) : { content: tabbed.content, navigationBar: null, bottomBar: null, hidden: 0 }
       const around = containersAbove(overlayViews, tabs, tabbed.content, nav)
       this.notDrawn.push(
         ...(tabs ? notDrawnAround(overlayViews, tabs) : []),
@@ -2017,7 +2116,11 @@ class Resolver {
         background: collectModifier(overlayViews, 'presentationBackground')?.args[0]?.value,
         backgroundInteraction: backgroundInteractionOf(overlayViews),
         ...(kind === 'dialog' && view.intent && view.path ? { anchorId: handlerIdFor(view.path) } : {}),
-        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content, this.ctx.state.openMenu()), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content, searchAround) },
+        screen: {
+          content: resolved.content, navigationBar: resolved.navigationBar, bottomBar: resolved.bottomBar,
+          overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content, this.ctx.state.openMenu()),
+          tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content, searchAround),
+        },
         ...(legacy ? this.alertWords(legacy, path) : this.wordsOf(kind, modifier, shown, path)),
         dismiss,
         dismissId,
@@ -2431,15 +2534,71 @@ function modifiersFor(views: readonly ViewValue[], around: readonly ViewValue[])
 }
 
 /**
- * `.toolbar(.hidden, for: .navigationBar)` anywhere on the screen, as SwiftUI reads it:
- * the screen is drawn without its bar. Written with no bar, it is the navigation bar.
+ * A toolbar's items, with a `Group`'s taken out of it: what a `@ToolbarContentBuilder` property
+ * or function of several items gives, and `Group { … }` among the items (Wave 4b).
  */
-function hidesNavigationBar(screen: readonly ViewValue[]): boolean {
-  return [...allModifiers(screen)].some(({ modifier }) => {
-    if (modifier.name !== 'toolbar' || modifier.closure || tokenName(modifier.args[0]?.value) !== 'hidden') return false
-    const bars = modifier.args.slice(1).map((arg) => tokenName(arg.value))
-    return bars.length === 0 || bars.includes('navigationBar')
-  })
+function toolbarItemsIn(views: readonly ViewValue[]): readonly ViewValue[] {
+  return views.some(view => view.name === 'Group') ? views.flatMap(view => view.name === 'Group' ? toolbarItemsIn(view.children) : [view]) : views
+}
+
+/** A `.toolbar { … }` with items, and the view it is written on (Wave 4b). */
+interface ToolbarOwner {
+  readonly view: ViewValue
+  readonly modifier: ModifierValue
+}
+
+/** What a screen's `.toolbar` modifiers say: the toolbars with items, and the bars hidden as `HIDES` bits (Wave 4b). */
+interface Toolbars {
+  readonly owners: ToolbarOwner[]
+  hidden: number
+}
+
+/** A screen's with none, shared. Never written to: `toolbarsOf` makes its own before it adds anything. */
+const NO_TOOLBARS: Toolbars = { owners: [], hidden: 0 }
+
+/**
+ * Every `.toolbar` on a screen, in one walk (Wave 4b). iOS merges every toolbar with items, a
+ * view's own after those of the views inside it, as its modifiers wrap them; and
+ * `.toolbar(.hidden, for:)` anywhere on the screen hides that bar. A screen with none is
+ * `NO_TOOLBARS`, so most allocate nothing here.
+ */
+function toolbarsOf(views: readonly ViewValue[], found: Toolbars = NO_TOOLBARS): Toolbars {
+  for (const view of views) {
+    found = toolbarsOf(view.children, found)
+    for (const modifier of view.modifiers) {
+      if (modifier.name !== 'toolbar') continue
+      if (found === NO_TOOLBARS) found = { owners: [], hidden: 0 }
+      if (modifier.closure) found.owners.push({ view, modifier })
+      else found.hidden |= hiddenBars(modifier)
+    }
+  }
+  return found
+}
+
+/** The bars hidden by `.toolbar(.hidden, for:)` among a view's own modifiers, as `HIDES` bits (Wave 4b). */
+function hiddenBy(modifiers: readonly ModifierValue[]): number {
+  let hidden = 0
+  for (const modifier of modifiers) if (modifier.name === 'toolbar' && !modifier.closure) hidden |= hiddenBars(modifier)
+  return hidden
+}
+
+/** One bit for each bar the preview hides (`HIDDEN_BARS`), in that list's order (Wave 4b). */
+const HIDES = { navigationBar: 1 << HIDDEN_BARS.indexOf('navigationBar'), bottomBar: 1 << HIDDEN_BARS.indexOf('bottomBar'), tabBar: 1 << HIDDEN_BARS.indexOf('tabBar') }
+
+/**
+ * The bars one `.toolbar(.hidden, for: …)` hides, as `HIDES` bits, as SwiftUI reads it. Written
+ * with no bar, it is the navigation bar. A bar the preview doesn't hide, the checker warns of
+ * (Wave 4b).
+ */
+function hiddenBars(modifier: ModifierValue): number {
+  if (tokenName(modifier.args[0]?.value) !== 'hidden') return 0
+  if (modifier.args.length === 1) return HIDES.navigationBar
+  let hidden = 0
+  for (let i = 1; i < modifier.args.length; i++) {
+    const bar = HIDDEN_BARS.indexOf(tokenName(modifier.args[i]!.value) ?? '')
+    if (bar >= 0) hidden |= 1 << bar
+  }
+  return hidden
 }
 
 function* allModifiers(

@@ -4,10 +4,11 @@ import { useState } from 'react'
 import { LAYOUT_WORDS, stackLayoutOf, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type DesignValue, type PreviewInput, type PreviewScenario, type ResourceOperation, type SharedStyle, type SourceSpan, type StateInput } from '@studio/shared'
 import { canRename, describeScreen, screenRemovalRefusal, type DesignScreenNode, type DesignTree } from '../../lib/designTree'
 import type { ScreenCommand } from '../../lib/screens'
-import { screenOverrideModifier, screenRoot, screenTitleControl, scenarioKey, scenarioScreen, lacksNavigationBar } from '../../lib/screens'
+import { screenOverrideModifier, screenRoot, scenarioKey, scenarioScreen } from '../../lib/screens'
+import { PAGE_KINDS } from '../../lib/pageKinds'
 import { describeState, stateSuggestions } from '../../lib/screenStates'
-import { PropertyControl } from '../PropertyControl'
 import { TokenField, valueFields } from './TokenField'
+import { BarsSection, SheetSection } from './ScreenBars'
 import { Icon } from '../ui/Icon'
 import styles from './Settings.module.css'
 
@@ -62,7 +63,6 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
   // A screen written inside another opens at its own code, not the view holding it.
   const code = definition?.source ?? screen.page.source
   const root = screenRoot(snapshot, definition)
-  const title = screenTitleControl(snapshot, definition)
   const presentation = describeScreen(screen, tree)
   // A `#Preview` is drawn on its own, with no screen's settings or states (Wave 3b).
   const preview = screen.presentation === 'preview'
@@ -78,13 +78,12 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
       {!screen.view && <p className={styles.note}>{preview ? 'A #Preview has no settings of its own here. Open it in Code to change it.' : 'This screen is written inside another screen’s code, so it has no settings of its own here. Open it in Code to change it.'}</p>}
       {screen.shared && <p className={styles.note}>Its view draws other screens too, so it is named by its title.</p>}
       {canRename(screen) && <div className={styles.row}><label htmlFor="screen-name">Name</label><input id="screen-name" aria-label="Screen name" maxLength={100} value={name} disabled={busy} onChange={event => setName(event.target.value)} onBlur={() => { if (name.trim() && name !== screen.name) void run(onScreenCommand({ kind: 'rename', view: screen.view!, name })) }} onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); if (event.key === 'Escape') setName(screen.name) }} /></div>}
-      {title ? <PropertyControl key={`${title.node.id}:${title.control.value}`} control={title.control} label="Title" onChange={(id, value) => onNodeChange(title.node, id, value)} />
-        : root && <p className={styles.note}>{lacksNavigationBar(snapshot, root)
-          ? 'This screen has no navigation bar here, so a title would not show.'
-          : 'No title bar title. Add a Title modifier to the screen’s first view to show one.'}</p>}
       {background && root && <TokenField field={background} label="Background" tokens={tokens} busy={busy} onChange={(id, value) => onNodeChange(root, id, value)} onCommand={resource(root)} />}
       {root && <button type="button" className={styles.button} onClick={() => onSelect(root)}>Edit {rootLabel(root)} settings</button>}
     </section>
+    {/* How a sheet is presented is set where it is opened, whichever view it shows (Wave 4b). */}
+    {PAGE_KINDS[screen.presentation].once && <SheetSection snapshot={snapshot} kind={screen.presentation} source={screen.page.source} onNodeChange={onNodeChange} onReveal={onReveal} />}
+    {!preview && <BarsSection snapshot={snapshot} definition={definition} root={root} busy={busy} onNodeChange={onNodeChange} onNodeCommand={onNodeCommand} onSelect={onSelect} />}
     {root && <section className={styles.section} aria-label="Overrides">
       <div className={styles.sectionHeader}><h3>Overrides</h3></div>
       <p className={styles.note}>Replace an App value on this screen only. Everything on the screen inherits it.</p>

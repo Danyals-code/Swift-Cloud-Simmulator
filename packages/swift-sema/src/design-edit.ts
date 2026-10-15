@@ -2,12 +2,12 @@ import { customizeCard, editsCardSurface } from './authoring-card'
 import { followCorners } from './authoring-border'
 import { editModifier, isRow } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
-import { PRESENTATION_PARTS, VIEW_PARTS, argumentLayerProblem, canvasDropProblem, deploymentVersion, isHelperDefinition, type AuthoringNode, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
+import { PRESENTATION_PARTS, TOOLBAR_CONTENT, VIEW_PARTS, argumentLayerProblem, canvasDropProblem, deploymentVersion, isHelperDefinition, isNonView, type AuthoringNode, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
 import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, viewSiteAt, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { removeHelper } from './authoring-helpers'
 import { modifierArgumentProblem, structuralEditProblem, type StructuralKind } from './structural-check'
-import { applyPatches, lineIndent, namedStruct, type FeatureContext } from './authoring-context'
+import { applyPatches, layerById, lineIndent, namedStruct, type FeatureContext } from './authoring-context'
 import { pastedValues } from './authoring-clipboard'
 import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
 import { liveControl } from './authoring-behavior'
@@ -20,11 +20,12 @@ import { callAt, layerContext, layerProject, writeLayer } from './layer'
 /** The operations that act on a view's whole statement - its place, its copies, whether it is there at all - as the structural check knows them. */
 const STRUCTURAL: Partial<Record<DesignEditRequest['operation']['kind'], StructuralKind>> = { delete: 'delete', move: 'move', moveTo: 'moveTo', insert: 'insert', paste: 'insert', hide: 'hide', show: 'show', 'layer-duplicate': 'duplicate', 'layer-wrap': 'wrap', 'layer-reparent': 'reparent', 'make-tappable': 'wrap' }
 
-/** What a toolbar takes besides views: one that holds any of these takes nothing else (Wave 4a). */
-const TOOLBAR_CONTENT: ReadonlySet<string> = new Set(['ToolbarItem', 'ToolbarItemGroup', 'ToolbarSpacer', 'DefaultToolbarItem', 'ToolbarTitleMenu'])
+/** The operations only a view takes (Wave 4b): a layer, a modifier, a tap, a transition, a wrapper or being a component, which what is no view (`isNonView`) is refused. */
+const VIEW_ONLY: ReadonlySet<DesignEditRequest['operation']['kind']> = new Set(['layer-set', 'modifier-add', 'make-tappable', 'behavior', 'guided-action', 'bind-state', 'transition', 'card-customize', 'extract-component', 'make-component', 'layer-wrap'])
+
 /** Whether what is listed under `layer` is toolbar items, Apple's or the project's own, rather than views. */
 function holdsToolbarItems(ctx: FeatureContext, layer: AuthoringNode | undefined): boolean {
-  return !!layer && ctx.nodes.some(n => n.parentId === layer.id && (TOOLBAR_CONTENT.has(n.name) || n.kind === 'component' && !!namedStruct(ctx, n.name)?.inherits.some(t => t.name === 'ToolbarContent' || t.name === 'CustomizableToolbarContent')))
+  return !!layer && layer.children.some(id => { const n = layerById(ctx, id); return !!n && (TOOLBAR_CONTENT.has(n.name) || n.kind === 'component' && !!namedStruct(ctx, n.name)?.inherits.some(t => t.name === 'ToolbarContent' || t.name === 'CustomizableToolbarContent')) })
 }
 
 /** Plans against an immutable source revision. Commit must compare the whole project again. */
@@ -71,6 +72,8 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       return finish(request.files.map(f => f.id === file.id ? { ...f, text: removed.text } : f), { file: file.id, offset: removed.offset })
     } catch (error) { return reject(error instanceof Error ? error.message : 'This helper could not be removed. Remove it in Code.') }
   }
+  // What is no view, a toolbar's item, takes nothing that would write a modifier or a wrapper on it (Wave 4b).
+  if (node && isNonView(node) && VIEW_ONLY.has(operation.kind)) return reject(`${node.name} is part of the ${node.name.startsWith('Toolbar') ? 'toolbar' : 'app'}, not a view, so it takes none of a view’s settings. Select the view inside it.`)
   // A run of texts joined with `+` takes only what keeps a Text a Text (Wave 3a).
   if (node?.textRun && (operation.kind === 'make-component' || operation.kind === 'extract-component')) return reject('Part of joined text stays a Text in its sum. Make the whole text a component instead.')
   if (node && operation.kind.startsWith('modifier-')) {
@@ -80,7 +83,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       const shadowToken = model.styles?.find(style => style.kind === 'shadow' && style.form === 'token')?.name
       // A border takes the view's new corners in the same step (D8).
       const byId = (id: string | undefined) => model.nodes.find(n => n.id === id)
-      const text = followCorners(file.text, editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget, { shadowToken, row: isRow(node, byId) }), file.id, node.source.start)
+      const text = followCorners(file.text, editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget, { shadowToken, row: isRow(node, byId), presented: node.presented }), file.id, node.source.start)
       return finish(request.files.map(f => f.id === file.id ? { ...f, text } : f), { file: file.id, offset: node.source.start })
     } catch (error) { return reject(error instanceof Error ? error.message : 'This modifier change could not be planned.') }
   }
@@ -191,7 +194,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           parent = model.nodes.find(candidate => candidate.id === parent!.parentId)
         }
         // A screen pushed onto a stack is on it already: a second stack would nest in it (D13).
-        if (isLink && !hasNavigation && !insideNavigationStack(model.nodes, node!)) {
+        if (isLink && !hasNavigation && !insideNavigationStack(context, node!)) {
           if (deploymentVersion(request.deploymentTarget) < 16) return reject('Adding a navigation screen requires iOS 16 or later.')
           if (root.source.file !== file.id || root.kind !== 'view' || !parent || !['definition', 'branch'].includes(parent.kind)) return reject('Select a view within the screen before adding a navigation link.')
           // A modifier switched off at the end of the root's chain is written after it, and goes inside with it.

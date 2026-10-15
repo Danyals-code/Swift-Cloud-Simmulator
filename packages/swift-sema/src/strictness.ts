@@ -695,11 +695,12 @@ class StrictnessLinter {
    *
    * Restricted to plain `func`s with a multi-statement body and no `return` anywhere:
    * a result builder (`var body: some View`) legitimately has neither, so computed
-   * properties and `@ViewBuilder` functions are excluded rather than special-cased.
+   * properties and `@ViewBuilder` functions are excluded rather than special-cased, and so
+   * are `@ToolbarContentBuilder` ones, which build a toolbar's items the same way (Wave 4b).
    */
   private missingReturn(decl: FuncDecl): void {
     if (!decl.returnType || !decl.body) return
-    if (decl.attributes.some((a) => a.name === 'ViewBuilder')) return
+    if (decl.attributes.some((a) => a.name === 'ViewBuilder' || a.name === 'ToolbarContentBuilder')) return
     if (decl.body.statements.length <= 1) return
     if (containsReturn(decl.body)) return
 

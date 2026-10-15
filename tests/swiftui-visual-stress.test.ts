@@ -40,7 +40,7 @@ describe.each(configurations)('visual checklist: %s / %s / %s', (device, scheme,
     if (expectedText) expect(text(result), problems(result)).toContain(expectedText)
     if (name.startsWith('gauge-')) expect(nodes(result).some(n => n.shape?.shape === 'spinner')).toBe(false)
     if (name === 'alert-fields') expect(nodes(result).filter(n => n.hitTarget?.role === 'textField')).toHaveLength(2)
-    if (name.startsWith('toolbar-')) expect(text(result)).not.toContain('Extra')
+    if (name === 'toolbar-keyboard') expect(text(result)).not.toContain('Extra')
   })
 })
 

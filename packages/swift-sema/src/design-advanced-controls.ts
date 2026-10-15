@@ -25,7 +25,7 @@ export function materialThickness(value: Expr): string | undefined {
   if (!value.base) return MATERIALS.find(thickness => value.member === thickness + 'Material')
   return value.base.kind === 'identifier' && value.base.name === 'Material' && MATERIALS.includes(value.member) ? value.member : undefined
 }
-export type AddControl = (id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description?: string, origin?: SourceSpan, disabledReason?: string, problem?: ControlRecipe['problem']) => void
+export type AddControl = (id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description?: string, origin?: SourceSpan, disabledReason?: string, problem?: ControlRecipe['problem'], placeholder?: string) => void
 export type ReplaceControl = (id: string, label: string, value: Expr, kind: ControlKind, options?: readonly string[], min?: number, max?: number, prefix?: string) => void
 /** Literal-only editors. Existing expressions, comments, bindings and linked tokens remain owned by their source. */
 export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers: readonly CallExpr[], text: string, target: number, colors: readonly string[], add: AddControl, replace: ReplaceControl, byId?: (id: string | undefined) => AuthoringNode | undefined): void {

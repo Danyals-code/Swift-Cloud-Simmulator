@@ -34,6 +34,20 @@ beside a view at the screen's edge or bottom, an action tinted from around its l
 list rows with a background, insets and a tinted separator. `tooling/capture-ios27.mjs`
 takes the fixture as an argument, and its screen names as the states to capture.
 
+16 more in the same folder, paired with `tests/fixtures/ios27-system-ui-4b.swift`, measure
+what Wave 4b draws. They cover:
+- a `.principal` item in place of an inline title, and above a large one;
+- a bottom bar split by a `Spacer`, two items sharing one capsule, and the bar beside a tab
+  bar of two tabs and under one of four;
+- a search field beside a bottom bar, folded away until the list is pulled down;
+- a tab bar hidden from its tab;
+- `ContentUnavailableView.search(text:)`, `.search`, and the closure form with actions;
+- sheets at the medium detent, at medium and large, at `.height(200)` with a grabber, and
+  with their own background and corner radius, each up over the screen that opens it.
+
+Every sheet is up at launch, so only the pulled-down search needed a gesture.
+`tests/system-ui-bars.test.ts` cites these.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh

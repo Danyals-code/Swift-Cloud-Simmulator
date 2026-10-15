@@ -171,7 +171,7 @@ export function guidedAction(ctx: FeatureContext, node: AuthoringNode, operation
     while (ancestor && ancestor.kind !== 'definition') {
       root = ancestor; ancestor = context.nodes.find(n => n.id === ancestor!.parentId)
     }
-    if (!insideNavigationStack(context.nodes, current)) {
+    if (!insideNavigationStack(context, current)) {
       if (root.kind !== 'view' || deploymentVersion(ctx.deploymentTarget) < 16) throw new Error('This screen needs a navigation container, which this project’s iOS version is too old for. Ask a developer to raise it to iOS 16 or newer.')
       // Insert at either boundary so the selected node remains identifiable. A modifier
       // switched off at the end of the root's chain is written after it, and goes inside with it.

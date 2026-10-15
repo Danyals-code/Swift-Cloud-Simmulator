@@ -3,7 +3,7 @@
 import { SymbolPicker } from './SymbolPicker'
 import { GuidedInteraction } from './GuidedInteraction'
 import { useState } from 'react'
-import { isHelperDefinition, offersWhenTapped, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type ComponentDescription, type ComponentVariant, type BehaviorAction, type DesignRecord, type DesignValue, type RecordField, type PreviewInput, type NavigationDestination } from '@studio/shared'
+import { isHelperDefinition, isNonView, offersWhenTapped, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type ComponentDescription, type ComponentVariant, type BehaviorAction, type DesignRecord, type DesignValue, type RecordField, type PreviewInput, type NavigationDestination } from '@studio/shared'
 import { defaultRecord, RecordEditor } from './RecordEditor'
 import { parseRecordDrafts } from '../lib/recordDrafts'
 import { newValueDefaults } from '../lib/newValue'
@@ -107,7 +107,7 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
     {/* Components are made from the copies a designer already has, so the flow
         starts by finding them rather than by asking for a name. */}
     {/* A run of joined text stays a Text in its sum, which a component's call would not be (Wave 3a). */}
-    {section === 'basics' && ['view', 'component'].includes(node.kind) && node.name !== 'WindowGroup' && !node.textRun && (onFindCopies
+    {section === 'basics' && ['view', 'component'].includes(node.kind) && !isNonView(node) && !node.textRun && (onFindCopies
       ? <MakeComponent node={node} busy={busy} nudge={pasteNudge} onDismissNudge={onDismissNudge} onFind={onFindCopies} onShow={copy => { const found = snapshot?.nodes.find(n => n.id === copy.id); if (found) onSelect?.(found) }} onMake={async (componentName, copies, names) => {
           if (!onCommand) return 'Select a view first.'
           setBusy(true)

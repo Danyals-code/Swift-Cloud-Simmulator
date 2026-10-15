@@ -1,6 +1,6 @@
 import type { AuthoringModifier, ModifierCatalogEntry } from './authoring-modifiers'
 import type { SharedStyle, StyleProperty } from './design-resources'
-import type { AppNavigationModel, CollectionSettings, ComponentSettings, BehaviorSettings, NavigationSettings, StateInput } from './authoring-features'
+import type { AppNavigationModel, CollectionSettings, ComponentSettings, BehaviorSettings, NavigationSettings, ScreenBars, StateInput } from './authoring-features'
 import type { Diagnostic } from './diagnostics'
 import type { SourceFile } from './protocol'
 import type { SourceSpan } from './source'
@@ -48,6 +48,13 @@ export interface AuthoringNode {
   readonly component?: ComponentSettings
   readonly behavior?: BehaviorSettings
   readonly navigation?: NavigationSettings
+  /** On a screen's definition (Wave 4b): its title, toolbar items and search field, for the Bars section of Screen settings. */
+  readonly bars?: ScreenBars
+  /**
+   * Set on the one view a `.sheet`, `.popover` or `.fullScreenCover` closure shows (Wave 4b),
+   * which carries its Sheet settings: how it is presented, a popover as a sheet as an iPhone shows it.
+   */
+  readonly presented?: 'sheet' | 'cover'
   readonly fields?: readonly string[]
   readonly extraction?: { readonly allowed: boolean; readonly reason: string }
   /**

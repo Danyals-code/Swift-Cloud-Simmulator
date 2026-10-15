@@ -138,6 +138,8 @@ const CONTENT_CLOSURE_LABELS: ReadonlyMap<string, ReadonlySet<string>> = new Map
   ['Gauge', new Set(['currentValueLabel', 'minimumValueLabel', 'maximumValueLabel'])],
   ['ProgressView', new Set(['label', 'currentValueLabel'])],
   ['Slider', new Set(['label', 'minimumValueLabel', 'maximumValueLabel'])],
+  // `ContentUnavailableView { Label(…) } description: { … } actions: { … }`: the label is its content (Wave 4b).
+  ['ContentUnavailableView', new Set(['description', 'actions'])],
 ])
 
 /**
@@ -1110,6 +1112,11 @@ export class SwiftUIHost implements InterpreterHost {
 
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
     call = withTitleText(TITLED_MODIFIERS.has(member), call)
+    // `ContentUnavailableView.search(text: query)`: the stock search empty state, which says
+    // what was searched for (Wave 4b). Without this the screen stopped on an unknown member.
+    if (target.kind === 'type' && target.name === 'ContentUnavailableView' && member === 'search' && !this.declaresType?.(target.name)) {
+      return view({ name: target.name, args: toArgs(call).filter(arg => arg.label === 'text'), children: [], modifiers: [], action: null, span: call.span })
+    }
     if (target.kind === 'type' && (target.name === 'Gradient' && member === 'Stop' || target.name === 'Gradient.Stop' && member === 'init')) return this.gradientStop(call)
     // `Edge.Set([.top, .leading])` and `Edge.Set(.top)` are the set they are given.
     if (target.kind === 'type' && (target.name === 'Edge' && member === 'Set' || target.name === 'Edge.Set' && member === 'init')) return call.args[0]?.value ?? { kind: 'array', elements: [] }

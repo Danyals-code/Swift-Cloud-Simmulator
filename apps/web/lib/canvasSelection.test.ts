@@ -165,6 +165,16 @@ it('picks on every screen the canvas draws, never the screen itself (D1)', () =>
   expect(named(canvasPick(layers, under(home.tree, 'Home'), 'click'))).toBe('Text Home')
 })
 
+it('picks a sheet’s views on its page, drawn over the screen that opens it, and nothing of that screen behind it (Wave 4b)', () => {
+  const result = run('NavigationStack { VStack { Text("Home"); Button("Compose") { composing = true }; Spacer() }.sheet(isPresented: $composing) { ComposeScreen().presentationDetents([.medium]) } }', 'struct ComposeScreen: View { var body: some View { VStack { Text("Draft title"); HStack { Text("Left"); Text("Right") } } } }', '@State private var composing = false', true)
+  const sheet = result.pages!.find(page => page.kind === 'sheet')!
+  const layers = { snapshot: result.authoring!, layers: result.pages!.flatMap(page => page.viewHierarchy ?? []) }
+  expect(named(canvasPick(layers, under(sheet.tree, 'Draft title'), 'click'))).toBe('Text Draft title')
+  expect(named(canvasPick(layers, under(sheet.tree, 'Right'), 'click'))).toBe('HStack Row')
+  // The screen is drawn behind it, dimmed, and is no screen of this page's to pick from.
+  expect(canvasPick(layers, under(sheet.tree, 'Home'), 'click')).toBeUndefined()
+})
+
 it('finds a link card under its tap target, so a row is picked at the depth gone into (D1)', () => {
   const result = run(`NavigationStack { VStack {
   Text("Library")

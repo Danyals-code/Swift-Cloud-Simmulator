@@ -40,14 +40,15 @@ describe('the note an empty Screens list shows', () => {
  * that other screen: named after it, merged with it, and edited in its place.
  */
 describe('the screens the Design panel lists', () => {
-  function screensOf(declarations: string, saved: readonly DesignScreen[] = []) {
+  function drawnWith(declarations: string, saved: readonly DesignScreen[] = []) {
     resetPipelineState()
     setFontMetrics([])
     const text = `import SwiftUI\n@main struct DemoApp: App { var body: some Scene { WindowGroup { HomeScreen() } } }\n${declarations}`
     const result = compile({ files: [{ id: 'App.swift', text }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1, allPages: true, designScreens: saved })
     expect(result.diagnostics).toEqual([])
-    return designTree(result.pages, result.authoring, screenCatalog(result.authoring, result.pages, saved))
+    return { pages: result.pages!, tree: designTree(result.pages, result.authoring, screenCatalog(result.authoring, result.pages, saved)) }
   }
+  const screensOf = (declarations: string, saved: readonly DesignScreen[] = []) => drawnWith(declarations, saved).tree
 
   it('names a screen written inside another after its own title, and gives it no view to act on', () => {
     const tree = screensOf(`struct HomeScreen: View {
@@ -60,7 +61,7 @@ describe('the screens the Design panel lists', () => {
     expect(home.children.map((screen) => [screen.name, screen.view])).toEqual([['Settings', undefined]])
   })
 
-  it('lists each sheet written inside a screen on its own', () => {
+  it('lists each sheet written inside a screen under the screen it is shown over (Wave 4b)', () => {
     const tree = screensOf(`struct HomeScreen: View {
   @State private var filtering = false
   @State private var sharing = false
@@ -73,7 +74,8 @@ describe('the screens the Design panel lists', () => {
     }
   }
 }`)
-    expect(tree.sheets.map(({ screen }) => [screen.name, screen.view])).toEqual([['Filters', undefined], ['Share', undefined]])
+    expect(tree.lanes[0]!.root.children.map(screen => [screen.name, screen.view, screen.presentation])).toEqual([['Filters', undefined, 'sheet'], ['Share', undefined, 'sheet']])
+    expect(tree.covers).toEqual([])
   })
 
   it('names each screen a view draws after its own title, and marks them as sharing it, so neither is renamed for both', () => {
@@ -125,8 +127,8 @@ struct ItemList: View {
     expect(tree.lanes.map(({ root }) => [root.name, root.view])).toEqual([['Inbox', undefined], ['Sent', undefined]])
   })
 
-  it('treats one sheet opened from two screens as one screen, which can be renamed', () => {
-    const tree = screensOf(`struct HomeScreen: View {
+  it('treats one sheet opened from two screens as one screen, which can be renamed, under the first that opens it', () => {
+    const { tree, pages } = drawnWith(`struct HomeScreen: View {
   @State private var editing = false
   var body: some View {
     NavigationStack {
@@ -143,7 +145,33 @@ struct MoreScreen: View {
 struct EditScreen: View {
   var body: some View { NavigationStack { Text("Form").navigationTitle("Edit") } }
 }`)
-    expect(tree.sheets.map(({ screen, openers }) => [screen.name, screen.view, screen.shared, openers.length])).toEqual([['Edit', 'EditScreen', undefined, 2]])
+    const home = tree.lanes[0]!.root
+    const [more, edit] = home.children
+    // Home opens it as it opens More, so Home is nearer the lane's start than More, which opens it a step further on.
+    expect(home.children.map(screen => [screen.name, screen.view, screen.shared, screen.presentation])).toEqual([['More', 'MoreScreen', undefined, 'destination'], ['Edit', 'EditScreen', undefined, 'sheet']])
+    expect(more!.children).toEqual([])
+    expect(edit!.openers).toEqual([home.id, more!.id])
+    expect(describeScreen(edit!, tree)).toBe('Sheet · shown over Home · also opened from More')
+    // The copy listed is the one the canvas draws.
+    expect(pageSlots(pages, undefined, page => page.view ?? page.id).map(slot => slot.page.id)).toContain(edit!.id)
+  })
+
+  it('keeps a full screen cover in the Sheets group, opened from every screen that opens it', () => {
+    const tree = screensOf(`struct HomeScreen: View {
+  @State private var playing = false
+  var body: some View {
+    NavigationStack {
+      Button("Play") { playing = true }
+        .navigationTitle("Home")
+        .fullScreenCover(isPresented: $playing) { PlayerScreen() }
+    }
+  }
+}
+struct PlayerScreen: View {
+  var body: some View { Text("Now playing") }
+}`)
+    expect(tree.covers.map(({ screen }) => [screen.name, screen.view, screen.presentation, screen.openers])).toEqual([['Player', 'PlayerScreen', 'cover', [tree.lanes[0]!.root.id]]])
+    expect(describeScreen(tree.covers[0]!.screen, tree)).toBe('Full screen · opened from Home')
   })
 })
 
@@ -168,11 +196,12 @@ describe('the way the Design panel opens to a screen', () => {
     expect(designScreenPath(tree, draft.id)).toEqual(['group:detached', draft.id])
   })
 
-  it('opens Sheets for a screen a sheet presents', () => {
-    const tree = treeOf('struct HomeScreen: View {\n  @State private var editing = false\n  var body: some View { Button("Edit") { editing = true }.sheet(isPresented: $editing) { EditScreen() } }\n}\nstruct EditScreen: View { var body: some View { Text("Edit") } }')
-    const edit = tree.sheets[0]!.screen
+  it('opens the screen a sheet is shown over, and Full screens for a full screen cover', () => {
+    const tree = treeOf('struct HomeScreen: View {\n  @State private var editing = false\n  @State private var playing = false\n  var body: some View { Button("Edit") { editing = true }.sheet(isPresented: $editing) { EditScreen() }.fullScreenCover(isPresented: $playing) { PlayerScreen() } }\n}\nstruct EditScreen: View { var body: some View { Text("Edit") } }\nstruct PlayerScreen: View { var body: some View { Text("Now playing") } }')
+    const home = tree.lanes[0]!.root, edit = home.children[0]!, player = tree.covers[0]!.screen
 
-    expect(designScreenPath(tree, edit.id)).toEqual(['group:sheets', edit.id])
+    expect(designScreenPath(tree, edit.id)).toEqual([home.id, edit.id])
+    expect(designScreenPath(tree, player.id)).toEqual(['group:covers', player.id])
   })
 })
 
@@ -315,9 +344,9 @@ struct DraftScreen: View { var body: some View { Text("Draft") } }
     expect(designScreens(tree).map(screen => [screen.name, describeScreen(screen, tree)])).toEqual([
       ['Home', 'The app starts here'],
       ['More', 'Pushed from Home'],
+      ['Compose', 'Sheet · shown over Home'],
       ['Delete the draft?', 'Alert · shown over Home'],
       ['Archive?', 'Confirmation dialog · shown over Home'],
-      ['Compose', 'Sheet · opened from Home'],
       ['Draft', 'Not linked yet · add Navigate to on a button to connect it'],
       ['Short', 'A #Preview · drawn on its own, not in the app'],
     ])

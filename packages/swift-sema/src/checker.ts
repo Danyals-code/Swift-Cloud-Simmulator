@@ -25,6 +25,7 @@ import {
   isKnownGlobal,
   isViewRoot,
   EXTENSIBLE_BUILTIN_TYPES,
+  HIDDEN_BARS,
   KNOWN_ATTRIBUTES,
   KNOWN_COLOR_NAMES,
   KNOWN_TYPES,
@@ -833,7 +834,9 @@ export class Checker {
         // the `.accentColor` modifier - a warning on correct code, which is the one
         // thing this checker must never produce.
         if (expr.callee.kind === 'memberAccess') {
-          const onAView = rootsInAView(expr.callee.base)
+          // Called on a view's type itself, it is a static member making that view,
+          // `ContentUnavailableView.search(text:)`, not a modifier (Wave 4b).
+          const onAView = expr.callee.base?.kind !== 'identifier' && rootsInAView(expr.callee.base)
           this.checkModifierCoverage(expr.callee.member, expr.callee.memberSpan, onAView)
           if (onAView) {
             this.checkArgumentLabels(expr.callee.member, expr.args)
@@ -967,7 +970,8 @@ export class Checker {
       if (callee.name === 'Link' || callee.name === 'ShareLink') reason = 'it is drawn, but tapping it opens nothing; opening URLs and the system share sheet are not implemented'
       if (callee.name === 'ToolbarItem' || callee.name === 'ToolbarItemGroup') {
         const placement = expr.args.find(arg => arg.label === 'placement')?.value
-        if (placement?.kind === 'memberAccess' && ['keyboard', 'bottomBar', 'principal'].includes(placement.member)) reason = `the .${placement.member} placement is not implemented; its controls are omitted`
+        // The keyboard's bar is up only while a field is typed in, which a preview never is.
+        if (placement?.kind === 'memberAccess' && placement.member === 'keyboard') reason = 'the .keyboard placement is not implemented; its controls are omitted'
       }
       if (callee.name === 'TimelineView') reason = 'the timeline runs only once, for the moment it is drawn, and does not advance its schedule'
       if (callee.name === 'ScrollViewReader') reason = 'what it holds is drawn, and scrollTo does not scroll the preview'
@@ -986,8 +990,8 @@ export class Checker {
     // they are as often written on a view of the project's own.
     if (callee.kind === 'memberAccess') {
       const hidden = callee.member === 'toolbar' && expr.args[0]?.label === null && expr.args[0].value.kind === 'memberAccess' && expr.args[0].value.member === 'hidden'
-      // The navigation bar is hidden; the others are not.
-      const bars = hidden ? expr.args.slice(1).flatMap((arg) => arg.value.kind === 'memberAccess' && arg.value.member !== 'navigationBar' ? [`.${arg.value.member}`] : []) : []
+      // The bars the preview hides are hidden (Wave 4b); the others are not.
+      const bars = hidden ? expr.args.slice(1).flatMap((arg) => arg.value.kind === 'memberAccess' && !HIDDEN_BARS.includes(arg.value.member) ? [`.${arg.value.member}`] : []) : []
       if (bars.length > 0) {
         feature = `.toolbar(.hidden, for: ${bars.join(', ')})`
         reason = 'it is not applied by the preview, so the bar still shows'

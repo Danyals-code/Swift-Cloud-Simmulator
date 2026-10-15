@@ -1,7 +1,7 @@
-import { MODIFIER_SLOTS, PRESENTATION_PARTS, authoringCapability, type AuthoringNode } from '@studio/shared'
-import type { CallExpr, Expr } from '@studio/swift-syntax'
+import { MODIFIER_SLOTS, PRESENTATION_PARTS, TOOLBAR_PLACEMENT_WORDS, authoringCapability, type AuthoringNode, type ToolbarPlacement } from '@studio/shared'
+import { Lexer, type CallExpr, type Expr } from '@studio/swift-syntax'
 import { buttonLabel, buttonRole, literalText, swiftString, symbolNameProblem, viewCallChain, type ControlKind, type ControlRecipe } from './design-controls'
-import type { AddControl, ReplaceControl } from './design-advanced-controls'
+import { type AddControl, type ReplaceControl } from './design-advanced-controls'
 import { indentAt } from './authoring-context'
 
 type Insert = (call: CallExpr, label: string | null, value: string, order?: readonly (string | null)[]) => ReturnType<ControlRecipe['patch']>
@@ -10,6 +10,40 @@ const anchors = ['center', 'topLeading', 'top', 'topTrailing', 'leading', 'trail
 const vertical = ['top', 'center', 'bottom', 'firstTextBaseline', 'lastTextBaseline']
 const gradients = ['LinearGradient', 'RadialGradient', 'AngularGradient']
 const literalNumber = (expr: Expr, text: string) => ['integerLiteral', 'floatLiteral', 'unary'].includes(expr.kind) && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text.slice(expr.span.start, expr.span.end)) ? Number(text.slice(expr.span.start, expr.span.end)) : undefined
+
+/** Each placement Bars sets, as Swift writes it (Wave 4b). `navigationBarLeading` and its pair are older names for the bar's sides. */
+export const TOOLBAR_PLACEMENTS: Readonly<Record<ToolbarPlacement, string>> = { leading: 'topBarLeading', trailing: 'topBarTrailing', principal: 'principal', bottom: 'bottomBar', automatic: 'automatic' }
+const PLACEMENT_NAMES = Object.keys(TOOLBAR_PLACEMENTS) as ToolbarPlacement[]
+
+/** A toolbar item's placement from the Swift of its `placement:`, Automatic when it has none; null for one Bars doesn't set. */
+export function toolbarPlacement(written: string | undefined): ToolbarPlacement | null {
+  if (written === undefined) return 'automatic'
+  const member = /^(?:ToolbarItemPlacement)?\.(\w+)$/.exec(written.replace(/\s/g, ''))?.[1]?.replace(/^navigationBar(?=Leading$|Trailing$)/, 'topBar')
+  return PLACEMENT_NAMES.find(placement => TOOLBAR_PLACEMENTS[placement] === member) ?? null
+}
+
+/**
+ * A toolbar item's Placement (Wave 4b): Leading, Trailing, Title, Bottom or Automatic, written
+ * as its `placement:`, which Automatic takes away when it is all its parentheses hold. Any
+ * other placement is shown as written, read only.
+ */
+export function toolbarItemControls(base: CallExpr, text: string, target: number, add: AddControl): void {
+  const content = base.trailingClosure
+  if (target < 14 || !content || base.args.some(a => a.label !== 'id' && a.label !== 'placement')) return
+  const arg = base.args.find(a => a.label === 'placement'), written = arg && text.slice(arg.value.span.start, arg.value.span.end)
+  const current = toolbarPlacement(written)
+  if (!current) return add('toolbar:placement', 'Placement', 'text', written!, () => ({ ...arg!.value.span, text: written! }), undefined, undefined, undefined, 'Shown as the code writes it.', arg!.value.span, 'Bars sets Leading, Trailing, Title, Bottom and Automatic. Change this placement in Code.')
+  const close = Lexer.tokenize(text.slice(base.callee.span.end, content.span.start), base.span.file).tokens.filter(t => t.text === ')').at(-1)
+  const parens = close && base.callee.span.end + close.span.start
+  add('toolbar:placement', 'Placement', 'select', TOOLBAR_PLACEMENT_WORDS[current], v => {
+    const value = `.${TOOLBAR_PLACEMENTS[PLACEMENT_NAMES.find(placement => TOOLBAR_PLACEMENT_WORDS[placement] === v)!]}`
+    if (arg && v === 'Automatic' && base.args.length === 1 && parens !== undefined) return { start: base.callee.span.end, end: parens + 1, text: '' }
+    if (arg) return { ...arg.value.span, text: value }
+    const last = base.args.at(-1)
+    if (last) return { start: last.span.end, end: last.span.end, text: `, placement: ${value}` }
+    return parens === undefined ? { start: base.callee.span.end, end: base.callee.span.end, text: `(placement: ${value})` } : { start: parens, end: parens, text: `placement: ${value}` }
+  }, PLACEMENT_NAMES.map(placement => TOOLBAR_PLACEMENT_WORDS[placement]), undefined, undefined, 'Title puts it in place of the screen’s title; Bottom, in a bar at the foot of the screen.', arg?.value.span)
+}
 
 /** A Button's Icon takes a well-formed symbol name, or nothing, which takes it away (Wave 4a). */
 const iconProblem = (value: string) => value ? symbolNameProblem(value) : null
@@ -222,6 +256,19 @@ export function objectControls(node: AuthoringNode, base: CallExpr, modifiers: r
     const modifier = name(m), id = `modifier:${i}:detail`
     const cap = authoringCapability(modifier, 'modifier', m.args.map(a => a.label))
     if (!cap || target < Number.parseFloat(cap.minimumIOS)) continue
+    // A search field's Prompt and Placement (Wave 4b): automatic, at the foot of an iPhone screen, or under the title.
+    if (modifier === 'searchable') {
+      const prompt = named(m, 'prompt'), placement = named(m, 'placement'), order = ['text', 'isPresented', 'placement', 'prompt']
+      const words = prompt && wordsOf(prompt)
+      if (prompt && words === undefined) shownAsWritten(id + ':prompt', 'Prompt', prompt)
+      else add(id + ':prompt', 'Prompt', 'text', words ?? '', v => !prompt ? insert(m, 'prompt', swiftString(v), order) : v ? { ...prompt.span, text: swiftString(v) } : dropArgument(m, m.args.find(a => a.value === prompt)!), undefined, undefined, undefined, 'Shown in the empty field. Empty shows “Search”.', prompt?.span, undefined, undefined, 'Search')
+      const where = placement && /^(?:SearchFieldPlacement)?\.(automatic|navigationBarDrawer)\b/.exec(text.slice(placement.span.start, placement.span.end).replace(/\s/g, ''))?.[1]
+      if (placement && !where) shownAsWritten(id + ':placement', 'Placement', placement)
+      else add(id + ':placement', 'Placement', 'select', where === 'navigationBarDrawer' ? 'Under the title' : 'Automatic', v => {
+        const value = v === 'Automatic' ? '.automatic' : '.navigationBarDrawer(displayMode: .always)'
+        return placement ? { ...placement.span, text: value } : insert(m, 'placement', value, order)
+      }, ['Automatic', 'Under the title'], undefined, undefined, 'Automatic puts it where iOS does: at the foot of an iPhone screen.', placement?.span)
+    }
     // Which side of a row its swipe actions are on, and whether a full swipe runs the first (Wave 4a).
     if (modifier === 'swipeActions') {
       param(m, id + ':edge', 'Edge', 'edge', 'select', 'trailing', ['leading', 'trailing'], undefined, undefined, '.', ['edge', 'allowsFullSwipe'])

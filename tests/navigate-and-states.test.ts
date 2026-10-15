@@ -68,6 +68,12 @@ describe('changing how a screen opens', () => {
     expect(plan(flat, nodeOf(flat, 'Button'), { kind: 'navigation-type', type: 'push' })).toMatchObject({ ok: false, reason: expect.stringContaining('needs a navigation container') })
   })
 
+  it('refuses a push from inside a popover, which starts a navigation of its own as a sheet does (Wave 4b)', () => {
+    const popover = files(app('                Button("More") { }\n                    .popover(isPresented: .constant(true)) {\n                        Button("Open") { isDetailScreenPresented = true }\n                            .sheet(isPresented: $isDetailScreenPresented) { DetailScreen() }\n                    }', '    @State private var isDetailScreenPresented = false\n'))
+    const open = model(popover).nodes.find(n => n.name === 'Button' && n.source.start > popover[0]!.text.indexOf('.popover'))!
+    expect(plan(popover, open, { kind: 'navigation-type', type: 'push' })).toMatchObject({ ok: false, reason: 'A pushed screen needs a navigation container on this screen. Add one, or keep this as a sheet.' })
+  })
+
   it('keeps a value that something else on the screen still uses', () => {
     const shared = files(app('                Button("Open") { isDetailScreenPresented = true }\n                    .sheet(isPresented: $isDetailScreenPresented) { DetailScreen() }\n                Text(isDetailScreenPresented ? "Open" : "Closed")', '    @State private var isDetailScreenPresented = false\n'))
     const back = edit(shared, nodeOf(shared, 'Button'), { kind: 'navigation-type', type: 'push' })

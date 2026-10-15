@@ -27,6 +27,10 @@ label.iconButton:has(input:disabled) { opacity: .4; }
 .error { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-error); }
 .note code { font-size: var(--text-footnote); }
 
+/* The Bars section's + buttons, one for each place a toolbar item goes, side by side. */
+.placements { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.placements > .button { justify-self: stretch; padding: 0 4px; }
+
 /* Push buttons: secondary, primary for the one that saves a form, red text to remove. */
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .button { display: inline-flex; align-items: center; justify-content: center; justify-self: start; gap: 6px; height: var(--control-height); padding: 0 12px; border-radius: var(--radius-md); background: var(--color-xc-fill); color: var(--color-xc-text); font-size: var(--text-body); white-space: nowrap; transition: background-color var(--duration-fast), color var(--duration-fast); }

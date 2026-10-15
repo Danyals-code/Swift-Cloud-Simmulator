@@ -1,6 +1,6 @@
 import { SCREEN_REMOVAL_REFUSALS, type AuthoringNode, type AuthoringSnapshot, type Diagnostic, type PagePreview, type ViewLayer } from '@studio/shared'
 import { screenDefinition, type DesignScreen } from './screens'
-import { PAGE_KINDS, pageRoots, reachedAs, type PageKind } from './pageKinds'
+import { firstOpened, openedOnce, PAGE_KINDS, pageRoots, reachedAs, type PageKind } from './pageKinds'
 import { fileName } from './stoppingError'
 
 export interface DesignScreenNode {
@@ -15,12 +15,17 @@ export interface DesignScreenNode {
    */
   readonly shared?: true
   readonly page: PagePreview
-  /** How it is reached from the screen before it: `root` starts a lane, `preview` is a `#Preview` on its own, and an alert or a dialog is up over its screen. */
+  /** How it is reached from the screen before it: `root` starts a lane, `preview` is a `#Preview` on its own, and a sheet, an alert or a dialog is up over its screen. */
   readonly presentation: PageKind
   /** Navigation steps from the lane's root: the canvas column. */
   readonly depth: number
-  /** Screens pushed from this one and the alerts and dialogs it shows, in source order. Presented screens live in `sheets`. */
+  /** Screens pushed from this one and the sheets, alerts and dialogs it shows, in source order. Full screen covers live in `covers`. */
   readonly children: readonly DesignScreenNode[]
+  /**
+   * Every screen that opens it, by page id, when it is one screen however many open it, as a
+   * sheet is: the one it is drawn over and listed under first.
+   */
+  readonly openers?: readonly string[]
 }
 
 export interface DesignLane {
@@ -31,10 +36,9 @@ export interface DesignLane {
   readonly root: DesignScreenNode
 }
 
-export interface DesignSheet {
+/** A screen presented as a screen of its own, a full screen cover, listed once with every screen that opens it (`openers`). */
+export interface DesignCover {
   readonly screen: DesignScreenNode
-  /** Every screen that presents it. A shared sheet is listed once, with each opener. */
-  readonly openers: readonly string[]
 }
 
 export interface DesignComponent {
@@ -47,7 +51,7 @@ export interface DesignComponent {
 }
 
 /**
- * The one tree Design shows: App > Components, the navigation lanes, the sheets.
+ * The one tree Design shows: App > Components, the navigation lanes, the full screen covers.
  *
  * Built from what the preview actually drew - its pages and their parents - so the
  * merged outline, the three panels and the canvas all describe the same app, and
@@ -56,7 +60,8 @@ export interface DesignComponent {
 export interface DesignTree {
   readonly navigation: 'tabs' | 'stack' | 'none'
   readonly lanes: readonly DesignLane[]
-  readonly sheets: readonly DesignSheet[]
+  /** The full screen covers, each listed once (Wave 4b): a sheet is listed under the screen it is drawn over. */
+  readonly covers: readonly DesignCover[]
   /** Screens made in the studio that nothing navigates to yet. */
   readonly detached: readonly DesignScreenNode[]
   /** Each `#Preview` in the code, drawn on its own: screens the app doesn't show. */
@@ -96,32 +101,39 @@ export function designTree(pages: readonly PagePreview[] | undefined, snapshot: 
   const byId = new Map(all.map(page => [page.id, page]))
   const { viewOf, shared, nameOf } = screenNaming(all, snapshot, screens)
   const presentationOf = (page: PagePreview) => reachedAs(page, !!page.parentId && byId.has(page.parentId))
-  const sheets = new Map<string, { screen: DesignScreenNode; openers: string[] }>()
+  const roots = pageRoots(all), running = roots.running
+  // A sheet is one screen wherever it is opened from: the copy opened first, as the canvas
+  // finds it, is listed, and every other opener is one of its openers.
+  const sameScreen = (page: PagePreview) => viewOf(page) ?? page.id
+  const drawn = firstOpened(all, [...running.map(root => [root]), roots.detached, roots.previews], sameScreen)
+  const openers = new Map<string, string[]>()
+  for (const page of all) {
+    if (!page.parentId || !byId.has(page.parentId) || !openedOnce(page)) continue
+    const list = openers.get(sameScreen(page)) ?? []
+    if (!list.includes(page.parentId)) openers.set(sameScreen(page), [...list, page.parentId])
+  }
+  const covers: DesignCover[] = []
   const build = (page: PagePreview, depth: number, seen: ReadonlySet<string>): DesignScreenNode => {
     const next = new Set([...seen, page.id])
     const children: DesignScreenNode[] = []
     for (const child of all) {
-      if (child.parentId !== page.id || next.has(child.id)) continue
-      if (PAGE_KINDS[presentationOf(child)].presented === 'screen') {
-        // Presented once, wherever it is presented from: the first opener in lane
-        // order owns its place, and every other opener only draws an arrow to it.
-        const key = viewOf(child) ?? child.id
-        const existing = sheets.get(key)
-        if (existing) existing.openers.push(page.id)
-        else sheets.set(key, { screen: build(child, depth + 1, next), openers: [page.id] })
-      } else children.push(build(child, depth + 1, next))
+      if (child.parentId !== page.id || next.has(child.id) || openedOnce(child) && drawn.get(sameScreen(child)) !== child.id) continue
+      const node = build(child, depth + 1, next)
+      if (PAGE_KINDS[node.presentation].presented === 'screen') covers.push({ screen: node })
+      else children.push(node)
     }
     const view = viewOf(page)
-    return { id: page.id, name: nameOf(page), view, ...(shared(view) ? { shared: true as const } : {}), page, presentation: presentationOf(page), depth, children }
+    // The screen it is drawn over first, then the others that open it.
+    const opened = page.parentId && openedOnce(page) && openers.get(sameScreen(page))?.includes(page.parentId) ? [page.parentId, ...openers.get(sameScreen(page))!.filter(id => id !== page.parentId)] : undefined
+    return { id: page.id, name: nameOf(page), view, ...(shared(view) ? { shared: true as const } : {}), page, presentation: presentationOf(page), depth, children, ...(opened ? { openers: opened } : {}) }
   }
-  const roots = pageRoots(all), running = roots.running
   const lanes = running.map(page => ({ id: page.id, name: nameOf(page), tab: running.length > 1, root: build(page, 0, new Set()) }))
   const detached = roots.detached.map(page => build(page, 0, new Set()))
   const previews = roots.previews.map(page => build(page, 0, new Set()))
   return {
     navigation: running.length > 1 ? 'tabs' : running.length === 1 ? 'stack' : 'none',
     lanes,
-    sheets: [...sheets.values()],
+    covers,
     detached,
     previews,
     components: designComponents(snapshot, screens.map(screen => screen.view)),
@@ -147,7 +159,7 @@ export function designScreens(tree: DesignTree): DesignScreenNode[] {
   const out: DesignScreenNode[] = []
   const visit = (node: DesignScreenNode) => { out.push(node); node.children.forEach(visit) }
   tree.lanes.forEach(lane => visit(lane.root))
-  tree.sheets.forEach(sheet => visit(sheet.screen))
+  tree.covers.forEach(cover => visit(cover.screen))
   tree.detached.forEach(visit)
   tree.previews.forEach(visit)
   return out
@@ -169,9 +181,12 @@ export function describeScreen(screen: DesignScreenNode, tree: DesignTree): stri
   if (tree.detached.some(node => node.id === screen.id)) return 'Not linked yet · add Navigate to on a button to connect it'
   const screens = designScreens(tree)
   const nameOf = (id: string) => screens.find(node => node.id === id)?.name ?? 'a screen'
-  const sheet = tree.sheets.find(candidate => candidate.screen.id === screen.id)
-  const parent = sheet ? undefined : screens.find(candidate => candidate.children.some(child => child.id === screen.id))
-  return PAGE_KINDS[screen.presentation].reached(sheet ? sheet.openers.map(nameOf).join(', ') : parent?.name ?? 'another screen')
+  const kind = PAGE_KINDS[screen.presentation]
+  const [first, ...others] = screen.openers ?? []
+  if (!first) return kind.reached(screens.find(candidate => candidate.children.some(child => child.id === screen.id))?.name ?? 'another screen')
+  // A sheet is drawn over the first screen that opens it; a cover is a screen of its own, opened from each.
+  if (kind.presented !== 'over') return kind.reached([first, ...others].map(nameOf).join(', '))
+  return `${kind.reached(nameOf(first))}${others.length ? ` · also opened from ${others.map(nameOf).join(', ')}` : ''}`
 }
 
 /**
@@ -205,7 +220,7 @@ export function liveDesignScreen(tree: DesignTree, live: readonly ViewLayer[] | 
   const below = (screens: readonly DesignScreenNode[]): DesignScreenNode[] => screens.flatMap(screen => [screen, ...below(screen.children)])
   // A sheet is over everything; an alert or a menu is not a screen, and leaves the one under it.
   const presented = live?.find(layer => layer.type === 'Presentation')
-  const sheet = presented && matchScreen(below(tree.sheets.map(item => item.screen)), presented, snapshot)
+  const sheet = presented && matchScreen(below(designScreens(tree).filter(screen => screen.openers)), presented, snapshot)
   if (sheet) return sheet
   const pushed = tab.children.find(layer => layer.type === 'Destination')
   if (!root || !pushed) return root
@@ -235,8 +250,8 @@ function ownerOfFirstView(layers: readonly ViewLayer[], snapshot: AuthoringSnaps
   return undefined
 }
 
-/** The outline's rows that list the sheets, the screens nothing links to yet, and the previews. */
-export const SHEETS_GROUP = 'group:sheets'
+/** The outline's rows that list the full screen covers, the screens nothing links to yet, and the previews. */
+export const COVERS_GROUP = 'group:covers'
 export const DETACHED_GROUP = 'group:detached'
 export const PREVIEWS_GROUP = 'group:previews'
 
@@ -255,7 +270,7 @@ export function designScreenPath(tree: DesignTree, id: string | undefined): stri
   }
   const roots = [
     ...tree.lanes.map(lane => ({ root: lane.root, groups: [] as string[] })),
-    ...tree.sheets.map(sheet => ({ root: sheet.screen, groups: [SHEETS_GROUP] })),
+    ...tree.covers.map(cover => ({ root: cover.screen, groups: [COVERS_GROUP] })),
     ...tree.detached.map(root => ({ root, groups: [DETACHED_GROUP] })),
     ...tree.previews.map(root => ({ root, groups: [PREVIEWS_GROUP] })),
   ]
@@ -284,6 +299,6 @@ export function emptyScreensNote(busy: boolean, diagnostics: readonly Diagnostic
 export function screenRemovalRefusal(screen: DesignScreenNode, tree: DesignTree): string | undefined {
   const lane = tree.lanes.find(candidate => candidate.root.id === screen.id)
   if (lane) return lane.tab ? SCREEN_REMOVAL_REFUSALS.tab : SCREEN_REMOVAL_REFUSALS.start
-  const opened = tree.sheets.some(sheet => sheet.screen.id === screen.id) || designScreens(tree).some(node => node.children.some(child => child.id === screen.id))
+  const opened = tree.covers.some(cover => cover.screen.id === screen.id) || designScreens(tree).some(node => node.children.some(child => child.id === screen.id))
   return opened ? SCREEN_REMOVAL_REFUSALS.opened : undefined
 }

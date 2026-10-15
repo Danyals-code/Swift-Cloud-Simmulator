@@ -32,6 +32,11 @@ export function labelArgView(arg: ViewArg): ViewValue | null {
   return arg.label === 'icon' ? asView(arg.value) : labelView(arg)
 }
 
+/** A view of the closure form of `ContentUnavailableView`'s description or actions, or null for any other argument (Wave 4b). */
+export function unavailablePart(arg: ViewArg): ViewValue | null {
+  return arg.label === 'description' || arg.label === 'actions' ? asView(arg.value) : null
+}
+
 /**
  * What `Button { … } label: { … }` is drawn with (D16), and a Menu's, a Picker's or a
  * GroupBox's label and a Label's icon (Wave 3a). The host keeps them as the control's
@@ -40,6 +45,7 @@ export function labelArgView(arg: ViewArg): ViewValue | null {
  * in Layers like any other.
  */
 function labelViews(view: ViewValue): ViewValue[] {
+  if (view.name === 'ContentUnavailableView') return view.args.flatMap(arg => unavailablePart(arg) ?? [])
   return LAYERED_LABEL_VIEWS.has(view.name) ? view.args.flatMap(arg => labelArgView(arg) ?? []) : []
 }
 

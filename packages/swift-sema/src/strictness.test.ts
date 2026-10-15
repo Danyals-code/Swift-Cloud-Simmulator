@@ -487,6 +487,24 @@ describe('returns', () => {
     ).toEqual([])
   })
 
+  it('says nothing about a toolbar content builder', () => {
+    // A toolbar's items are built as a view's body is (Wave 4b).
+    expect(
+      messages(
+        app(`    var body: some View {
+        NavigationStack {
+            Text("a").toolbar { items() }
+        }
+    }
+
+    @ToolbarContentBuilder func items() -> some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) { Button("Edit") { } }
+        ToolbarItem(placement: .topBarTrailing) { Button("Add") { } }
+    }`),
+      ).filter((message) => message.includes('Missing return')),
+    ).toEqual([])
+  })
+
   /**
    * The walk behind this check followed only `if` and `for`, so a function whose
    * returns were all inside anything else was told it had none. Every construct

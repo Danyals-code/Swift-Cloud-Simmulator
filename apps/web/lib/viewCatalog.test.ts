@@ -40,6 +40,13 @@ describe('the Add palette’s System group (Wave 4a)', () => {
     expect(paletteEdit(entry('text'), sheet)).toEqual({ operation: { kind: 'insert', snippet: 'Text("Text")' } })
   })
 
+  it('inserts an empty state where Add puts any view, as iOS 17’s ContentUnavailableView (Wave 4b)', () => {
+    expect(entry('empty-state')).toMatchObject({ name: 'Empty state', group: 'System' })
+    expect(paletteEdit(entry('empty-state'), undefined)).toEqual({ operation: { kind: 'insert', snippet: 'ContentUnavailableView("No Results", systemImage: "magnifyingglass", description: Text("Try a different search."))' } })
+    expect(searchCatalog('empty')[0]?.id).toBe('empty-state')
+    expect(searchCatalog('no results')[0]?.id).toBe('empty-state')
+  })
+
   it('keeps the existing groups first, and finds the new entries by the words people use', () => {
     expect([...new Set(VIEW_CATALOG.map(snippet => snippet.group))]).toEqual(['Layout', 'Content', 'Controls', 'Shapes', 'Navigation', 'System'])
     expect(searchCatalog('swipe')[0]?.id).toBe('swipe-action')

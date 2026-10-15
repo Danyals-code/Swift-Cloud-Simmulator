@@ -234,7 +234,49 @@ export type NavigationOperation =
   | { readonly kind: 'tab-remove'; readonly index: number }
   | { readonly kind: 'tab-move'; readonly index: number; readonly toIndex: number }
 
+/** Where a toolbar item sits (Wave 4b): the bar's leading or trailing side, in place of the title, the bottom bar, or where iOS puts it. */
+export type ToolbarPlacement = 'leading' | 'trailing' | 'principal' | 'bottom' | 'automatic'
+/** Each placement in a designer's words, as the Placement field and the Bars section name it (Wave 4b). */
+export const TOOLBAR_PLACEMENT_WORDS: Readonly<Record<ToolbarPlacement, string>> = { leading: 'Leading', trailing: 'Trailing', principal: 'Title', bottom: 'Bottom', automatic: 'Automatic' }
+
+/** One of a screen's toolbar items, as its Bars section lists it (Wave 4b). */
+export interface ScreenBarItem {
+  /** The `ToolbarItem`, `ToolbarItemGroup` or view in the toolbar, to select. */
+  readonly node: string
+  /** Where it sits; null for a placement written in code that Bars doesn't set, such as `.confirmationAction`. */
+  readonly placement: ToolbarPlacement | null
+  /** What it shows: its button's title, its symbol, or its view's name. */
+  readonly label: string
+}
+
+/**
+ * A screen's bars, as Screen settings lists them (Wave 4b), on the screen's definition: read
+ * from its own views, never from the sheets and pages it opens.
+ */
+export interface ScreenBars {
+  /** The view the screen's `.navigationTitle` is written on, and the id of its Title control there. */
+  readonly title?: { readonly node: string; readonly control: string }
+  /** Set when the screen certainly has no navigation bar where it is shown, so a title on it doesn't show. */
+  readonly barless?: true
+  /** Its toolbar items, in the order written. */
+  readonly items: readonly ScreenBarItem[]
+  /**
+   * Its search field, when it has one: the view `.searchable` is written on, its prompt when
+   * the code writes one as words, and the id of the Prompt control on that view when it can be edited.
+   */
+  readonly search?: { readonly node: string; readonly prompt?: string; readonly control?: string }
+  /** Why toolbar items can't be added from here, when they can't. */
+  readonly problem?: string
+  /** Why the search field can't be switched on here, when it can't. */
+  readonly searchProblem?: string
+}
+
 export type AuthoringOperation = ResourceOperation | ModifierOperation | NavigationOperation | LayerSetOperation
+  /** An item in the screen's toolbar at `placement`, making the toolbar when the screen has none (Wave 4b). */
+  | { readonly kind: 'toolbar-item-add'; readonly placement: ToolbarPlacement; readonly snippet?: string }
+  /** A search field on the screen, searching text kept in the screen's state (Wave 4b). */
+  | { readonly kind: 'searchable-add'; readonly prompt: string }
+  | { readonly kind: 'searchable-remove' }
   | { readonly kind: 'component-expose'; readonly control: string; readonly name: string }
   | { readonly kind: 'component-insert'; readonly component: string }
   | { readonly kind: 'component-variant'; readonly variant: ComponentVariant }

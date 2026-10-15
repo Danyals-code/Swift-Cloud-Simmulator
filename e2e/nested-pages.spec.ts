@@ -156,6 +156,8 @@ test('editing detail and sheet Layers updates exact Swift and keeps page selecti
   await text.fill('New book form')
   await text.press('Enter')
   await expect(page.locator('[data-page-kind="sheet"]').getByText('New book form', { exact: true })).toBeVisible()
+  // The sheet is drawn up over the screen that opens it, which shows behind it (Wave 4b).
+  await expect(page.locator('[data-page-kind="sheet"]').getByText('Library heading', { exact: true })).toHaveCount(1)
   await expect(page.getByTestId('logical-layers')).toContainText('Add a book layers')
   source = source.replace('Text("Form heading")', 'Text("New book form")')
   await assertSource(page, source)

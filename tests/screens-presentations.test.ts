@@ -265,7 +265,7 @@ describe('an alert in Design', () => {
 })
 
 describe('the Screens list', () => {
-  it('lists an alert and a dialog under the screen that shows them, as what they are', () => {
+  it('lists an alert, a dialog and a sheet under the screen that shows them, as what they are', () => {
     const result = run(`NavigationStack {
             Text("Inbox")
                 .navigationTitle("Inbox")
@@ -274,8 +274,8 @@ describe('the Screens list', () => {
                 .sheet(isPresented: $composing) { Text("Compose").navigationTitle("Compose") }
         }`, '@State private var confirming = false\n    @State private var archiving = false\n    @State private var composing = false')
     const tree = designTree(result.pages, result.authoring, [])
-    expect(tree.lanes[0]!.root.children.map(screen => [screen.presentation, screen.name])).toEqual([['alert', 'Delete the draft?'], ['dialog', 'Archive?']])
-    expect(tree.sheets.map(sheet => [sheet.screen.presentation, sheet.screen.name])).toEqual([['sheet', 'Compose']])
+    expect(tree.lanes[0]!.root.children.map(screen => [screen.presentation, screen.name])).toEqual([['alert', 'Delete the draft?'], ['dialog', 'Archive?'], ['sheet', 'Compose']])
+    expect(tree.covers).toEqual([])
     // On the canvas each is beside the screen it is up over, reached as what it is.
     expect(pageSlots(result.pages!).filter(slot => slot.parentId).map(slot => [slot.presentation, slot.page.name])).toEqual([['alert', 'Delete the draft?'], ['dialog', 'Archive?'], ['sheet', 'Compose']])
   })

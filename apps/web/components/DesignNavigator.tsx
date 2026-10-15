@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { Diagnostic, PagePreview } from '@studio/shared'
-import { canRename, designScreenPath, DETACHED_GROUP, emptyScreensNote, PREVIEWS_GROUP, SHEETS_GROUP, type DesignComponent, type DesignScreenNode, type DesignTree } from '../lib/designTree'
+import { canRename, designScreenPath, DETACHED_GROUP, emptyScreensNote, PREVIEWS_GROUP, COVERS_GROUP, type DesignComponent, type DesignScreenNode, type DesignTree } from '../lib/designTree'
 import type { ScreenCommand } from '../lib/screens'
 import type { NavigatorLayout } from '../lib/layout'
 import { PAGE_KINDS } from '../lib/pageKinds'
@@ -96,14 +96,14 @@ export function DesignNavigator(props: DesignNavigatorProps) {
     else void command({ kind: value as 'duplicate' | 'remove', view: node.view })
   }
 
-  /** One screen, its layers when it is the one being edited, then the screens it pushes. */
-  const screenRows = (node: DesignScreenNode, depth: number, withLayers: boolean, detail?: string): ReactNode => {
+  /** One screen, its layers when it is the one being edited, then the screens it pushes and shows. A sheet several screens open says so. */
+  const screenRows = (node: DesignScreenNode, depth: number, withLayers: boolean): ReactNode => {
     if (!matches(node) || !inFocus(node)) return null
     const selected = node.id === selectedScreenId
     const expandable = withLayers && selected || node.children.length > 0
     const expanded = expandable && isOpen(node.id)
     return <Fragment key={node.id}>
-      <Row id={node.id} depth={depth} icon={PAGE_KINDS[node.presentation].icon} label={node.name} detail={detail}
+      <Row id={node.id} depth={depth} icon={PAGE_KINDS[node.presentation].icon} label={node.name} detail={node.openers && node.openers.length > 1 ? `Opened from ${node.openers.length} screens` : undefined}
         selected={selected && level === 'screen'} current={selected && level !== 'screen'} expandable={expandable} expanded={expanded} onToggle={() => toggle(node.id)}
         onClick={() => onSelectScreen(node.page)} actions={screenActions(node)} onAction={value => onScreenAction(node, value)} testId="design-screen" />
       {expanded && withLayers && selected && <div className={styles.layers} data-testid="design-screen-layers">{renderLayers({ embedded: true, query, indent: BASE + (depth + 1) * INDENT })}</div>}
@@ -120,9 +120,9 @@ export function DesignNavigator(props: DesignNavigatorProps) {
     {(!focus || path.includes(PREVIEWS_GROUP)) && !!tree.previews.length && <><GroupRow id={PREVIEWS_GROUP} depth={depth} label="Previews" count={tree.previews.length} expanded={isOpen(PREVIEWS_GROUP)} onToggle={() => toggle(PREVIEWS_GROUP)} title="Each #Preview in the code, drawn on its own. The app doesn't show these." />{isOpen(PREVIEWS_GROUP) && tree.previews.map(node => screenRows(node, depth + 1, withLayers))}</>}
     {!tree.lanes.length && !tree.detached.length && <p className={styles.empty}>{empty.text}{empty.at && <> <button type="button" className={styles.emptyAction} onClick={() => onReveal(empty.at!.file, empty.at!.offset)}>Show in Code</button></>}</p>}
   </>
-  const sheetsGroup = (depth: number, withLayers: boolean) => !tree.sheets.length ? null : <>
-    <GroupRow id={SHEETS_GROUP} depth={depth} label="Sheets" icon="sheet" count={tree.sheets.length} expanded={isOpen(SHEETS_GROUP)} onToggle={() => toggle(SHEETS_GROUP)} />
-    {isOpen(SHEETS_GROUP) && tree.sheets.map(sheet => screenRows(sheet.screen, depth + 1, withLayers, sheet.openers.length > 1 ? `Opened from ${sheet.openers.length} screens` : undefined))}
+  const coversGroup = (depth: number, withLayers: boolean) => !tree.covers.length ? null : <>
+    <GroupRow id={COVERS_GROUP} depth={depth} label="Full screens" icon="sheet" count={tree.covers.length} title="Screens shown over everything, from a Full screen action. A sheet is listed under the screen it opens over." expanded={isOpen(COVERS_GROUP)} onToggle={() => toggle(COVERS_GROUP)} />
+    {isOpen(COVERS_GROUP) && tree.covers.map(cover => screenRows(cover.screen, depth + 1, withLayers))}
   </>
   const componentsGroup = (depth: number) => <>
     <GroupRow id="group:components" depth={depth} label="Components" icon="component" count={tree.components.length} expanded={isOpen('group:components')} onToggle={() => toggle('group:components')} />
@@ -170,7 +170,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
     </section>
     <section className={styles.panel} aria-label="Screens" data-panel="screens">
       <h2>Screens{addScreen}</h2>
-      <div className={styles.scroll} role="tree" aria-label="Screens" onKeyDown={moveFocus}>{screensGroup(0, false)}{sheetsGroup(0, false)}</div>
+      <div className={styles.scroll} role="tree" aria-label="Screens" onKeyDown={moveFocus}>{screensGroup(0, false)}{coversGroup(0, false)}</div>
       {feedback}
     </section>
     <section className={`${styles.panel} ${styles.layersPanel}`} aria-label="Layers" data-panel="layers">
@@ -186,7 +186,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
         {!focus && componentsGroup(1)}
         <GroupRow id="group:screens" depth={1} label={tree.navigation === 'tabs' ? 'Tabs' : 'Screens'} icon={tree.navigation === 'tabs' ? 'tabs' : 'screens'} expanded={isOpen('group:screens')} onToggle={() => toggle('group:screens')} action={addScreen} />
         {isOpen('group:screens') && screensGroup(2, true)}
-        {(!focus || path.includes(SHEETS_GROUP)) && sheetsGroup(1, true)}
+        {(!focus || path.includes(COVERS_GROUP)) && coversGroup(1, true)}
       </>}
     </div>
     {feedback}

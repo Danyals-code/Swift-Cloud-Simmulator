@@ -433,9 +433,9 @@ describe('a view name the preview does not draw', () => {
     })
 
     // The static-member spelling arrives carrying nothing at all, and stands for text
-    // iOS supplies itself.
+    // iOS supplies itself, its description too (Wave 4b, iphone18pro-system-ui).
     expect(drawn('        ContentUnavailableView.search')).toEqual({
-      text: ['No Results'],
+      text: ['No Results', 'Check the spelling or try a new search.'],
       symbols: ['magnifyingglass'],
     })
 

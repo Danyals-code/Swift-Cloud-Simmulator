@@ -1,5 +1,5 @@
 import type { PagePreview } from '@studio/shared'
-import { PAGE_KINDS, pageRoots, reachedAs, type PageKind } from './pageKinds'
+import { firstOpened, openedOnce, pageRoots, reachedAs, type PageKind } from './pageKinds'
 
 /**
  * Where each screen goes on the canvas.
@@ -24,9 +24,6 @@ export interface PageSlot {
   readonly parentId?: string
 }
 
-/** Whether a page is a screen presented on its own, drawn once however many screens open it. */
-const presentedScreen = (page: PagePreview) => PAGE_KINDS[reachedAs(page, true)].presented === 'screen'
-
 /**
  * Lanes, columns and branch rows for every screen, states excluded.
  *
@@ -43,24 +40,8 @@ export function pageSlots(pages: readonly PagePreview[], visibleRootId?: string,
   const narrowed = all.filter(({ laneRoots }) => laneRoots.some(root => root.id === visibleRootId))
   const lanes = visibleRootId && narrowed.length ? narrowed : all
   const childrenOf = (id: string) => pages.filter(child => child.parentId === id)
-  // Which copy of a shared sheet is drawn: the one opened nearest the left of the
-  // first lane, found breadth first so a deep opener never wins over a shallow one.
-  const drawn = new Map<string, string>()
-  const visited = new Set<string>()
-  for (const { laneRoots } of lanes) {
-    for (let frontier = [...laneRoots]; frontier.length;) {
-      const next: PagePreview[] = []
-      for (const page of frontier) {
-        if (visited.has(page.id)) continue
-        visited.add(page.id)
-        for (const child of childrenOf(page.id)) {
-          if (presentedScreen(child) && !drawn.has(sameScreen(child))) drawn.set(sameScreen(child), child.id)
-          next.push(child)
-        }
-      }
-      frontier = next
-    }
-  }
+  // Which copy of a shared sheet is drawn: the one opened nearest the left of the first lane.
+  const drawn = firstOpened(pages, lanes.map(({ laneRoots }) => laneRoots), sameScreen)
   const placed = new Set<string>()
   const result: PageSlot[] = []
   for (const { laneRoots, lane } of lanes) {
@@ -72,7 +53,7 @@ export function pageSlots(pages: readonly PagePreview[], visibleRootId?: string,
       let first = true
       for (const child of childrenOf(page.id)) {
         if (placed.has(child.id)) continue
-        if (presentedScreen(child) && drawn.get(sameScreen(child)) !== child.id) continue
+        if (openedOnce(child) && drawn.get(sameScreen(child)) !== child.id) continue
         const row = first ? branchRow : rows++
         first = false
         place(child, column + 1, row, page.id)
@@ -92,7 +73,7 @@ export function pageSlots(pages: readonly PagePreview[], visibleRootId?: string,
   if (last && lanes.length === all.length) {
     let rows = result.filter(slot => slot.lane === last.lane).reduce((most, slot) => Math.max(most, slot.branchRow + 1), 0)
     for (const page of pages) {
-      if (placed.has(page.id) || presentedScreen(page) && drawn.get(sameScreen(page)) !== page.id) continue
+      if (placed.has(page.id) || openedOnce(page) && drawn.get(sameScreen(page)) !== page.id) continue
       placed.add(page.id)
       result.push({ page, lane: last.lane, column: 0, branchRow: rows++, stateIndex: 0, presentation: reachedAs(page, false) })
     }
@@ -193,7 +174,7 @@ export function canvasLayout(pages: readonly PagePreview[], options: CanvasOptio
   const sameScreen = options.sameScreen ?? (page => page.id)
   const shown = new Map(slots.map(slot => [sameScreen(slot.page), slot.page.id]))
   for (const page of pages) {
-    if (!page.parentId || !presentedScreen(page) || slots.some(slot => slot.page.id === page.id)) continue
+    if (!page.parentId || !openedOnce(page) || slots.some(slot => slot.page.id === page.id)) continue
     const target = shown.get(sameScreen(page))
     if (target && slots.some(slot => slot.page.id === page.parentId)) add({ from: page.parentId, to: target, kind: reachedAs(page, true) })
   }

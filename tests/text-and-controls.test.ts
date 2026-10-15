@@ -277,7 +277,7 @@ describe('What the preview does not apply, it says; what is cheap, it applies', 
     ['.scrollTransition', 'ScrollView { Text("A").scrollTransition { content, phase in content.opacity(phase.isIdentity ? 1 : 0.3) } }', '', /'\.scrollTransition' is recognized but not applied by the preview/],
     ['pinnedViews', 'ScrollView { LazyVStack(pinnedViews: [.sectionHeaders]) { Section { Text("A") } header: { Text("H") } } }', '', /pinnedViews.*not applied/],
     ['.asymmetric', 'Text("A").transition(.asymmetric(insertion: .scale, removal: .opacity))', '', /asymmetric.*insertion/],
-    ['.toolbar(.hidden, for: .tabBar)', 'TabView { Text("A").toolbar(.hidden, for: .tabBar).tabItem { Text("One") } }', '', /\.toolbar\(\.hidden, for: \.tabBar\).*not applied/],
+    ['.toolbar(.hidden, for: .automatic)', 'TabView { Text("A").toolbar(.hidden, for: .automatic).tabItem { Text("One") } }', '', /\.toolbar\(\.hidden, for: \.automatic\).*not applied/],
     ['a custom Layout', 'Flow { Text("A") }', flow, /'Flow' is a custom Layout/],
   ])('warns on %s', (_, body, extra, message) => {
     const r = run(app(body, extra))

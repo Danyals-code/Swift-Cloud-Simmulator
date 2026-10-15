@@ -101,7 +101,7 @@ function stateDependencies(ctx: FeatureContext, owner: string, inputs: readonly 
   return inputs.map(input => ({ state: input.name, nodeIds: [...(owners.get(owner)?.get(input.name) ?? [])] }))
 }
 /** Whether a new value named `name` on `owner` would clash with a member of it, a type, or a local the view sees. */
-function nameTaken(ctx: FeatureContext, node: AuthoringNode, owner: StructDecl | undefined, name: string): boolean {
+export function nameTaken(ctx: FeatureContext, node: AuthoringNode, owner: StructDecl | undefined, name: string): boolean {
   return shadowsMember(ctx, node, name) || !!owner?.members.some(m => 'name' in m && m.name === name) || allDeclarations(ctx).some(d => 'name' in d && d.name === name)
 }
 
@@ -385,7 +385,7 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
   } else if (action.type === 'navigate' || action.type === 'sheet' || action.type === 'cover') {
     if (!settings.destinations.includes(action.destination)) throw new Error('Choose a local View that has a supported no-argument initializer.')
     if (action.type === 'navigate') {
-      if (!insideNavigationStack(ctx.nodes, node)) throw new Error('Place this Button inside a NavigationStack before configuring navigation.')
+      if (!insideNavigationStack(ctx, node)) throw new Error('Place this Button inside a NavigationStack before configuring navigation.')
       if (call.args.some(a => a.label === 'role')) throw new Error('A link has no role. Set Role to None, then choose where it goes.')
       // A card stays the link's label, as `NavigationLink { Detail() } label: { … }` writes it (D16).
       const label = call.args[0]!, symbol = call.args.find(a => a.label === 'systemImage')

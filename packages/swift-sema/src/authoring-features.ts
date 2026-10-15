@@ -1,4 +1,4 @@
-import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, PreviewColorAsset, SourceFile } from '@studio/shared'
+import { isNonView, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type PreviewColorAsset, type SourceFile } from '@studio/shared'
 import { collectionFor, addCollectionField, bindField, convertCollection, emptyState, enclosingCollection, recordsSwift, validateRecords } from './authoring-collections'
 import { componentRecipes, componentSettings, extractComponent, insertComponent, applyComponentVariant, exposeComponentInput } from './authoring-components'
 import { behaviorSettings, configureAction, configureBinding, configureTransition, stateInputs } from './authoring-behavior'
@@ -12,6 +12,7 @@ import { makeComponent } from './authoring-copies'
 import { createScreenValue, guidedAction, screenEdit } from './authoring-screens'
 import { customizeCard } from './authoring-card'
 import { makeTappable, structureEdit } from './authoring-structure'
+import { barsEdit, screenBars } from './authoring-bars'
 
 export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot): AuthoringSnapshot {
   // A file with an error keeps its own views plain, and what is declared in it gives no settings: a
@@ -31,8 +32,8 @@ export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot
     const collection = sound(collectionFor(ctx, node), c => c.source.file), component = sound(componentSettings(ctx, node), c => fileOf.get(c.definitionId))
     const parent = sound(enclosingCollection(ctx, node), c => c.source.file)
     // A copy of a component can be made tappable as any view can (D16).
-    const behavior = ['view', 'collection', 'component'].includes(node.kind) && node.name !== 'WindowGroup' ? behaviorSettings(ctx, node) : undefined
-    return { ...node, navigation: navigationSettings(ctx, node), styles: styleProperties(ctx, node), collection, component, behavior, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: (component ? [...component.controls, ...(node.controls ?? [])] : node.controls)?.map(c => constrainNumericControl(c, node.name, behavior?.binding?.type)) }
+    const behavior = ['view', 'collection', 'component'].includes(node.kind) && !isNonView(node) ? behaviorSettings(ctx, node) : undefined
+    return { ...node, navigation: navigationSettings(ctx, node), styles: styleProperties(ctx, node), collection, component, behavior, bars: node.kind === 'definition' ? screenBars(ctx, node) : undefined, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: (component ? [...component.controls, ...(node.controls ?? [])] : node.controls)?.map(c => constrainNumericControl(c, node.name, behavior?.binding?.type)) }
   }
 }
 export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation: AuthoringOperation | { kind: 'property'; control: string; value: string }): { files: SourceFile[]; offset: number; colors?: PreviewColorAsset[] } {
@@ -44,6 +45,7 @@ export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation:
     case 'guided-action': return guidedAction(ctx, node, operation)
     case 'screen-create': case 'screen-duplicate': case 'screen-remove': { const result = screenEdit(ctx, node, operation); patches = result.patches; files = result.files ?? []; removed = result.removed ?? []; break }
     case 'card-customize': return customizeCard(ctx, node, operation.color)
+    case 'toolbar-item-add': case 'searchable-add': case 'searchable-remove': return barsEdit(ctx, node, operation)
     case 'layer-duplicate': case 'layer-wrap': case 'layer-reparent': return structureEdit(ctx, node, operation)
     case 'make-tappable': return makeTappable(ctx, node)
     case 'navigation-target': patches = configureNavigationTarget(ctx, node, operation.destination); break

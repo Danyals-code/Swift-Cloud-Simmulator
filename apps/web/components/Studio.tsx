@@ -86,7 +86,7 @@ const NO_IDS: readonly string[] = []
 const NO_DIAGNOSTICS: never[] = []
 const NO_GROUPS: readonly (readonly string[])[] = []
 const NO_MULTI_SELECTION = { page: '', files: [], ids: [] }
-const EMPTY_TREE: DesignTree = { navigation: 'none', lanes: [], sheets: [], detached: [], previews: [], components: [] }
+const EMPTY_TREE: DesignTree = { navigation: 'none', lanes: [], covers: [], detached: [], previews: [], components: [] }
 
 /** Changes the studio's own records for `project`: one Undo step, named `op` in the event log. */
 function commitStudioRecords(project: Project, after: StudioMetadata, op: StudioChange): string | null {
