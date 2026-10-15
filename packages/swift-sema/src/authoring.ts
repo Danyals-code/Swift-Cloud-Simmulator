@@ -4,7 +4,7 @@ import { borderOf, cornersOf } from './authoring-border'
 import { enrichAuthoring } from './authoring-features'
 import type { ComponentDescription, PreviewColorAsset } from '@studio/shared'
 import {
-  CONTEXT_MENU_PREVIEW, MODIFIER_SLOTS, PRESENTATION_PARTS, VIEW_PARTS, authoringCapability,
+  CONTEXT_MENU_PREVIEW, MODIFIER_SLOTS, PRESENTATION_PARTS, PRESENTED_SLOTS, VIEW_PARTS, authoringCapability, isNonView,
   type AuthoringNode, type AuthoringProperty, type AuthoringSnapshot,
   type Diagnostic, type PropertyValueKind, type SourceFile, type SourceSpan,
 } from '@studio/shared'
@@ -23,6 +23,17 @@ const READ_ONLY = 'Read-only in this version. Use the source to change this prop
 
 // Reading view-builder content does not grant a writer for the container overload.
 const CONTENT_VIEWS = new Set(['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'LazyVGrid', 'LazyHGrid', 'Grid', 'GridRow', 'ViewThatFits', 'GeometryReader', 'ScrollView', 'ForEach', 'List', 'Section', 'Form', 'NavigationStack', 'NavigationView', 'NavigationSplitView', 'NavigationLink', 'TabView', 'Tab', 'Group', 'GroupBox', 'DisclosureGroup', 'ControlGroup', 'AnyView', 'WindowGroup', 'ToolbarItem', 'ToolbarItemGroup', 'Picker'])
+
+/**
+ * The one view a sheet, popover or full-screen cover closure shows (Wave 4b), which carries the
+ * sheet's settings: its one statement besides the values it declares, as a note is none. Each
+ * other statement is a layer of the closure's too, so this is the closure holding one layer.
+ */
+function presentedView(closure: ClosureExpr): Expr | undefined {
+  const statements = closure.body.statements.filter(stmt => !(stmt.kind === 'declStmt' && stmt.declaration.kind === 'varDecl'))
+  const only = statements.length === 1 ? statements[0]! : undefined
+  return only?.kind === 'exprStmt' ? only.expression : only?.kind === 'returnStmt' ? only.value ?? undefined : undefined
+}
 
 function callName(expr: Expr): string | null {
   if (expr.kind === 'identifier') return expr.name
@@ -143,6 +154,8 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   const previews: { body: Block; node: MutableNode }[] = []
   const tokens = new Map<string, VarDecl[]>()
   const contextual = new Map<string, VarDecl[]>()
+  /** The one view each sheet, popover or cover closure shows (`presentedView`), and how, given to its node as `presented` (Wave 4b). */
+  const shown = new Map<Expr, 'sheet' | 'cover'>()
   /**
    * Each file lexed once, with its tokens written as a fingerprint writes them, joined, and
    * where each one's writing starts in that, so a run of them is one slice of it.
@@ -298,6 +311,8 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     const node = add(custom.length === 1 ? 'component' : name === 'ForEach' || name === 'List' && chain.base.args.length > 0 ? 'collection' : builtin ? 'view' : 'opaque', name, expr.span, parent.owner, parent)
     if (custom.length === 1) Object.assign(node, { definitionId: custom[0]!.node.id })
     if (helper) Object.assign(node, { helper: true })
+    const shownAs = node.kind !== 'opaque' ? shown.get(expr) : undefined
+    if (shownAs) Object.assign(node, { presented: shownAs })
     // A run is part of the text it is joined into, which it can't leave or be wrapped out of.
     if (run) Object.assign(node, { textRun: true, argument: true })
     if (joined) {
@@ -354,9 +369,9 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }
-    if (!title) Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', { deploymentTarget: input.deploymentTarget, allowEdits: !!node.controls, row: isRow(node, layerOf) }))
+    if (!title) Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', { deploymentTarget: input.deploymentTarget, allowEdits: !!node.controls, row: isRow(node, layerOf), presented: shownAs }))
     // The same chain read as a layer: one value per Figma property (Wave 2).
-    if (node.controls && !title) {
+    if (node.controls && !title && !isNonView(node)) {
       const layer = readLayer(expr, layerContext(layers, node, parent, texts.get(node.source.file) ?? ''))
       if (layer) Object.assign(node, { layer })
     }
@@ -423,6 +438,8 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       const preview = name === 'contextMenu' ? modifier.args.find(arg => arg.label === 'preview')?.value : undefined
       if (closure?.kind === 'closure') {
         const slot = add('branch', label, closure.span, parent.owner, node)
+        const view = PRESENTED_SLOTS.has(label) ? presentedView(closure) : undefined
+        if (view) shown.set(view, name === 'fullScreenCover' ? 'cover' : 'sheet')
         block(closure.body, slot, closureScope(closure, scope))
         if (preview?.kind === 'closure') block(preview.body, add('branch', CONTEXT_MENU_PREVIEW, preview.span, parent.owner, node), closureScope(preview, scope))
       } else if (name === 'background' || name === 'overlay') {

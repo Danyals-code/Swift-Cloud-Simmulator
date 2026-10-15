@@ -558,7 +558,8 @@ test('Add with nothing selected makes the view the last row of a screen\'s list 
   await page.getByTestId('add-view-text').click()
   await expect(page.getByTestId('add-view-palette')).toHaveCount(0)
 
-  await expect(page.getByTestId('render-tree').getByText('Text', { exact: true })).toBeVisible()
+  // On the list's own phone: its sheet's phone draws the list too, behind the sheet (Wave 4b).
+  await expect(page.locator('[data-testid="gallery-page"][data-page-kind="root"]').getByTestId('render-tree').getByText('Text', { exact: true })).toBeVisible()
   const text = await source(page)
   expect(text).toContain('List {\n            ForEach(items) { item in\n                Text(item.name)\n            }\n            Text("Text")\n        }')
 })

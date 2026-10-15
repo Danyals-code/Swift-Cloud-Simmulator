@@ -1,6 +1,8 @@
 {
   "source": "Built from tests/fixtures/ios27-system-ui-4a.swift with swiftc for arm64-apple-ios27.0-simulator (Xcode 27.0, 27A266a, SDK 27.0, warnings as errors) and run on a new iPhone 18 Pro simulator (ECD19CCB-2BD2-4361-804C-7496085499F9, iOS 27.0), light appearance forced with simctl ui, status bar overridden to 9:41; one launch per screen with -screen <name>. Swipes and the long press were made with simulated touches (a drag of about 140 pt for 0.4 s, held 0.2 s, then released; a held drag for the full swipe; a 1.5 s press), on 2026-10-15. 1206x2622 pixels / 402x874 points at 3x. Captures marked tool were taken with tooling/capture-ios27.mjs and the fixture as it is now; the others with simctl io screenshot, the command the tool runs, the titles one before the swipe-widths screen was added to the fixture (no other screen changed). The context-menu-leading, context-menu-inset, context-menu-bottom and swipe-tint screens were added after those captures, and captured with the tool the same day (no other screen changed).",
   "fixtureSha256": "af836d8fc67f0e7374c584011e054ca7bddf38dc811da6c5e7b86582a0cce404",
+  "source4b": "Built from tests/fixtures/ios27-system-ui-4b.swift with swiftc for arm64-apple-ios27.0-simulator (Xcode 27.0, 27A266a, SDK 27.0, warnings as errors) and run on the same iPhone 18 Pro simulator (ECD19CCB-2BD2-4361-804C-7496085499F9, iOS 27.0), light appearance, status bar overridden to 9:41; one launch per screen with -screen <name>, every sheet up at launch, on 2026-10-15. Every capture was taken with tooling/capture-ios27.mjs and the fixture as it is now; bottom-bar-search-pulled after a simulated drag of 120 pt down the list.",
+  "fixture4bSha256": "0171a5909f01565d8ff3db11f843c79546f978df491b9ab1552518a6cc6b0b17",
   "captures": [
     { "file": "list-rows.png", "screen": "list-rows", "tool": true, "sha256": "772a5fd6687e0f88c4bb2f1b2662f4e27a706de5ee2f295050a039f08fd93091" },
     { "file": "swipe-trailing-labels.png", "screen": "swipe-trailing", "row": "Labels, swiped left", "tool": true, "sha256": "6502f92f2e542f22e29c921a5f888d315a4bbfb3592491b7c0702b19aa922f51" },
@@ -19,7 +21,23 @@
     { "file": "context-menu-leading.png", "screen": "context-menu-leading", "row": "Hold me, 16 in, pressed 1.5 s", "tool": true, "sha256": "bd40ec77e138f41df15923f1273272b065fcc4cb08cdd7fdf803a17f86535c88" },
     { "file": "context-menu-inset.png", "screen": "context-menu-inset", "row": "Hold me, 48 in, pressed 1.5 s", "tool": true, "sha256": "c373d81f36c04dbe4a9780bf3b1602007fc12d3cb0b20f27ba286cd3af1f9934" },
     { "file": "context-menu-bottom.png", "screen": "context-menu-bottom", "row": "Hold me, at the bottom, pressed 1.5 s", "tool": true, "sha256": "cc7fab2d6976e80aeec4ef6df5d1d410c19af58a63dc1c6aba8fa29b901a1d6c" },
-    { "file": "swipe-tint.png", "screen": "swipe-tint", "row": "Both rows, swiped left", "tool": true, "sha256": "e85099f537f603d9ed80ab64c3f1d0f18f8f47b38a51febee4aefd1ea1466534" }
+    { "file": "swipe-tint.png", "screen": "swipe-tint", "row": "Both rows, swiped left", "tool": true, "sha256": "e85099f537f603d9ed80ab64c3f1d0f18f8f47b38a51febee4aefd1ea1466534" },
+    { "file": "principal-inline.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "principal", "tool": true, "sha256": "ebb85fe2997845f5758f04b4a38b5b411badbb44ecf2b978107bef3e93dde8b2" },
+    { "file": "principal-large.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "principal-large", "tool": true, "sha256": "59682e07c86cf84dc0163d220a16bc0ff5f9ba4a59d9d190310ff027ec746e17" },
+    { "file": "bottom-bar.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "bottom-bar", "tool": true, "sha256": "6aa70e4b9eaddb6ccf663294e45605e06e2895f07c6a280808cc86c0e2e9b65c" },
+    { "file": "bottom-bar-items.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "bottom-bar-items", "tool": true, "sha256": "7b7731009bf8d47f89b4744148fea869620def6c4f0670ba46f65977e656da6a" },
+    { "file": "bottom-bar-tabs.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "bottom-bar-tabs", "tool": true, "sha256": "79f6791819e2819421a32333183bcc4e476ae7fc57cf88a87b93a2889f562487" },
+    { "file": "bottom-bar-four-tabs.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "bottom-bar-four-tabs", "tool": true, "sha256": "cefd14802c7f5d8a17776f3b7123df3f72e84cd46c300e5dce654c5950edfcf9" },
+    { "file": "bottom-bar-search.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "bottom-bar-search", "tool": true, "sha256": "6aa70e4b9eaddb6ccf663294e45605e06e2895f07c6a280808cc86c0e2e9b65c" },
+    { "file": "bottom-bar-search-pulled.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "bottom-bar-search", "tool": true, "sha256": "c0bfa9da5fb288ddebb87b087816a7a2de03bc288cbf4f3d034c21dee4fd00fc", "state": "list pulled down 120 pt and let go" },
+    { "file": "tab-bar-hidden.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "tab-bar-hidden", "tool": true, "sha256": "bbc7351db778c28da834b50b2be63d598fa8fa2fe2abaae97d7994f2d91ce0ae" },
+    { "file": "cuv-search.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "cuv-search", "tool": true, "sha256": "e3b32ca5bb8f9e8eadba98ec43a60b9f2bf4c6e9ce390084750d95361c6832d5" },
+    { "file": "cuv-search-member.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "cuv-search-member", "tool": true, "sha256": "a39d437cd0ffb7c919ac6a4e1c2b6404d21ed856e42eef1e2fa4f244961c17c8" },
+    { "file": "cuv-closure.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "cuv-closure", "tool": true, "sha256": "8ff5d603e1fe5aaa5dcbe082d74a318aee513830400156a6b6cffa1c7075d4ed" },
+    { "file": "sheet-medium.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "sheet-medium", "tool": true, "sha256": "f56d15fe20739d6446ffa1ea155d2a0042855370ba2c022d24cbbff6add4c0c7" },
+    { "file": "sheet-medium-large.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "sheet-medium-large", "tool": true, "sha256": "108de6d3f05ab30082b2900b72a31918ee671276b3a33f91b20e4b63c5be1673" },
+    { "file": "sheet-height.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "sheet-height", "tool": true, "sha256": "ce6d153dc3717bab4c79ca6fdce85d5c2d750f205baf8e740cf60db37f8abda0" },
+    { "file": "sheet-styled.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "sheet-styled", "tool": true, "sha256": "304a1af650926300c10d411385c9be615a231c86b6ca67464bcc53f998a99612" }
   ],
   "measured": {
     "units": "Points. x from the screen's leading edge, y from its top. Every list is the default inset grouped style: its card runs from x 16 to 386, and its first row from y 97 to 149, each row 52 tall. Edges are read along a line through a shape's middle; a capsule's height down its middle.",
@@ -98,6 +116,73 @@
       ],
       "separatorThickness": 1,
       "tintOpaque": true
+    },
+    "toolbar": {
+      "principal": {
+        "inline": { "title": { "text": "Inbox", "font": "headline", "ink": { "x": [180.67, 222], "y": [70.33, 83] } }, "subtitle": { "text": "3 unread", "font": "caption", "ink": { "x": [176.67, 224.67], "y": [89.33, 98.33] } }, "trailingButton": { "x": [325, 385.67], "y": [62.67, 105.33] } },
+        "large": { "item": { "text": "Custom", "ink": { "x": [171.33, 230.33], "y": [78, 90.67] } }, "largeTitle": { "ink": { "x": [18, 101.67], "y": [128, 152.33] } } },
+        "note": "A .principal item takes the title's place in the bar's row, centred on it (the row's middle is y 84). With the default title display mode the large title is still drawn under the bar, where it is without one."
+      },
+      "bottomBar": {
+        "capsule": { "height": 48, "y": [798, 846], "margin": 28, "note": "The capsule is the bottom search field's (iphone18pro-misrenders search-root): 48 tall, its outline from 797.33 to 846.67, 28 in from the screen's edges." },
+        "split": { "edit": { "x": [27.33, 90], "titleInk": [45.33, 71] }, "compose": { "x": [325.33, 374.67], "glyph": [340, 359] }, "note": "ToolbarItemGroup(placement: .bottomBar) { Button(\"Edit\"); Spacer(); Button(\"Compose\", systemImage:) }: a Spacer splits the bar into a glass capsule for each side, at the screen's edges. A title is about 18 in from its capsule's ends; an icon alone is a 48 circle." },
+        "together": { "capsule": { "x": [145.33, 256.67] }, "editInk": [160.33, 186], "shareGlyph": [221, 240.33], "note": "Two ToolbarItem(placement: .bottomBar) with no Spacer share one capsule, centred: the title 15 in from its end, the icon centred about 26 in from the other." },
+        "twoTabs": { "tabBar": { "x": [106.33, 295.33], "y": [790.33, 853.33] }, "edit": { "x": [27.33, 90] }, "compose": { "x": [325.33, 374.67] }, "note": "In a TabView the bar's items stay where they are alone, on the tab bar's row, beside the tab bar centred between them." },
+        "fourTabs": { "tabBar": { "x": [20.33, 381.67], "y": [790.33, 853.33] }, "note": "A tab bar of four tabs is drawn over the bar's items, which show faintly through its glass." },
+        "search": { "atRest": "none drawn", "pulledDown": { "field": { "x": [16, 386], "y": [168, 212] }, "listCardTop": 222 }, "note": "Beside a bottom bar, .searchable with the automatic placement goes in the navigation bar's drawer, as it does with a tab bar (iphone18pro-misrenders search-tab-content): folded away at rest, under the title once the list is pulled down." }
+      },
+      "tabBarHidden": ".toolbar(.hidden, for: .tabBar) on a tab's content hides the tab bar: nothing is drawn below the list."
+    },
+    "contentUnavailable": {
+      "search": {
+        "icon": { "symbol": "magnifyingglass", "ink": { "x": [182, 220.33], "y": [381.33, 420] } },
+        "title": { "text": "No Results for “kiwi”", "ink": { "x": [105.33, 296.67], "y": [446.67, 462.67] } },
+        "description": { "text": "Check the spelling or try a new search.", "lines": 1, "ink": { "x": [33, 368.67], "y": [474.67, 493] } },
+        "note": "ContentUnavailableView.search(text: \"kiwi\"): the stock icon, title and description, centred on the screen's safe area, as the title form is drawn."
+      },
+      "searchMember": {
+        "title": { "text": "No Results", "ink": { "x": [152, 251], "y": [447.33, 462.67] } },
+        "note": "ContentUnavailableView.search: the same icon and description, titled \"No Results\"."
+      },
+      "closure": {
+        "icon": { "symbol": "tray.fill", "ink": { "x": [178, 224.33], "y": [348.33, 382] } },
+        "title": { "text": "No Mail", "ink": { "x": [167.67, 235], "y": [408.67, 424.67] } },
+        "description": { "ink": { "x": [48, 354.33], "y": [436.67, 455] } },
+        "actions": [{ "title": "Refresh", "style": "automatic", "ink": { "x": [176, 226.67], "y": [494.33, 506] }, "color": [0, 136, 255] }, { "title": "Compose", "style": "borderedProminent", "capsule": { "x": [158.33, 244], "y": [529, 557] }, "titleInk": { "x": [169.33, 233] } }],
+        "note": "ContentUnavailableView { Label(\"No Mail\", systemImage: \"tray.fill\") } description: { Text } actions: { Button(\"Refresh\"); Button(\"Compose\").buttonStyle(.borderedProminent) }: the label's icon and title and the description drawn as the title form draws them, 28 between title and description at the ink. The actions are a column under the description at the small control size (15 pt titles, a 28 tall prominent capsule), Refresh's ink starting 39.33 under the description's and Compose's capsule 74 under it; the whole is centred, 38 higher than the title form for the actions. The preview puts the column 34 under the description's line and its buttons 18 apart, which puts Refresh's middle 55 under the description's and Compose's 96, against 54.33 and 97.17 at the ink."
+      }
+    },
+    "sheets": {
+      "dim": {
+        "opener": [242, 242, 247],
+        "dimmed": [194, 194, 198],
+        "note": "black at 0.2 over the opener"
+      },
+      "medium": {
+        "x": [8, 394],
+        "top": 414.67,
+        "bottom": 866,
+        "grabber": "none with one detent",
+        "note": "451.33 tall; the preview draws it 454 (docs/ios27-appearance.md, known differences)."
+      },
+      "mediumLarge": {
+        "top": 414.67,
+        "grabber": { "x": [172.33, 229.67], "y": [420.67, 424.67] },
+        "note": "With two detents the automatic grabber is shown, 57.33 by 4, 6 under the top."
+      },
+      "height200": {
+        "top": 641,
+        "height": 225,
+        "grabber": { "x": [172.33, 229.67], "y": [647, 651], "color": [166, 166, 172], "over": [230, 230, 235] }
+      },
+      "styled": {
+        "fill": [255, 204, 0],
+        "cornerRadius": 12,
+        "grabberOver": [196, 145, 0],
+        "x": [8, 394],
+        "top": 415,
+        "note": "presentationBackground(.yellow) fills the sheet with no material; presentationCornerRadius(12) rounds its top corners at 12."
+      }
     }
   }
 }

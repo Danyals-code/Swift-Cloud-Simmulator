@@ -96,6 +96,9 @@ const EVERY_KIND: { readonly [K in Operation['kind']]: Extract<Operation, { kind
   'behavior': { kind: 'behavior', action: { type: 'append', collection: S, record }, replace: false },
   'bind-state': { kind: 'bind-state', name: S, create: { value: S } },
   'transition': { kind: 'transition', state: S, style: 'slide', duration: 0.3 },
+  'toolbar-item-add': { kind: 'toolbar-item-add', placement: 'trailing', snippet: `Button("${S}") { }` },
+  'searchable-add': { kind: 'searchable-add', prompt: S },
+  'searchable-remove': { kind: 'searchable-remove' },
 }
 
 describe('design edits in the event log', () => {

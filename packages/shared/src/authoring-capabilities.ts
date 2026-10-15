@@ -77,6 +77,9 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('NavigationStack', 'view', [[]], true, '16.0'),
   capability('NavigationLink', 'view', [[null], [null, 'destination'], ['destination']], true),
   capability('WindowGroup', 'view', [[]], true, '14.0'),
+  // A toolbar's items, whose Placement Bars sets (Wave 4b).
+  capability('ToolbarItem', 'view', [[], ['placement'], ['id'], ['id', 'placement']], true, '14.0'),
+  capability('ToolbarItemGroup', 'view', [[], ['placement']], true, '14.0'),
   capability('padding', 'modifier', [[], [null], [null, null]]),
   capability('frame', 'modifier', [...optionalForms(['width', 'height', 'alignment']), ...optionalForms(['minWidth', 'idealWidth', 'maxWidth', 'minHeight', 'idealHeight', 'maxHeight', 'alignment'])]),
   capability('font', 'modifier', [[null]]), capability('foregroundColor', 'modifier', [[null]]),
@@ -139,6 +142,15 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('swipeActions', 'modifier', optionalForms(['edge', 'allowsFullSwipe']), true, '15.0'),
   capability('contextMenu', 'modifier', [[], ['menuItems']], true),
   { ...capability('contextMenu', 'modifier', [['preview'], ['menuItems', 'preview']], true, '16.0'), id: 'modifier.contextMenu.preview' },
+  // A sheet's settings, on the view it shows (Wave 4b).
+  capability('presentationDetents', 'modifier', [[null], [null, 'selection']], false, '16.0'),
+  capability('presentationDragIndicator', 'modifier', [[null]], false, '16.0'),
+  capability('presentationBackground', 'modifier', [[null]], false, '16.4'),
+  capability('presentationCornerRadius', 'modifier', [[null]], false, '16.4'),
+  capability('interactiveDismissDisabled', 'modifier', [[], [null]], false, '15.0'),
+  // A screen's search field (Wave 4b).
+  capability('searchable', 'modifier', [['text'], ['text', 'prompt'], ['text', 'placement'], ['text', 'placement', 'prompt']], false, '15.0'),
+  { ...capability('searchable', 'modifier', [['text', 'isPresented'], ['text', 'isPresented', 'prompt'], ['text', 'isPresented', 'placement'], ['text', 'isPresented', 'placement', 'prompt']], false, '17.0'), id: 'modifier.searchable.presented' },
   capability('listRowSpacing', 'modifier', [[null]], false, '17.0'),
   capability('listSectionSpacing', 'modifier', [[null]], false, '17.0'),
   // The v1 modifier catalog: what the Add menu writes and every card can edit.

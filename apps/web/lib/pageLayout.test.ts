@@ -21,6 +21,12 @@ it('places a sheet opened from several screens once, beside the first opener, wi
   expect(layout.arrows).toEqual([{ from: 'Home', to: 'Profile', kind: 'destination' }, { from: 'Home', to: 'Edit·1', kind: 'sheet' }, { from: 'Profile', to: 'Edit·1', kind: 'sheet' }])
 })
 
+it('draws a sheet or popover once, over its first opener, but each screen’s own alert over that screen (Wave 4b)', () => {
+  const same = (p: PagePreview) => p.id.split('·')[0]!
+  const pages = [page('Home'), page('Profile', 'Home'), page('Pick·1', 'Home', 'popover'), page('Pick·2', 'Profile', 'popover'), page('Ask·1', 'Home', 'alert'), page('Ask·2', 'Profile', 'alert')]
+  expect(shape(pageSlots(pages, undefined, same))).toEqual([['Home', 0, 0, 0], ['Profile', 0, 1, 0], ['Ask·2', 0, 2, 0], ['Pick·1', 0, 1, 1], ['Ask·1', 0, 1, 2]])
+})
+
 it('shows one tab with its screens when the others are hidden, and keeps orphans and unlinked screens visible', () => {
   const pages = [page('Library'), page('Details', 'Library'), page('Saved'), page('Compose', 'Saved')]
   expect(shape(pageSlots(pages, 'Saved'))).toEqual([['Saved', 1, 0, 0], ['Compose', 1, 1, 0]])

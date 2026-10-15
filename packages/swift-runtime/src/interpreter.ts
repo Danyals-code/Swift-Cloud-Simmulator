@@ -150,6 +150,14 @@ const MAX_INSTANCE_DEPTH = 100
 const MAX_SAFE_INT = Number.MAX_SAFE_INTEGER
 
 /**
+ * Result builders whose body is a list, as `@ViewBuilder`'s is. `@ToolbarContentBuilder`
+ * builds a toolbar's items the same way, so a property of two `ToolbarItem`s gives both
+ * (Wave 4b).
+ */
+const BUILDER_ATTRIBUTES: ReadonlySet<string> = new Set(['ViewBuilder', 'ToolbarContentBuilder'])
+const isBuilder = (attributes: readonly { readonly name: string }[]): boolean => attributes.some((a) => BUILDER_ATTRIBUTES.has(a.name))
+
+/**
  * A tree-walking interpreter for the supported Swift subset.
  *
  * Three things it takes seriously, because each is a silent-wrongness risk rather
@@ -724,7 +732,7 @@ export class Interpreter {
         this.globals.child(target),
         span,
         namedTypeOf(computed.typeAnnotation),
-        computed.attributes.some((a) => a.name === 'ViewBuilder'),
+        isBuilder(computed.attributes),
       )
     }
 
@@ -787,7 +795,7 @@ export class Interpreter {
         this.globals.child(target),
         span,
         namedTypeOf(computed.typeAnnotation),
-        computed.attributes.some((a) => a.name === 'ViewBuilder'),
+        isBuilder(computed.attributes),
       )
       return this.helperView(target, member, computed.typeAnnotation, value, span)
     }
@@ -990,7 +998,7 @@ export class Interpreter {
         env,
         span,
         namedTypeOf(decl.returnType),
-        decl.attributes.some((a) => a.name === 'ViewBuilder'),
+        isBuilder(decl.attributes),
       )
       return fn.self ? this.helperView(fn.self, decl.name, decl.returnType, value, span) : value
     } finally {

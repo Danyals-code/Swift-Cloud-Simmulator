@@ -503,10 +503,10 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Array', 'Dictionary', 'Set', 'Optional', 'Range', 'ClosedRange',
   'Color', 'UIColor', 'Font', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment',
   'Edge', 'EdgeInsets', 'Angle', 'UnitPoint', 'CGFloat', 'CGSize', 'CGPoint', 'CGRect',
-  'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
+  'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent', 'Visibility',
   'Material', 'StrokeStyle', 'GeometryProxy', 'ScrollViewProxy', 'Gradient', 'AnyShapeStyle', 'Glass',
   'RectangleCornerRadii',
-  'ToolbarItemPlacement', 'Binding', 'NavigationPath', 'Alert', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet', 'Scanner', 'CharacterSet',
+  'ToolbarItemPlacement', 'ToolbarContent', 'Binding', 'NavigationPath', 'Alert', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet', 'Scanner', 'CharacterSet',
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
   'Task', 'MainActor', 'Duration', 'Sendable', 'Comparable', 'Equatable', 'Hashable',
   'ViewModifier', 'ButtonStyle', 'LabelStyle', 'ToggleStyle', 'Configuration',
@@ -569,9 +569,15 @@ export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean }> = ne
   ['GestureState', { supported: true }],
 ])
 
+/**
+ * The bars `.toolbar(.hidden, for: …)` hides in the preview, as iOS does (Wave 4b). The preview
+ * draws the others still, and the checker says so.
+ */
+export const HIDDEN_BARS: readonly string[] = ['navigationBar', 'bottomBar', 'tabBar']
+
 /** Attributes that are meaningful rather than property wrappers. */
 export const KNOWN_ATTRIBUTES: ReadonlySet<string> = new Set([
-  'main', 'ViewBuilder', 'escaping', 'autoclosure', 'available', 'discardableResult',
+  'main', 'ViewBuilder', 'ToolbarContentBuilder', 'escaping', 'autoclosure', 'available', 'discardableResult',
   'inlinable', 'frozen', 'objc', 'MainActor', 'Observable', 'Sendable', 'Previewable',
 ])
 

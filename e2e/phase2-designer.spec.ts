@@ -19,11 +19,14 @@ async function add(page: Page, kind: string) {
   await expect(page.getByTestId('add-view-palette')).toBeHidden()
   await expect(page.getByTestId('authoring-inspector')).toHaveAttribute('aria-busy', 'false')
 }
+/** Titles the button just added to Home, drawn on Home's own phone: a sheet's phone draws Home too, behind the sheet (Wave 4b). */
 async function title(page: Page, name: string) {
   const field = page.getByTestId('settings-basics').getByRole('textbox', { name: 'Title', exact: true })
   await field.fill(name); await field.press('Enter')
-  await expect(page.getByTestId('render-tree').getByRole('button', { name, exact: true })).toBeVisible()
+  await expect(home(page).getByTestId('render-tree').getByRole('button', { name, exact: true })).toBeVisible()
 }
+/** Home's phone: the app's first screen, the one phone that starts its lane. */
+const home = (page: Page) => page.locator('[data-testid="gallery-page"][data-page-kind="root"]')
 /** Design's left panel: App, its screens and the focused screen's layers, in one tree. */
 const navigator = (page: Page) => page.getByRole('navigation', { name: 'Layers', exact: true })
 /** A screen's own button in the navigator, which opens it on the canvas. */
@@ -129,8 +132,9 @@ test('builds a three-screen club flow with custom color, image, navigation, shee
   await page.getByRole('combobox', { name: 'Interaction screen', exact: true }).selectOption('__new')
   await page.getByRole('textbox', { name: 'Interaction screen name', exact: true }).fill('Welcome')
   await saveInteraction(page)
-  // A sheet is listed under Sheets, apart from the screens pushed in the stack.
-  await navigator(page).getByRole('button', { name: 'Expand Sheets', exact: true }).click()
+  // A sheet is listed under the screen it is shown over, after the screen it pushes (Wave 4b):
+  // under Home, which is open as the screen in focus.
+  await expect(navigator(page).getByRole('button', { name: 'Collapse Home', exact: true })).toBeVisible()
   await expect(screenButton(page, 'Welcome')).toBeEnabled()
   await screenButton(page, 'Home').click()
   await add(page, 'button'); await title(page, 'Subscribe')

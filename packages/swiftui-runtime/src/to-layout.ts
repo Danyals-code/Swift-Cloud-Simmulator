@@ -66,6 +66,7 @@ import {
   MENU,
   NAV_BAR,
   TAB_BAR,
+  BOTTOM_BAR,
   TAB_ITEM,
   type Overlay,
   type ResolvedUI,
@@ -152,6 +153,8 @@ export interface ScreenLayout {
   readonly background: RGBA
   readonly navigationBar: { readonly element: LayoutElement; readonly height: number; readonly large: boolean } | null
   readonly tabBar: LayoutElement | null
+  /** The toolbar's `.bottomBar` items, in the tab bar's row (Wave 4b). */
+  readonly bottomBar?: LayoutElement | null
   readonly search?: { readonly element: LayoutElement; readonly placement: 'top' | 'bottom'; readonly height: number }
   readonly overlay: {
     readonly element: LayoutElement
@@ -297,9 +300,9 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   const body = converter.convertList(ui.content, 'v', 'vertical')
 
   // On a phone, iOS 27 puts the search field at the bottom of the screen, where a tab
-  // bar would be. Where there is one, it goes in the drawer under the title instead.
+  // bar would be. Where there is one, or a bottom bar, it goes in the drawer under the title instead.
   const compact = (options.viewportWidth ?? 393) < 600
-  const drawerSearch = ui.search && (['navigationBarDrawer', 'sidebar'].includes(ui.search.placement) || ui.search.placement === 'automatic' && compact && !!ui.tabBar)
+  const drawerSearch = ui.search && (['navigationBarDrawer', 'sidebar'].includes(ui.search.placement) || ui.search.placement === 'automatic' && compact && !!(ui.tabBar || ui.bottomBar))
   const toolbarSearch = ui.search && !drawerSearch && !compact && ui.navigationBar ? converter.searchField(ui.search, 'toolbar') : null
   const search = ui.search && !drawerSearch && !toolbarSearch
     ? compact
@@ -320,6 +323,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
     : null
 
   const tabBar = ui.tabBar ? converter.tabBar(ui.tabBar) : null
+  const bottomBar = ui.bottomBar ? converter.bottomBar(ui.bottomBar) : null
   const attached = !!ui.overlay && attachedSheet(ui.overlay, options.viewportWidth ?? 393)
 
   const overlay = ui.overlay
@@ -349,6 +353,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
     background,
     navigationBar,
     tabBar,
+    bottomBar,
     overlay,
     hitTargets,
   }
@@ -455,6 +460,8 @@ interface ControlStyles {
   readonly foregroundSet?: boolean
   /** A toolbar item drawn in a capsule it shares with the items beside it, so without a glass of its own. */
   readonly toolbarGroup?: boolean
+  /** A toolbar item in the bottom bar, whose capsules are taller than the navigation bar's (Wave 4b). */
+  readonly bottomBar?: boolean
   /** Whether these views are a button's label, which take the button's colour, grey when it is disabled. */
   readonly buttonLabel?: boolean
 }
@@ -673,8 +680,40 @@ class Converter {
     const outer = this.styles
     this.styles = { ...outer, toolbarGroup: true }
     try {
-      const row: LayoutElement = { kind: 'stack', id: `${prefix}group`, axis: 'horizontal', spacing: 10, alignment: CENTER, children: items.map(item) }
+      const row: LayoutElement = { kind: 'stack', id: `${prefix}group`, axis: 'horizontal', spacing: outer.bottomBar ? 7 : 10, alignment: CENTER, children: items.map(item) }
       return [this.glassSurface({ kind: 'modified', id: `${prefix}grouppad`, modifier: { kind: 'padding', insets: insets(0, 3, 0, 3) }, child: row }, `${prefix}group`, 999, 'circular')]
+    } finally { this.styles = outer }
+  }
+
+  /**
+   * The toolbar's `.bottomBar` items, as the iOS 27 simulator draws them (Wave 4b,
+   * iphone18pro-system-ui): glass capsules 48 tall, 28 in from the screen's edges, on the
+   * line a tab bar or a bottom search field takes. A `Spacer` splits them into a capsule for
+   * each side; items with none between them share one, centred, as the bar's sides do.
+   */
+  bottomBar(bar: NonNullable<ResolvedUI['bottomBar']>): LayoutElement {
+    const outer = this.styles
+    this.styles = { ...withStyles(outer, bar.view, this.scheme), container: 'toolbar', bottomBar: true }
+    this.styles = { ...this.styles, label: this.styles.label ?? 'iconOnly' }
+    try {
+      const children: LayoutElement[] = []
+      let run: ViewValue[] = []
+      const close = () => { if (run.length) children.push(...this.toolbarSide(run, `bottombar-${children.length}-`)); run = [] }
+      for (const item of bar.items) {
+        if (item.name !== 'Spacer') { run.push(item); continue }
+        close()
+        children.push({ kind: 'spacer', id: item.path ?? `bottombar-${children.length}`, axis: 'horizontal', minLength: 0 })
+      }
+      close()
+      const spaced = children.some(child => child.kind === 'spacer') ? children
+        : [{ kind: 'spacer' as const, id: 'bottombar-lead', axis: 'horizontal' as const, minLength: 0 }, ...children, { kind: 'spacer' as const, id: 'bottombar-trail', axis: 'horizontal' as const, minLength: 0 }]
+      // Centred on the tab bar's line, in the space a tab bar takes, as a bottom search field is.
+      const centring = (SURFACES.tab.height - SURFACES.search.capsuleHeight) / 2
+      return {
+        kind: 'modified', id: 'bottombar-outer',
+        modifier: { kind: 'padding', insets: insets(centring, SURFACES.search.capsuleMargin, centring + SURFACES.tab.bottom, SURFACES.search.capsuleMargin) },
+        child: { kind: 'stack', id: 'bottombar-row', axis: 'horizontal', spacing: 0, alignment: CENTER, children: spaced, debugName: BOTTOM_BAR },
+      }
     } finally { this.styles = outer }
   }
 
@@ -712,8 +751,10 @@ class Converter {
             ...this.toolbarSide(bar.trailing, 'navbar-t'),
           ],
         },
+        // A principal item takes the title's place, centred in the row (Wave 4b, iphone18pro-system-ui).
+        bar.principal.length ? this.chromeContent('navbar-principal-font', () => ({ kind: 'stack', id: 'navbar-principal', axis: 'horizontal', spacing: 8, alignment: CENTER, children: this.convertList(bar.principal, 'navbar-p', 'horizontal') }))
         // Both titles exist so the DOM can cross-fade them without evaluating Swift.
-        search ? { kind: 'modified', id: 'navbar-title-inset', modifier: { kind: 'padding', insets: insets(0, bar.leading.length ? 90 : 0, 0, Math.min(280, this.viewportWidth * 0.34) + bar.trailing.length * 100) }, child: this.chromeContent('navbar-title-font', () => this.styledText('navbar-title', bar.title, 'headline', 'label')) } : this.chromeContent('navbar-title-font', () => this.styledText('navbar-title', bar.title, 'headline', 'label')),
+        : search ? { kind: 'modified', id: 'navbar-title-inset', modifier: { kind: 'padding', insets: insets(0, bar.leading.length ? 90 : 0, 0, Math.min(280, this.viewportWidth * 0.34) + bar.trailing.length * 100) }, child: this.chromeContent('navbar-title-font', () => this.styledText('navbar-title', bar.title, 'headline', 'label')) } : this.chromeContent('navbar-title-font', () => this.styledText('navbar-title', bar.title, 'headline', 'label')),
       ],
     }
 
@@ -2467,10 +2508,13 @@ class Converter {
     const metrics = controlMetrics(this.styles.controlSize)
     // In a toolbar's glass, measured in the iOS 27 simulator: 44 pt tall, an icon alone
     // 44 pt wide, and text 16 pt in for a Button, 10 for a NavigationLink and 8 in a
-    // capsule shared with other items.
+    // capsule shared with other items. In the bottom bar, 48 tall and wide, and text 18 in,
+    // or 12 in a shared capsule (Wave 4b).
     const toolbarGlass = toolbar && glass && !prominent
+    const bottom = this.styles.bottomBar === true
+    const side = bottom ? SURFACES.search.capsuleHeight : 44
     const padV = toolbar ? 11 : metrics.padY
-    const padH = toolbar ? (this.styles.toolbarGroup ? 8 : view.name === 'NavigationLink' ? 10 : 16) : metrics.padX
+    const padH = toolbar ? (this.styles.toolbarGroup ? bottom ? 12 : 8 : view.name === 'NavigationLink' ? 10 : bottom ? 18 : 16) : metrics.padX
 
     const radius = this.styles.buttonBorderShape === 'roundedRectangle'
       ? this.appearance.button.roundedRectangleRadius
@@ -2491,7 +2535,7 @@ class Converter {
       ? {
           kind: 'modified',
           id: `${path}btnpad`,
-          modifier: { kind: 'frame', ...(iconAlone ? { width: 44 } : {}), height: 44, alignment: CENTER },
+          modifier: { kind: 'frame', ...(iconAlone ? { width: side } : {}), height: side, alignment: CENTER },
           child: iconAlone ? tinted : { kind: 'modified', id: `${path}btnpadh`, modifier: { kind: 'padding', insets: insets(0, padH, 0, padH) }, child: tinted },
         }
       : {
@@ -3326,24 +3370,28 @@ class Converter {
    * is what a screen shows *before* it has anything to show, which makes it one of the
    * first things written and one of the first things looked at.
    *
-   * `.search` is the stock spelling and carries its own text and symbol, so a screen
-   * that writes it gets the same thing iOS gives it rather than an empty box.
+   * `.search` and `.search(text:)` are the stock spellings and carry their own words and
+   * symbol, so a screen that writes one gets what iOS gives it rather than an empty box. The
+   * closure form draws its own label, description and actions (Wave 4b, iphone18pro-system-ui).
    */
   private contentUnavailable(view: ViewValue, path: string, origin: object): LayoutElement {
     const written = stringArg(positional(view.args, 0))
     const symbolArg = stringArg(labelled(view.args, 'systemImage'))
+    // `ContentUnavailableView { Label(…) } description: { … } actions: { … }`: its label is its content.
+    const closures = view.children.length > 0
 
     // `ContentUnavailableView.search` is a static member rather than a call, so it
-    // arrives carrying nothing at all. No title and no symbol can only be that
-    // spelling - the initialisers all take at least a label - and it stands for text
-    // iOS supplies itself.
-    const stock = written === null && symbolArg === null
-    const title = written ?? (stock ? 'No Results' : '')
+    // arrives carrying nothing at all, and `.search(text:)` only what was searched for. No
+    // title, no symbol and no label can only be those spellings - the initialisers all take
+    // at least a label - and they stand for words iOS supplies itself.
+    const stock = !closures && written === null && symbolArg === null
+    const searched = stringArg(labelled(view.args, 'text'))
+    const title = written ?? (stock ? searched ? `No Results for \u201c${searched}\u201d` : 'No Results' : '')
     const symbol = symbolArg ?? (stock ? 'magnifyingglass' : '')
 
     // `description:` takes a `Text`, not a string, so it arrives as a view.
-    const describing = argViews(view, 'description')[0]
-    const description = describing ? textIn(describing).join(' ') : ''
+    const describing = argViews(view, 'description')
+    const description = stock ? 'Check the spelling or try a new search.' : !closures && describing[0] ? textIn(describing[0]).join(' ') : ''
 
     // As the iOS 27 simulator draws it, matched pixel for pixel by the same stack built
     // from plain views: a 40-pt icon in the secondary colour, a bold title3 title 20 pt
@@ -3354,24 +3402,21 @@ class Converter {
     const children: LayoutElement[] = []
     const after = (gap: number, id: string, child: LayoutElement): LayoutElement =>
       children.length ? { kind: 'modified', id, modifier: { kind: 'padding', insets: insets(gap, 0, 0, 0) }, child } : child
+    const icon = (id: string, name: string): LayoutElement => ({
+      kind: 'modified',
+      id: `${id}iconf`,
+      modifier: { kind: 'font', font: { ...bodyFont(this.typeScale), size: 40 * bodyFont(this.typeScale).size / 17 } },
+      child: { kind: 'modified', id: `${id}iconc`, modifier: { kind: 'foregroundStyle', color: this.color('secondaryLabel') }, child: this.symbolImage(`${id}icon`, name) },
+    })
+    const heading = (id: string, words: string) => this.styledText(`${id}title`, words, 'title3', 'label', 700)
 
-    if (symbol) {
-      children.push({
-        kind: 'modified',
-        id: `${path}iconf`,
-        modifier: { kind: 'font', font: { ...bodyFont(this.typeScale), size: 40 * bodyFont(this.typeScale).size / 17 } },
-        child: {
-          kind: 'modified',
-          id: `${path}iconc`,
-          modifier: { kind: 'foregroundStyle', color: this.color('secondaryLabel') },
-          child: this.symbolImage(`${path}icon`, symbol),
-        },
-      })
-    }
-    if (title) children.push(after(20, `${path}titlegap`, this.styledText(`${path}title`, title, 'title3', 'label', 700)))
+    if (symbol) children.push(icon(path, symbol))
+    if (title) children.push(after(20, `${path}titlegap`, heading(path, title)))
     if (description) {
       children.push(after(title ? 3 : 20, `${path}descgap`, this.styledText(`${path}desc`, description, 'title3', 'secondaryLabel')))
     }
+    if (closures) children.push(...this.unavailableParts(view, path, children.length > 0, icon, heading))
+    const actions = closures && argViews(view, 'actions').length > 0
 
     return {
       kind: 'modified',
@@ -3385,7 +3430,7 @@ class Converter {
       child: {
         kind: 'modified',
         id: `${path}inset`,
-        modifier: { kind: 'padding', insets: insets(0, 32, 30, 32) },
+        modifier: { kind: 'padding', insets: insets(0, 32, actions ? 0 : 30, 32) },
         child: {
           kind: 'modified',
           id: `${path}centred`,
@@ -3402,6 +3447,58 @@ class Converter {
         },
       },
     }
+  }
+
+  /**
+   * The closure form's label, description and actions (Wave 4b). A `Label` is drawn as the
+   * title form's icon over its title, under the label's own path, so a click on either finds
+   * it; other views as a title or a description are. The actions are a column at the small
+   * control size, 34 under the description and 18 apart, where the iOS 27 simulator puts
+   * them (iphone18pro-system-ui, `contentUnavailable.closure`).
+   */
+  private unavailableParts(
+    view: ViewValue,
+    path: string,
+    above: boolean,
+    icon: (id: string, name: string) => LayoutElement,
+    heading: (id: string, words: string) => LayoutElement,
+  ): LayoutElement[] {
+    const parts: LayoutElement[] = []
+    const gap = (size: number, id: string, child: LayoutElement): LayoutElement =>
+      above || parts.length ? { kind: 'modified', id, modifier: { kind: 'padding', insets: insets(size, 0, 0, 0) }, child } : child
+    const styled = (id: string, style: string, weight: number | undefined, child: LayoutElement): LayoutElement => {
+      const font = fontForToken(style, this.typeScale)!
+      return { kind: 'modified', id: `${id}f`, modifier: { kind: 'font', font: weight ? { ...font, weight } : font }, child }
+    }
+    view.children.forEach((label, index) => {
+      const at = label.path ?? `${path}-${index}`
+      const title = label.name === 'Label' ? stringArg(positional(label.args, 0)) : null
+      const symbol = label.name === 'Label' ? stringArg(labelled(label.args, 'systemImage')) : null
+      if (title === null && symbol === null) {
+        parts.push(gap(20, `${at}gap`, styled(at, 'title3', 700, this.convert(label, at, 'vertical'))))
+        return
+      }
+      const drawn: LayoutElement[] = []
+      if (symbol) drawn.push(icon(at, symbol))
+      if (title) drawn.push(drawn.length ? { kind: 'modified', id: `${at}titlegap`, modifier: { kind: 'padding', insets: insets(20, 0, 0, 0) }, child: heading(at, title) } : heading(at, title))
+      parts.push(gap(20, `${at}gap`, { kind: 'stack', id: at, axis: 'vertical', spacing: 0, alignment: CENTER, children: drawn, ...(label.span ? { origin: label.span } : {}) }))
+    })
+    argViews(view, 'description').forEach((described, index) => {
+      const at = described.path ?? `${path}description-${index}`
+      const secondary: LayoutElement = { kind: 'modified', id: `${at}c`, modifier: { kind: 'foregroundStyle', color: this.color('secondaryLabel') }, child: this.convert(described, at, 'vertical') }
+      parts.push(gap(parts.length ? 3 : 20, `${at}gap`, styled(at, 'title3', undefined, secondary)))
+    })
+    const actions = argViews(view, 'actions')
+    if (actions.length) {
+      const outer = this.styles
+      this.styles = { ...outer, controlSize: 'small' }
+      try {
+        const column: LayoutElement = { kind: 'stack', id: `${path}actions`, axis: 'vertical', spacing: 18, alignment: CENTER,
+          children: actions.map((action, index) => this.convert(action, action.path ?? `${path}actions-${index}`, 'vertical')) }
+        parts.push(gap(34, `${path}actionsgap`, column))
+      } finally { this.styles = outer }
+    }
+    return parts
   }
 
   private gauge(view: ViewValue, path: string, origin: object): LayoutElement {

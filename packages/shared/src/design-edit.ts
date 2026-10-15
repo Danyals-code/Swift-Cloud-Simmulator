@@ -13,6 +13,8 @@ export interface DesignControl {
   readonly kind: 'text' | 'number' | 'select' | 'toggle'
   readonly integer?: boolean
   readonly value: string
+  /** What an empty text field shows: what iOS shows when nothing is written, as a search field's “Search” (Wave 4b). */
+  readonly placeholder?: string
   /**
    * What a number is measured in, shown beside it. A `%` value is a share of one, as
    * `.opacity(0.5)` takes it: the field shows and takes it times 100, and the value, min

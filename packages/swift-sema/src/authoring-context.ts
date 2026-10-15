@@ -62,6 +62,7 @@ interface ContextIndex {
   declared?: ReadonlyMap<unknown, readonly Decl[]>
   extensions?: ReadonlyMap<string, readonly ExtensionDecl[]>
   layers?: ReadonlyMap<string, AuthoringNode>
+  calls?: ReadonlyMap<string, readonly AuthoringNode[]>
   readonly owners: Map<string, StructDecl | undefined>
   readonly named: Map<string, StructDecl | undefined>
   readonly containing: Map<string, readonly Node[]>
@@ -147,6 +148,12 @@ export function layerById(ctx: FeatureContext, id: string | undefined): Authorin
   const index = indexOf(ctx)
   index.layers ??= new Map([...ctx.nodes].reverse().map(layer => [layer.id, layer]))
   return id === undefined ? undefined : index.layers.get(id)
+}
+/** The layers that call the definition with an id, in the order written: a component's copies, a helper's calls (Wave 4b). */
+export function callsOf(ctx: FeatureContext, definitionId: string): readonly AuthoringNode[] {
+  const index = indexOf(ctx)
+  index.calls ??= grouped(ctx.nodes, layer => layer.definitionId)
+  return index.calls.get(definitionId) ?? []
 }
 export function scalarType(type: TypeRef | null, initial?: Expr | null): { type: RecordField['type']; optional: boolean } | undefined {
   if (type?.kind === 'optionalType') { const inner = scalarType(type.wrapped); return inner && { ...inner, optional: true } }

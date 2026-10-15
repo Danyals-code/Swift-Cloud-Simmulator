@@ -25,6 +25,62 @@ describe('the SwiftUI the AI is asked for', () => {
     expect([...preview.diagnostics.map(d => d.message), ...preview.logs.filter(log => log.level === 'error').map(log => log.message)]).toEqual([])
   })
 
+  it('no longer steers away from toolbar items in the title’s place or a bottom bar, or an empty state built from closures, which the preview draws (Wave 4b)', () => {
+    expect(SWIFTUI_GUIDANCE).toContain('ToolbarItem placements other than .topBarLeading, .topBarTrailing, .principal and .bottomBar')
+    expect(SWIFTUI_GUIDANCE).not.toMatch(/ContentUnavailableView[^;]*built from content closures/)
+    resetPipelineState()
+    const files = [{ id: 'App.swift', text: `import SwiftUI
+@main struct MailApp: App { var body: some Scene { WindowGroup { NavigationStack { MailScreen() } } } }
+struct MailScreen: View {
+    var body: some View {
+        ContentUnavailableView {
+            Label("No Mail", systemImage: "tray")
+        } description: {
+            Text("New mail appears here.")
+        } actions: {
+            Button("Refresh") { }
+        }
+        .toolbar {
+            ToolbarItem(placement: .principal) { Text("Inbox") }
+            ToolbarItem(placement: .bottomBar) { Button("Compose") { } }
+        }
+    }
+}` }]
+    const preview = compile({ files, canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1 })
+    expect([...preview.diagnostics.map(d => d.message), ...preview.logs.filter(log => log.level === 'error').map(log => log.message)]).toEqual([])
+  })
+
+  it('no longer steers away from a second .toolbar, toolbar content from a builder, or hiding the navigation, tab or bottom bar, which the preview draws (Wave 4b)', () => {
+    expect(SWIFTUI_GUIDANCE).not.toContain('a second .toolbar')
+    expect(SWIFTUI_GUIDANCE).not.toContain('ToolbarContentBuilder')
+    // Any other bar hidden, or hidden with .toolbarVisibility, is still drawn, and a keyboard's toolbar is not.
+    expect(SWIFTUI_GUIDANCE).toContain('.toolbar(.hidden, for:) for any bar but .navigationBar, .tabBar and .bottomBar, and .toolbarVisibility')
+    expect(SWIFTUI_GUIDANCE).toContain('ToolbarItem placements other than .topBarLeading, .topBarTrailing, .principal and .bottomBar')
+    resetPipelineState()
+    const files = [{ id: 'App.swift', text: `import SwiftUI
+@main struct MailApp: App { var body: some Scene { WindowGroup { TabView { NavigationStack { MailScreen() }.tabItem { Label("Mail", systemImage: "tray") } } } } }
+struct MailScreen: View {
+    var body: some View {
+        List { NavigationLink("Welcome") { MessageScreen() } }
+            .navigationTitle("Inbox")
+            .toolbar { actions }
+            .toolbar {
+                ToolbarItem(placement: .bottomBar) { Button("Compose") { } }
+            }
+            .toolbar(.hidden, for: .tabBar)
+    }
+    @ToolbarContentBuilder
+    var actions: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) { Button("Edit") { } }
+    }
+}
+struct MessageScreen: View {
+    var body: some View { Text("Hello").toolbar(.hidden) }
+}` }]
+    const preview = compile({ files, canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1, allPages: true })
+    expect([...preview.diagnostics.map(d => d.message), ...preview.logs.filter(log => log.level === 'error' || log.level === 'warn').map(log => log.message)]).toEqual([])
+  })
+
   it('offers only SF Symbols the preview draws and Apple ships', () => {
     const symbols = offered()
 

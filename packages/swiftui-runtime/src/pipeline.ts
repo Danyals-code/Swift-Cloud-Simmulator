@@ -412,6 +412,7 @@ function eachTree(screen: ScreenLayout, change: (root: PassRoot) => LayoutElemen
     content: at(screen.content),
     navigationBar: screen.navigationBar && { ...screen.navigationBar, element: at(screen.navigationBar.element) },
     tabBar: screen.tabBar && at(screen.tabBar),
+    bottomBar: screen.bottomBar && at(screen.bottomBar),
     ...(screen.search ? { search: { ...screen.search, element: at(screen.search.element) } } : {}),
     overlay: screen.overlay && { ...screen.overlay, ...(screen.overlay.screen ? { screen: eachTree(screen.overlay.screen, change, `${prefix}overlay/`, `${prefix}overlay-surface`) } : {}) },
   }
@@ -431,7 +432,8 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
   const tabHeight = screen.tabBar ? TAB_BAR_HEIGHT : 0
   const regular = canvas.width >= 600
   const topTabs = regular ? tabHeight : 0
-  const bottomTabs = regular ? 0 : tabHeight
+  // A bottom bar shares the tab bar's row (Wave 4b), so the two take its height once.
+  const bottomTabs = Math.max(regular ? 0 : tabHeight, screen.bottomBar ? TAB_BAR_HEIGHT : 0)
   const bottomSearch = screen.search?.placement === 'bottom' ? screen.search.height : 0
   const topSearch = screen.search?.placement === 'top' ? screen.search.height : 0
   // The bars at the bottom stop short of the screen's edge, over the home indicator.
@@ -474,6 +476,8 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
       return node
     }) }
   }
+  // Under the tab bar, which a tab bar of four tabs draws over it, as iOS 27 does.
+  if (screen.bottomBar) tree = appendPlaced(tree, engine.layout(screen.bottomBar, { x: 0, y: bottomBarsEnd - TAB_BAR_HEIGHT, width: canvas.width, height: TAB_BAR_HEIGHT }, env, CENTER, passOptions(pass)), BAR_Z + 500)
   if (screen.tabBar) {
     const bar = engine.layout(screen.tabBar, { x: 0, y: regular ? safeArea.top : bottomBarsEnd - tabHeight, width: canvas.width, height: tabHeight }, env, CENTER, passOptions(pass))
     tree = appendPlaced(tree, bar, BAR_Z + 1000)

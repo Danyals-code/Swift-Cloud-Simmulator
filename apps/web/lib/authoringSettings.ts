@@ -1,4 +1,4 @@
-import { CONTENT_SLOT_NAMES, isHelperDefinition, type AuthoringNode, type AuthoringSnapshot } from '@studio/shared'
+import { CONTENT_SLOT_NAMES, isHelperDefinition, TOOLBAR_ITEMS, type AuthoringNode, type AuthoringSnapshot } from '@studio/shared'
 import { sourceLayerIsVisual } from './sourceLayers'
 
 const NAVIGATION = new Set(['NavigationStack', 'NavigationView', 'NavigationSplitView', 'NavigationLink'])
@@ -101,6 +101,6 @@ export function settingsContextLabel(node: AuthoringNode): string {
   if (NAVIGATION.has(node.name)) return 'Screen navigation'
   if (node.name === 'Section') return 'List section'
   if (node.name === 'Group') return 'Content group'
-  if (node.name === 'ToolbarItem' || node.name === 'ToolbarItemGroup') return 'Toolbar placement'
+  if (TOOLBAR_ITEMS.has(node.name)) return 'Toolbar placement'
   return node.name
 }

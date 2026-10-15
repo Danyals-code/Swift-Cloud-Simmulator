@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { buildAuthoringModel } from '@studio/swift-sema'
 import type { PagePreview } from '@studio/shared'
-import { lacksNavigationBar, screenCatalog, screenLabel, screenRoot, screenTitleControl } from './screens'
+import { screenCatalog, screenLabel, screenTitleControl } from './screens'
 
 /**
  * What a screen is called.
@@ -63,9 +63,10 @@ it('offers a screen title only where a navigation bar shows it, and says why not
 
 it('invites a title only on a screen whose first view sits under a navigation bar', () => {
   const plain = titled('VStack { Text("Hi") }')
-  const rootOf = (view: string) => screenRoot(plain, plain.nodes.find(n => n.kind === 'definition' && n.name === view))
-  expect(lacksNavigationBar(plain, rootOf('SettingsSheet'))).toBe(true)
-  expect(lacksNavigationBar(plain, rootOf('DetailScreen'))).toBe(false)
+  const definitionOf = (view: string) => plain.nodes.find(n => n.kind === 'definition' && n.name === view)
+  // Bars says a title would not show where the screen certainly has no navigation bar (`bars.barless`).
+  expect(definitionOf('SettingsSheet')?.bars?.barless).toBe(true)
+  expect(definitionOf('DetailScreen')?.bars?.barless).toBeFalsy()
 })
 
 /** Where the model can't follow how a screen is shown, the title stays editable: only a certain "no bar" turns it off. */

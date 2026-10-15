@@ -2,6 +2,7 @@ import { beforeEach, expect, it } from 'vitest'
 import type { CompileResult, RenderTree } from '@studio/shared'
 import { FOLIO_FILES } from '@studio/project-model/templates'
 import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
+import { inert } from './render-geometry'
 
 beforeEach(resetPipelineState)
 let revision = 0
@@ -38,7 +39,12 @@ it('places real Folio details and the add form under their owning tabs', () => {
   expect(texts(children[0]!.tree)).toContain('The Secret Garden')
   expect(texts(children[0]!.tree)).toContain('A locked garden, an unexpected friendship')
   expect(texts(children[0]!.tree)).toContain('Save to reading list')
-  expect(children[1]!.tree.nodes.filter(node => node.hitTarget?.role === 'textField').map(node => node.hitTarget?.placeholder)).toEqual(['Title', 'Author'])
+  // The add form is up over the Library that opens it (Wave 4b), whose own search field takes no taps behind it.
+  const sheet = children[1]!.tree.nodes
+  const fields = sheet.filter(node => node.hitTarget?.role === 'textField')
+  expect(fields.filter(node => !inert(sheet, node)).map(node => node.hitTarget?.placeholder)).toEqual(['Title', 'Author'])
+  expect(fields.filter(node => inert(sheet, node)).map(node => node.hitTarget?.placeholder)).toEqual(['Title or author'])
+  expect(texts(children[1]!.tree)).toContain('The Time Machine')
   expect(children.every(page => page.rootId === library.id && !page.active && !page.handlerId)).toBe(true)
   expect(result.pages!.filter(page => page.parentId === roots[1]!.id).map(page => page.name)).toEqual(['Add a book'])
   expect(result.pages!.filter(page => page.parentId === roots[2]!.id)).toHaveLength(0)

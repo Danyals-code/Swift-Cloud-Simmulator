@@ -44,9 +44,9 @@ const blue = (text: string) => render(text).nodes.find(n => { const fill = n.bac
 it('F01 blocks generic styling on Tab, while its content and a custom View named Tab remain editable', () => {
   const text = source('TabView(selection: $selection) { Tab("Home", systemImage: "house", value: 0) { Text("Hello") } }')
   const tab = find(text, 'Tab')
-  expect(tab.modifierCatalog?.some(m => m.available)).toBe(false)
-  expect(tab.modifierCatalog?.find(m => m.name === 'font')?.reason).toContain('inside this tab')
-  expect(plan(text, tab, { kind: 'modifier-add', name: 'font' })).toMatchObject({ ok: false })
+  // A tab is no view, so it is offered no modifier at all (Wave 4b).
+  expect(tab.modifierCatalog).toEqual([])
+  expect(plan(text, tab, { kind: 'modifier-add', name: 'font' })).toMatchObject({ ok: false, reason: 'Tab is part of the app, not a view, so it takes none of a view’s settings. Select the view inside it.' })
   const changed = edit(text, 'Text', { kind: 'modifier-add', name: 'font' })
   expect(changed).toContain('Text("Hello").font(.body)')
   render(changed)

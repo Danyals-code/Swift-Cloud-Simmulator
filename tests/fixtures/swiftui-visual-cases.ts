@@ -37,7 +37,9 @@ export const visualCases: VisualCase[] = [
   test('searchable', 'NavigationStack { List { Text("Result") }.searchable(text: $text).navigationTitle("Search") }', 'Result'),
   test('searchScopes', 'NavigationStack { List { Text("Result") }.searchable(text: $text).searchScopes($choice) { Text("All").tag(0); Text("Saved").tag(1) } }', 'Result', 'searchScopes'),
   test('searchSuggestions', 'NavigationStack { List { Text("Result") }.searchable(text: $text).searchSuggestions { Text("Suggested") } }', 'Result', 'searchSuggestions'),
-  ...['keyboard', 'bottomBar', 'principal'].map(placement => test(`toolbar-${placement}`, `NavigationStack { Text("Base").toolbar { ToolbarItem(placement: .${placement}) { Button("Extra") {} } } }`, 'Base', placement)),
+  test('toolbar-keyboard', 'NavigationStack { Text("Base").toolbar { ToolbarItem(placement: .keyboard) { Button("Extra") {} } } }', 'Base', 'keyboard'),
+  // In place of the title, and in the bottom bar (Wave 4b).
+  ...['bottomBar', 'principal'].map(placement => test(`toolbar-${placement}`, `NavigationStack { Text("Base").toolbar { ToolbarItem(placement: .${placement}) { Button("Extra") {} } } }`, 'Extra')),
   test('navigation', 'NavigationStack { NavigationLink("Details") { Text("Destination") }.navigationTitle("Library").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Compose") {} } } }', 'Compose'),
   test('NavigationSplitView', 'NavigationSplitView { Text("Sidebar") } detail: { Text("Detail") }', 'Sidebar'),
   test('modern-tabs', 'TabView { Tab("Home", systemImage: "house") { Text("Home screen") }; Tab("Saved", systemImage: "star") { Text("Saved screen") } }', 'Home screen'),

@@ -3,9 +3,9 @@ import { openCounter, openInDesign, replaceSource, sourceInCode } from './design
 
 /**
  * Every way SwiftUI presents or pushes a screen is a screen in Design (doc 18, Wave 3b):
- * an alert and a dialog are drawn over the screen that shows them and listed under it, a
- * sheet opened with an item is drawn with a record the screen holds, and one the canvas
- * can't draw says what it needs.
+ * an alert, a dialog and a sheet (Wave 4b) are drawn over the screen that shows them and
+ * listed under it, a sheet opened with an item is drawn with a record the screen holds,
+ * and one the canvas can't draw says what it needs.
  */
 
 const APP = `import SwiftUI
@@ -75,9 +75,13 @@ test('an alert, a dialog and a sheet opened with an item are screens under the s
   // The list, the sheet drawn with the first draft, the alert and the dialog.
   await expect(phones(page)).toHaveCount(4)
   await expect(phone(page, 'sheet').getByTestId('render-tree')).toContainText('Editing Notes')
+  // The sheet is up over the list that opens it, which is drawn behind it (Wave 4b).
+  await expect(phone(page, 'sheet').locator('[data-node-id="overlay-surface"]')).toHaveCount(1)
+  await expect(phone(page, 'sheet').getByTestId('render-tree')).toContainText('Inbox')
   await expect(phone(page, 'alert').getByTestId('render-tree')).toContainText('This can\'t be undone.')
   await expect(phone(page, 'dialog').getByTestId('render-tree')).toContainText('Archive all')
   await expandScreen(page, 'Inbox')
+  await expect(screenRow(page, 'DraftScreen')).toBeVisible()
   await expect(screenRow(page, 'Delete the draft?')).toBeVisible()
   await expect(screenRow(page, 'Archive the list?')).toBeVisible()
   await expect(page.getByTestId('pages-not-drawn')).toHaveCount(0)

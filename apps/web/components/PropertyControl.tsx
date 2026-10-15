@@ -257,7 +257,7 @@ function ValueControl({ control, onChange, label = control.label, caption }: Pro
           {chipShown && tokenChip}
         </span>
         <button type="button" aria-pressed={spreadOut(draft)} disabled={busy} title="Spread the views out, with a Spacer between each pair. Type a number to go back." onClick={() => choose(AUTO_SPACING)}>Auto</button>
-      </span> : withUnit(<input {...input} readOnly={busy} type={/^date:(from|through)$/.test(control.id) ? "datetime-local" : "text"} inputMode={control.kind === 'number' ? 'decimal' : 'text'} placeholder={control.kind === 'number' ? 'Default' : 'Enter value'} onChange={event => change(event.target.value)} />)}
+      </span> : withUnit(<input {...input} readOnly={busy} type={/^date:(from|through)$/.test(control.id) ? "datetime-local" : "text"} inputMode={control.kind === 'number' ? 'decimal' : 'text'} placeholder={control.placeholder ?? (control.kind === 'number' ? 'Default' : 'Enter value')} onChange={event => change(event.target.value)} />)}
     </label>}
     {control.min === 0 && control.max === 1 && <input
       type="range" min="0" max={scale} step={(control.step ?? 0.01) * scale}

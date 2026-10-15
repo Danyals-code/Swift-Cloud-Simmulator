@@ -1,5 +1,4 @@
-import { CONTENT_SLOT_NAMES, CONTEXT_MENU_PREVIEW, LAYOUT_WORDS, MODIFIER_SLOTS, helperPlaces, isHelperCall, isHelperDefinition, nameInWords, reconcileAuthoringSelection, type AuthoringNode, type AuthoringSelection, type AuthoringSnapshot, type HiddenViewInfo, type SourceFile, type SourceSpan, type ViewLayer } from '@studio/shared'
-import { PAGE_SLOTS } from './pageKinds'
+import { CONTENT_SLOT_NAMES, CONTEXT_MENU_PREVIEW, LAYOUT_WORDS, MODIFIER_SLOTS, PAGE_SLOTS, TOOLBAR_ITEMS, helperPlaces, isHelperCall, isHelperDefinition, nameInWords, reconcileAuthoringSelection, type AuthoringNode, type AuthoringSelection, type AuthoringSnapshot, type HiddenViewInfo, type SourceFile, type SourceSpan, type ViewLayer } from '@studio/shared'
 
 export interface SourceLayerNavigation {
   readonly snapshot: AuthoringSnapshot
@@ -191,7 +190,7 @@ export function sourceLayerNotShown(snapshot: AuthoringSnapshot, node: Authoring
   return !shown(node)
 }
 
-const STRUCTURAL_VIEWS = new Set(['ForEach', 'Group', 'NavigationStack', 'NavigationView', 'NavigationSplitView', 'WindowGroup', 'Window', 'ToolbarItem', 'ToolbarItemGroup', 'ViewThatFits', 'EmptyView'])
+const STRUCTURAL_VIEWS = new Set(['ForEach', 'Group', 'NavigationStack', 'NavigationView', 'NavigationSplitView', 'WindowGroup', 'Window', ...TOOLBAR_ITEMS, 'ViewThatFits', 'EmptyView'])
 
 /** A component's name as Layers shows it: `BookRowView` is "Book row". */
 export const friendlyComponentName = (name: string) => name.replace(/View$/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/\b[A-Z]\w*/g, (word, offset: number) => offset ? word.toLowerCase() : word)

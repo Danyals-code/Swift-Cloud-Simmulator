@@ -1,5 +1,8 @@
 import type { RenderNode, RenderTree, ViewLayer } from '@studio/shared'
 
+/** A node's id with the `overlay/` its sheet draws it under taken off, once for each sheet it is in (Wave 4b). */
+const viewId = (node: RenderNode) => node.id.replace(/^(?:overlay\/)+/, '')
+
 export function findLayer(layers: readonly ViewLayer[], id: string): ViewLayer | undefined {
   for (const layer of layers) {
     if (layer.id === id) return layer
@@ -36,7 +39,7 @@ export function layerRenderGroups(layers: readonly ViewLayer[], tree: RenderTree
   for (const painted of tree.nodes) {
     let branch: Branch | undefined = root
     let owner: string | undefined
-    for (const character of painted.id) {
+    for (const character of viewId(painted)) {
       branch = branch.children.get(character)
       if (!branch) break
       owner = branch.owner ?? owner
@@ -86,8 +89,10 @@ export function layerForRenderNode(
   }
 
   let best: ViewLayer | undefined
+  // Read once, not for each layer the walk visits: this runs on every hover (Wave 4b).
+  const id = viewId(node)
   const visit = (layer: ViewLayer): void => {
-    if (node.id.startsWith(layer.id) && (!best || layer.id.length > best.id.length)) best = layer
+    if (id.startsWith(layer.id) && (!best || layer.id.length > best.id.length)) best = layer
     layer.children.forEach(visit)
   }
   layers.forEach(visit)

@@ -103,7 +103,7 @@ describe('Phase 4: logical collections and source-owned data', () => {
     const next = edit(converted, 'List', { kind: 'empty-state', text: 'Nothing here' })
     expect(next[0]!.text).toContain(`        Group {
             if items.isEmpty {
-                Text("Nothing here")
+                ContentUnavailableView("No Results", systemImage: "magnifyingglass", description: Text("Nothing here"))
             } else {
                 List(items) { item in
                     Text(item.title)

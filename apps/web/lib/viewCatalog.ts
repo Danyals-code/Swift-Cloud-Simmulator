@@ -71,6 +71,7 @@ export const VIEW_CATALOG: readonly ViewSnippet[] = [
   { id: 'tabview', name: 'Tabs', swiftName: 'TabView', group: 'Navigation', hint: 'Tabs along the bottom', keywords: 'tabs pages', snippet: 'TabView {\n    Text("First")\n        .tabItem { Label("First", systemImage: "1.circle") }\n    Text("Second")\n        .tabItem { Label("Second", systemImage: "2.circle") }\n}' },
 
   // --------------------------------------------------------------- System
+  { id: 'empty-state', name: 'Empty state', swiftName: 'ContentUnavailableView', group: 'System', hint: 'What a screen shows with nothing in it', keywords: 'empty no results nothing placeholder unavailable', snippet: 'ContentUnavailableView("No Results", systemImage: "magnifyingglass", description: Text("Try a different search."))' },
   { id: 'swipe-action', name: 'Swipe action', swiftName: 'swipeActions', group: 'System', hint: 'A button a row shows when swiped', keywords: 'delete pin flag row leading trailing', snippet: '', action: { modifier: 'swipeActions', on: 'row' } },
   { id: 'context-menu', name: 'Context menu', swiftName: 'contextMenu', group: 'System', hint: 'A menu shown by a long press', keywords: 'long press hold menu copy share', snippet: '', action: { modifier: 'contextMenu', on: 'view' } },
 ]

@@ -1,4 +1,4 @@
-import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, deploymentVersion, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, deploymentVersion, isNonView, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
 import { Parser, afterOffMarkers, commentFollows, hasHumanComment, offMarker, offMarkerText, offMarkersIn, type CallExpr, type Expr, DIRECTIVE_LINE } from '@studio/swift-syntax'
 import { roundedCorners, viewCallChain } from './design-controls'
 import { NEW_BORDER, borderOf, borderSource, cornersOf, type Corners } from './authoring-border'
@@ -43,6 +43,8 @@ interface CatalogEntry {
   readonly only?: readonly string[]
   /** Offered on rows of a list alone (Wave 4a): views in a List, a Form or a Section. */
   readonly row?: true
+  /** Offered on the view a sheet shows alone (Wave 4b), or on a full-screen cover's too. */
+  readonly presented?: 'sheet' | 'cover'
   readonly hidden?: boolean
 }
 
@@ -102,6 +104,12 @@ const CATALOG: readonly CatalogEntry[] = [
   // Their buttons go in a slot of their own, each on a line, which Add with the slot selected adds to (Wave 4a).
   { name: 'swipeActions', label: 'Swipe actions', category: 'behavior', slot: SLOT.behaviour, description: 'Buttons a swipe across the row shows', minimumIOS: 15, row: true, source: options => closureSource('swipeActions', 'Button("Delete", systemImage: "trash", role: .destructive) { }', options) },
   { name: 'contextMenu', label: 'Context menu', category: 'behavior', slot: SLOT.behaviour, description: 'Buttons a long press shows', source: options => closureSource('contextMenu', 'Button("Copy") { }', options) },
+  // A sheet's settings, on the view it shows, which has a field for each too (Wave 4b).
+  { name: 'presentationDetents', label: 'Sheet height', category: 'appearance', slot: SLOT.behaviour, description: 'Medium, large or a fixed height', minimumIOS: 16, presented: 'sheet', source: () => '.presentationDetents([.medium])' },
+  { name: 'presentationDragIndicator', label: 'Grabber', category: 'appearance', slot: SLOT.behaviour, description: 'The bar at the top of a sheet', minimumIOS: 16, presented: 'sheet', source: () => '.presentationDragIndicator(.visible)' },
+  { name: 'presentationBackground', label: 'Sheet background', category: 'appearance', slot: SLOT.behaviour, description: 'A color or a material behind it', minimumIOS: 16.4, presented: 'cover', source: () => '.presentationBackground(.thinMaterial)' },
+  { name: 'presentationCornerRadius', label: 'Sheet corner radius', category: 'appearance', slot: SLOT.behaviour, description: 'Round the sheet’s corners', minimumIOS: 16.4, presented: 'sheet', source: () => '.presentationCornerRadius(24)' },
+  { name: 'interactiveDismissDisabled', label: 'Keep open on swipe', category: 'behavior', slot: SLOT.behaviour, description: 'A swipe down doesn’t close the sheet', minimumIOS: 15, presented: 'sheet', source: () => '.interactiveDismissDisabled()' },
   { name: 'listRowSpacing', label: 'Row spacing', category: 'appearance', slot: SLOT.behaviour, description: 'Space between rows', minimumIOS: 17, only: ['List', 'Form'], source: () => '.listRowSpacing(8)' },
   { name: 'listSectionSpacing', label: 'Section spacing', category: 'appearance', slot: SLOT.behaviour, description: 'Space between sections', minimumIOS: 17, only: ['List', 'Form'], source: () => '.listSectionSpacing(24)' },
   { name: 'padding', label: 'Padding', category: 'layout', slot: SLOT.padding, description: 'Space around it', source: () => '.padding(16)' },
@@ -212,6 +220,18 @@ function segmentsOf(expr: Expr, text: string): { base: CallExpr; segments: Segme
   }
   return { base: chain.base, segments, end }
 }
+/**
+ * What `modifier-remove` takes out for `call`, one of `expr`'s modifiers (Wave 4b): from where
+ * the code before it ends to its own end, a switched-off modifier before it staying. Undefined
+ * where a note or a `#if` in the chain holds its modifiers where they are.
+ */
+export function modifierSegment(expr: Expr, text: string, call: CallExpr): { start: number; end: number } | undefined {
+  const parsed = segmentsOf(expr, text), segment = parsed?.segments.find(s => s.call === call)
+  if (!parsed || !segment) return undefined
+  const { commented, conditional } = heldInPlace(parsed, text, expr.span.file)
+  return commented || conditional ? undefined : { start: segment.start, end: segment.end }
+}
+
 /** Where a call's own text begins: its dot, after any comments or line breaks before it. */
 export function dotOf(call: CallExpr, text: string): number {
   if (call.callee.kind !== 'memberAccess') return call.span.start
@@ -267,7 +287,7 @@ function heldInPlace(parsed: { base: CallExpr; end: number }, text: string, file
  * false while the view's source has a problem to resolve first, and a run of joined text
  * (`node.textRun`) takes only what keeps it a Text (`KEEPS_TEXT`).
  */
-export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, allowEdits = true, row = false }: { deploymentTarget?: string; allowEdits?: boolean; row?: boolean } = {}): { modifiers: AuthoringModifier[]; modifierCatalog: readonly ModifierCatalogEntry[] } {
+export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, allowEdits = true, row = false, presented }: { deploymentTarget?: string; allowEdits?: boolean; row?: boolean; presented?: 'sheet' | 'cover' } = {}): { modifiers: AuthoringModifier[]; modifierCatalog: readonly ModifierCatalogEntry[] } {
   const run = !!node.textRun
   const parsed = segmentsOf(expr, text)
   if (!parsed) return { modifiers: [], modifierCatalog: [] }
@@ -327,7 +347,8 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { d
   // A project's own modifier may return anything, so nothing is added beside it; Apple's return `some View`.
   const unknown = segments.some(segment => segment.call && !isAppleCall(nameOf(segment.call)))
   const available = editable && !unknown
-  return { modifiers, modifierCatalog: catalogOf({ name: OFFERED_TO.has(node.name) ? node.name : '', tab: node.name === 'Tab' && node.kind !== 'component', run, row, available, unknown, version, allowEdits, locked }) }
+  // What is no view takes no view's modifier (Wave 4b).
+  return { modifiers, modifierCatalog: isNonView(node) ? [] : catalogOf({ name: OFFERED_TO.has(node.name) ? node.name : '', run, row, presented, available, unknown, version, allowEdits, locked }) }
 }
 
 /** What holds rows: a view in one is a row of a list (Wave 4a). */
@@ -348,10 +369,11 @@ export function isRow(node: AuthoringNode, byId: (id: string | undefined) => Aut
 interface CatalogFacts {
   /** The view's name when an entry is `only` for it; any other view is offered what one named '' is. */
   readonly name: string
-  readonly tab: boolean
   readonly run: boolean
   /** A row of a list, which is offered the row settings. */
   readonly row: boolean
+  /** How the view is presented, when it is the one a sheet or a cover shows, which is offered their settings. */
+  readonly presented: 'sheet' | 'cover' | undefined
   readonly available: boolean
   readonly unknown: boolean
   readonly version: number
@@ -367,15 +389,15 @@ const OFFERED_TO: ReadonlySet<string> = new Set(CATALOG.flatMap(entry => entry.o
 const catalogs = new Map<string, readonly ModifierCatalogEntry[]>()
 
 function catalogOf(facts: CatalogFacts): readonly ModifierCatalogEntry[] {
-  const { name, tab, run, row, available, unknown, version, allowEdits, locked } = facts
-  const key = [name, tab, run, row, available, unknown, version, allowEdits, locked].join('|')
+  const { name, run, row, presented, available, unknown, version, allowEdits, locked } = facts
+  const key = [name, run, row, presented, available, unknown, version, allowEdits, locked].join('|')
   const built = catalogs.get(key)
   if (built) return built
-  const catalog = CATALOG.filter(entry => (!entry.only || entry.only.includes(name)) && (!entry.row || row)).map(entry => {
+  const catalog = CATALOG.filter(entry => (!entry.only || entry.only.includes(name)) && (!entry.row || row) && (!entry.presented || presented && (presented === 'sheet' || entry.presented === 'cover'))).map(entry => {
     const minimum = Math.max(CATALOG_MINIMUM.get(entry)!, run ? KEEPS_TEXT[entry.name] ?? 13 : 13)
     const styleOnly = !run || entry.name in KEEPS_TEXT
     const supported = available && styleOnly && version >= minimum
-    const reason = !styleOnly ? runRefusal(`Put the joined text in parentheses in Code to give all of it ${entry.label.toLowerCase()}.`) : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : available ? `Needs iOS ${minimum} or newer. Change the deployment target to use it.` : tab ? 'Select the view inside this tab to style its content.' : !allowEdits ? 'This view cannot be changed until its source is resolved.' : locked
+    const reason = !styleOnly ? runRefusal(`Put the joined text in parentheses in Code to give all of it ${entry.label.toLowerCase()}.`) : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : available ? `Needs iOS ${minimum} or newer. Change the deployment target to use it.` : !allowEdits ? 'This view cannot be changed until its source is resolved.' : locked
     return { name: entry.name, label: entry.label, category: entry.category, description: entry.description, ...(entry.hidden ? { hidden: true } : {}), available: supported, reason: supported ? undefined : reason }
   })
   if (catalogs.size >= 256) catalogs.clear()
@@ -384,10 +406,10 @@ function catalogOf(facts: CatalogFacts): readonly ModifierCatalogEntry[] {
 }
 
 /** Move whole segments; never reconstruct an existing modifier or its arguments. */
-export function editModifier(node: AuthoringNode, expr: Expr, text: string, operation: ModifierOperation, deploymentTarget?: string, options: { shadowToken?: string; row?: boolean } = {}): string {
+export function editModifier(node: AuthoringNode, expr: Expr, text: string, operation: ModifierOperation, deploymentTarget?: string, options: { shadowToken?: string; row?: boolean; presented?: 'sheet' | 'cover' } = {}): string {
   const parsed = segmentsOf(expr, text)
   if (!parsed) throw new Error('Select a view with an editable modifier chain.')
-  const model = modifierModel(node, expr, text, { deploymentTarget, row: options.row })
+  const model = modifierModel(node, expr, text, { deploymentTarget, row: options.row, presented: options.presented })
   const { segments } = parsed
   const slices = segments.map(s => text.slice(s.start, s.end))
   const chainStart = segments[0]?.start ?? expr.span.end
@@ -396,6 +418,7 @@ export function editModifier(node: AuthoringNode, expr: Expr, text: string, oper
     const entry = CATALOG.find(c => c.name === operation.name), offered = entry && model.modifierCatalog.find(c => c.name === entry.name)
     // A row's setting off a row says what it needs, and one the view is offered says why not (Wave 4a).
     if (entry?.row && !options.row) throw new Error(`${entry.label} can only be added to a row of a List, a Form or a Section.`)
+    if (entry?.presented && !options.presented) throw new Error(`${entry.label} can only be added to the view a sheet shows.`)
     if (!entry || !offered?.available) throw new Error(offered?.reason ?? 'This modifier cannot be added to the selected view.')
     let index: number
     if (operation.before !== undefined) {
