@@ -9,7 +9,7 @@ import { ModifierStack } from './ModifierStack'
 import { LayerSections } from './layer/LayerSections'
 import { NavigationDestinationEditor } from './NavigationDestinationEditor'
 import { TokenField, valueFields } from './settings/TokenField'
-import { sourceLayerHelperReach, sourceLayerIsVisual, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
+import { sourceLayerHelperReach, sourceLayerIsVisual, sourceLayerLabel, sourceLayerOpens, sourceLayerSlot, sourceLayerType } from '../lib/sourceLayers'
 import { authoringSettingsContext, settingsContextLabel, settingsVisualChildren } from '../lib/authoringSettings'
 import { MenuButton } from './ui/Menu'
 import { SHORTCUT_KEYS } from '../lib/shortcuts'
@@ -139,7 +139,9 @@ export function AuthoringInspector({ node, drawn, stale, onReveal, onChange, fea
         {valueFields(selected, basics, basicProperties).map(field => field.style
           ? <TokenField key={`${field.style.property}:${field.style.token ?? field.style.value}`} field={field} tokens={tokens} busy={stale} onChange={onChange} onCommand={resource} />
           : field.control && onChange ? <PropertyControl key={`${selected.id}:${field.control.id}:${field.control.value}`} control={field.control} onChange={onChange} /> : null)}
-        {!basics.length && !selected.component && !['definition', 'template'].includes(selected.kind) && !interaction && <p className={styles.note}>{selected.properties.some(property => property.valueKind === 'data-binding' || property.valueKind === 'component-argument') ? 'Its content comes from data.' : 'Nothing to set when it is created.'}</p>}
+        {/* A slot is where views go, which is what Add does with it selected (Wave 4a). */}
+        {sourceLayerSlot(selected) ? <p className={styles.note}>{sourceLayerOpens(selected) ? 'Drawn open on the canvas while it, or a view in it, is selected. ' : ''}Add puts a view in it, after its last.</p>
+          : !basics.length && !selected.component && !['definition', 'template'].includes(selected.kind) && !interaction && <p className={styles.note}>{selected.properties.some(property => property.valueKind === 'data-binding' || property.valueKind === 'component-argument') ? 'Its content comes from data.' : 'Nothing to set when it is created.'}</p>}
         {features && <AuthoringFeatures key={`basics:${featureKey}`} node={selected} {...features} section="basics" />}
         {stack && stackLayout && <p className={styles.note} data-testid="alignment-hint">{stackLayout === 'ZStack' ? 'Aligned' : 'Aligned and spaced'} by its {LAYOUT_WORDS[stackLayout]}. <button type="button" className={styles.linkButton} onClick={() => features?.onSelect?.(stack)}>Select {sourceLayerLabel(stack)}</button></p>}
         {interaction && features && <AuthoringFeatures key={`interaction:${featureKey}`} node={selected} {...features} section="interaction" />}

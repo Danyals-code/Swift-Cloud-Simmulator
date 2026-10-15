@@ -66,6 +66,10 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('ForEach', 'view', [[null], [null, 'id']], true),
   capability('Section', 'view', [[], [null], ['header'], ['footer'], ['header', 'footer']], true),
   capability('Button', 'view', [[], [null], ['role'], [null, 'role']], false),
+  // `Button("Add", systemImage: "plus") { }`, and with a role as well (Wave 4a).
+  { ...capability('Button', 'view', [[null, 'systemImage'], [null, 'systemImage', 'role']], false, '14.0'), id: 'view.Button.systemImage' },
+  // `Button { } label: { … }`, with a role or not: the label is a closure after the action.
+  { ...capability('Button', 'view', [['label'], ['role', 'label']], false), id: 'view.Button.label' },
   capability('TextField', 'view', [[null, 'text']]),
   { ...capability('TextField', 'view', [[null, 'text', 'axis']], false, '16.0'), id: 'view.TextField.axis' },
   capability('Toggle', 'view', [[null, 'isOn']]),
@@ -127,6 +131,14 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('scrollIndicators', 'modifier', [[null]], false, '16.0'),
   capability('scrollContentBackground', 'modifier', [[null]], false, '16.0'),
   capability('listRowSeparator', 'modifier', [[null]], false, '15.0'),
+  // A row's background, insets and separator colour (Wave 4a).
+  capability('listRowBackground', 'modifier', [[null]]),
+  capability('listRowInsets', 'modifier', [[null]]),
+  capability('listRowSeparatorTint', 'modifier', [[null], [null, 'edges']], false, '15.0'),
+  // A row's swipe actions and any view's context menu, whose buttons are a slot of their own (Wave 4a).
+  capability('swipeActions', 'modifier', optionalForms(['edge', 'allowsFullSwipe']), true, '15.0'),
+  capability('contextMenu', 'modifier', [[], ['menuItems']], true),
+  { ...capability('contextMenu', 'modifier', [['preview'], ['menuItems', 'preview']], true, '16.0'), id: 'modifier.contextMenu.preview' },
   capability('listRowSpacing', 'modifier', [[null]], false, '17.0'),
   capability('listSectionSpacing', 'modifier', [[null]], false, '17.0'),
   // The v1 modifier catalog: what the Add menu writes and every card can edit.

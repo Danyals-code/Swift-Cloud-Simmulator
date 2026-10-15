@@ -92,6 +92,8 @@ const STROKE = {
   rows: 'M2.5 4h11M2.5 8h11M2.5 12h11',
   'list-rows': 'M3 3.5h2v2H3v-2ZM7 4.5h6M3 7h2v2H3V7ZM7 8h6M3 10.5h2v2H3v-2ZM7 11.5h6',
   'text-lines': 'M3 4h10M3 8h10M3 12h6',
+  // A row slid aside to show an action behind it.
+  swipe: 'M1.5 4.5h7v7h-7M11 4.5h3.5v7H11v-7Z',
   button: 'M2.5 5.5h11c.55 0 1 .45 1 1v3c0 .55-.45 1-1 1h-11c-.55 0-1-.45-1-1v-3c0-.55.45-1 1-1Z',
   image: 'M2.5 3.5h11v9h-11v-9ZM2.5 10l3-2.5 2.5 2 2.5-2 3 2.5M10.5 6a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z',
   scroll: 'M8 2.5v11M5.5 5 8 2.5 10.5 5M5.5 11 8 13.5 10.5 11',

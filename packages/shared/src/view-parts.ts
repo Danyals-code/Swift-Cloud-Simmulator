@@ -37,7 +37,11 @@ export const VIEW_PARTS: Readonly<Record<string, ViewParts>> = {
 export const MODIFIER_SLOTS: Readonly<Record<string, string>> = {
   background: 'Background', overlay: 'Overlay', toolbar: 'Toolbar', sheet: 'Sheet', fullScreenCover: 'Full screen cover',
   navigationDestination: 'Destination', safeAreaInset: 'Safe area inset', alert: 'Alert', confirmationDialog: 'Confirmation dialog',
+  swipeActions: 'Swipe actions', contextMenu: 'Context menu',
 }
+
+/** The slot of what a context menu shows lifted above the screen while it is open: its `preview:` (Wave 4a). */
+export const CONTEXT_MENU_PREVIEW = 'Preview'
 
 /**
  * The parts of an alert or a confirmation dialog besides its title, each a slot within its
@@ -47,7 +51,7 @@ export const MODIFIER_SLOTS: Readonly<Record<string, string>> = {
 export const PRESENTATION_PARTS: Readonly<Record<string, string>> = { trailing: 'Actions', actions: 'Actions', message: 'Message' }
 
 /** Every slot name a view's content can be listed under besides its own: its parts' and its modifiers'. */
-export const CONTENT_SLOT_NAMES: ReadonlySet<string> = new Set([...Object.values(MODIFIER_SLOTS), ...Object.values(PRESENTATION_PARTS), ...Object.values(VIEW_PARTS).flatMap(parts => Object.values(parts.slots))])
+export const CONTENT_SLOT_NAMES: ReadonlySet<string> = new Set([...Object.values(MODIFIER_SLOTS), CONTEXT_MENU_PREVIEW, ...Object.values(PRESENTATION_PARTS), ...Object.values(VIEW_PARTS).flatMap(parts => Object.values(parts.slots))])
 
 /** The views the preview draws `label:` and `icon:` views of as layers of their own (`drawnAsLayers`). */
 export const LAYERED_LABEL_VIEWS: ReadonlySet<string> = new Set(Object.entries(VIEW_PARTS).flatMap(([name, parts]) => parts.drawnAsLayers ? [name] : []))

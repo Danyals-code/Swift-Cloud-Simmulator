@@ -79,6 +79,19 @@ export function editWritten(source: string, view: string, operation: DesignEditR
   return plan.ok ? { text: plan.changes.find(change => change.file === APP)?.after ?? source } : { refused: plan.reason }
 }
 
+/** The file after `operation` on the view written as `view`; throws with the planner's reason when it refuses. */
+export function edited(source: string, view: string, operation: DesignEditRequest['operation'], deploymentTarget?: string): string {
+  const result = editWritten(source, view, operation, deploymentTarget)
+  if ('refused' in result) throw new Error(result.refused)
+  return result.text
+}
+
+/** Why the planner refuses `operation` on the view written as `view`, or undefined when it writes it. */
+export function refusal(source: string, view: string, operation: DesignEditRequest['operation'], deploymentTarget?: string): string | undefined {
+  const result = editWritten(source, view, operation, deploymentTarget)
+  return 'refused' in result ? result.refused : undefined
+}
+
 /** The preview's compile of a project, drawn on an iPhone's canvas with no safe area; `options` adds to the request. */
 export function draw(files: readonly SourceFile[], options: Partial<CompileRequest> = {}): CompileResult {
   return compile({ files: [...files], revision: 1, canvas: { width: 393, height: 852 }, colorScheme: 'light', safeArea: { top: 0, bottom: 0, leading: 0, trailing: 0 }, ...options })

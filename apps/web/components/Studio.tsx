@@ -49,7 +49,8 @@ import { AppNavigationSettings } from './settings/AppNavigationSettings'
 import { ScreenSettings } from './settings/ScreenSettings'
 import { AppearancePicker, DevicePicker, TextSizePicker } from './PreviewEnvironment'
 import { canvasLanes, designScreens, designTree, focusedDesignScreen, liveDesignScreen, screenRemovalRefusal, type DesignTree } from '../lib/designTree'
-import { sourceLayerAround, sourceLayerDrawn, sourceLayerLabel, sourceLayerNames, sourceLayerType } from '../lib/sourceLayers'
+import { sourceLayerAround, sourceLayerDrawn, sourceLayerLabel, sourceLayerNames, sourceLayerOpens, sourceLayerRevealing, sourceLayerSlot, sourceLayerType } from '../lib/sourceLayers'
+import { paletteEdit } from '../lib/viewCatalog'
 const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane), { ssr: false })
 import { ShortcutsDialog } from './ShortcutsDialog'
 import { FileSwitcher } from './FileSwitcher'
@@ -959,8 +960,9 @@ export function Studio() {
     return performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, { kind: 'property', control, value })
   }, [authoringNode, performDesignEdit])
 
-  /** Where Add would put it, which the palette says before anything is added. */
-  const addTarget = selectedLayer
+  /** Where Add would put it, which the palette says before anything is added: into a selected slot as its last view (Wave 4a). */
+  const addSlot = sourceLayerSlot(authoringNode)
+  const addTarget = addSlot ? `Into ${sourceLayerLabel(addSlot)}` : selectedLayer
     ? site?.container ? `Into ${authoringNode ? sourceLayerLabel(authoringNode) : selectedLayer.name}` : `After ${authoringNode ? sourceLayerLabel(authoringNode) : selectedLayer.name}`
     : 'Into this screen'
 
@@ -1012,7 +1014,7 @@ export function Studio() {
     onManage: () => { setMode('design'); selectApp() },
   }
 
-  const canAdd = !!addTargetLayer?.source && !stale && !aiEditing
+  const canAdd = (!!addTargetLayer?.source || !!addSlot) && !stale && !aiEditing
 
   const selection = selectedLayer && site
     ? {
@@ -1245,8 +1247,10 @@ export function Studio() {
    * its own while designing. Kept while the canvas catches up with an edit, which follows
    * the view itself, so the handles come back with the edit's own compile.
    */
-  const measured = mode === 'design' && inspecting && selectedTogether.length < 2 && authoringNode?.layer && authoringNode.kind !== 'definition' ? authoringNode.source : null
-  useEffect(() => { if (!stale) setMeasureTarget(measured) }, [measured, stale, setMeasureTarget])
+  const measured = mode === 'design' && inspecting && selectedTogether.length < 2 && authoringNode && (authoringNode.layer && authoringNode.kind !== 'definition' || sourceLayerOpens(authoringNode)) ? authoringNode.source : null
+  /** Whether it draws a row swiped open or a menu up (Wave 4a), which the canvas closes again once it is left. */
+  const revealing = useMemo(() => { const snapshot = result?.authoring; return !!measured && !!authoringNode && !!snapshot && sourceLayerRevealing(snapshot, authoringNode) }, [measured, authoringNode, result?.authoring])
+  useEffect(() => { if (!stale) setMeasureTarget(measured, revealing) }, [measured, revealing, stale, setMeasureTarget])
   const latestSelection = useRef(authoringNode)
   useEffect(() => { latestSelection.current = authoringNode })
   /** A drag, or a burst of arrow keys, written as one edit: the view's layer, or its stack's spacing control. */
@@ -1883,7 +1887,11 @@ export function Studio() {
           onClose={() => setAdding(false)}
           onChoose={(snippet) => {
             setAdding(false)
-            void applyEdit({ kind: 'insert', snippet: snippet.snippet }, addTargetLayer)
+            // A swipe action or a context menu goes on the selected view; a view into a selected slot (Wave 4a).
+            const { operation, on, problem } = paletteEdit(snippet, authoringNode)
+            if (problem) refuseEdit(operation, problem, authoringNode)
+            else if (on) void performDesignEdit(on.source, on.fingerprint, on.owner, operation)
+            else void applyEdit(operation, addTargetLayer)
           }}
         />
       ) : null}

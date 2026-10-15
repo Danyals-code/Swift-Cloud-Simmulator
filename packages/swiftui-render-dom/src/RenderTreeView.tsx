@@ -459,6 +459,16 @@ function RenderNodeView({
     if (!panel || !node.anchorId) return
     const root = panel.closest<HTMLElement>('[data-testid="render-tree"]')
     const anchor = root?.querySelector<HTMLElement>(`[data-handler-id="${CSS.escape(node.anchorId)}"]`)
+    // A context menu (Wave 4a) is placed beside its view by the layout, and only follows it as
+    // far as a list it is in has scrolled; its views carry the handler it is named by.
+    const held = !anchor && root?.querySelector<HTMLElement>(`[data-context-menu-id="${CSS.escape(node.anchorId)}"]`)
+    if (root && held) {
+      let x = 0, y = 0
+      for (let parent = held.parentElement; parent && parent !== root; parent = parent.parentElement) { x += parent.scrollLeft; y += parent.scrollTop }
+      panel.style.left = `${node.frame.x - x}px`
+      panel.style.top = `${node.frame.y - y}px`
+      return
+    }
     if (!root || !anchor) return
     const place = () => {
       const a = anchor.getBoundingClientRect(), r = root.getBoundingClientRect()
@@ -475,7 +485,7 @@ function RenderNodeView({
     place()
     window.addEventListener('resize', place)
     return () => window.removeEventListener('resize', place)
-  }, [node.anchorId, node.frame.width, node.frame.height])
+  }, [node.anchorId, node.frame.x, node.frame.y, node.frame.width, node.frame.height])
   const [pressed, setPressed] = useState(false)
   const interactive = node.hitTarget?.enabled === true
   const inspecting = inspect !== undefined && node.id !== 'screen'
@@ -606,6 +616,7 @@ function RenderNodeView({
       data-node-id={node.id}
       data-layer-selected={selectedIds?.has(node.id) || undefined}
       data-handler-id={node.hitTarget?.handlerId}
+      data-context-menu-id={node.hitTarget?.contextMenuHandlerId}
       inert={exiting || node.inert || undefined}
       data-transition-exit={exiting || undefined}
       data-chrome-role={node.chromeRole}

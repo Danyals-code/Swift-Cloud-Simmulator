@@ -26,6 +26,14 @@ what order, what a GeometryReader reports where it is placed, how links and shar
 draw, and where a ScrollView puts a lone child. Those screens also print what they
 measure, kept by launching through `simctl launch --console-pty`.
 
+18 more in [native/iphone18pro-system-ui](native/iphone18pro-system-ui/measurements.json),
+paired with `tests/fixtures/ios27-system-ui-4a.swift`, measure the system UI Wave 4a draws:
+leading and trailing swipe actions with icons, titles or both, a full swipe before and after
+it arms, `.onDelete` beside a leading action, an open context menu, where its panel goes
+beside a view at the screen's edge or bottom, an action tinted from around its list, and
+list rows with a background, insets and a tinted separator. `tooling/capture-ios27.mjs`
+takes the fixture as an argument, and its screen names as the states to capture.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh

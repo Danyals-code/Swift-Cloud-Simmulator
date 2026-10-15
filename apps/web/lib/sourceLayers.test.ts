@@ -4,7 +4,7 @@ import { FOLIO_FILES } from '@studio/project-model/templates'
 import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
 import { hiddenViewsIn } from '@studio/swift-syntax'
 import type { AuthoringSnapshot } from '@studio/shared'
-import { rebaseSourceLayers, sourceDefinitionAround, sourceLayerDrawn, sourceLayerHelperReach, sourceLayerNames, sourceLayerHiddenOwner, sourceLayerHiddenInScope, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerIsVisual, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from './sourceLayers'
+import { rebaseSourceLayers, sourceDefinitionAround, sourceLayerDrawn, sourceLayerHelperReach, sourceLayerNames, sourceLayerHiddenOwner, sourceLayerHiddenInScope, sourceLayerLabel, sourceLayerNotShown, sourceLayerRevealing, sourceLayerRows, sourceLayerType, sourceLayerIsVisual, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from './sourceLayers'
 
 const collection = 'ForEach(0..<3, id: \\.self) { i in Text("Row").padding(8) }'
 const source = `import SwiftUI
@@ -395,6 +395,14 @@ ${extra}`
     expect(entered.rows.map(row => sourceLayerLabel(row.node))).toEqual(['Title', 'Subtitle'])
   })
 
+  it('lists swipe actions, a context menu and its preview as layers of their own, drawn or not (Wave 4a)', () => {
+    // The canvas draws them open only while they are selected, so Layers is where they are found.
+    const { snapshot, layers, state } = run('List { Text("Inbox").swipeActions { Button("Pin") { } }.contextMenu { Button("Copy") { } } preview: { Text("Big inbox") }.overlay { Text("Badge") } }')
+    const rows = sourceLayerRows(snapshot, { ...state, opened: new Set(snapshot.nodes.map(node => node.id)) }, undefined, '', { runtimeLayers: layers }).rows
+    expect(rows.map(row => `${'  '.repeat(row.depth)}${sourceLayerLabel(row.node)}`)).toEqual(['List', '  Inbox', '    Swipe actions', '      Pin', '    Context menu', '      Copy', '    Preview', '      Big inbox', '    Badge'])
+    expect(rows.filter(row => sourceLayerNotShown(snapshot, row.node))).toEqual([])
+  })
+
   it('omits unrendered alternatives and separate pages from the parent phone', () => {
     const { snapshot, layers, state } = run('VStack { Text("Main"); if false { Text("Unavailable") } else { Text("Ready") }; NavigationLink("Details", destination: Text("Detail page")) }.sheet(isPresented: .constant(false)) { Text("Add page") }')
     const rows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: layers }).rows
@@ -746,5 +754,21 @@ struct ContentView: View {
     const result = compile({ projectId: 'p', revision: 1, files: files(text), canvas: { width: 402, height: 874 }, colorScheme: 'light' })
     const names = sourceLayerNames(result.viewHierarchy!)
     expect(result.authoring!.nodes.filter(node => node.name === 'Button').map(node => sourceLayerDrawn(node, names))).toEqual(['Save', undefined])
+  })
+})
+
+describe('what selecting a layer draws open on the canvas (Wave 4a)', () => {
+  // Only these selections draw a row swiped open or a menu up, so only leaving them redraws the page.
+  const snapshot = model(`import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View { var body: some View { List { Text("Inbox").swipeActions { Button("Pin") { } }.contextMenu { Button { } label: { Text("Copy") } } preview: { Text("Big inbox") }; Text("Drafts") }.toolbar { Button("Save") { } } } }`)
+  const layer = (label: string) => snapshot.nodes.find(node => node.kind !== 'definition' && sourceLayerLabel(node) === label)!
+
+  it('is a Swipe actions, Context menu or Preview slot, or any view in one', () => {
+    expect(['Swipe actions', 'Pin', 'Context menu', 'Copy', 'Preview', 'Big inbox'].filter(label => !sourceLayerRevealing(snapshot, layer(label)))).toEqual([])
+  })
+
+  it('is not the row they belong to, nor a view anywhere else, such as a Toolbar’s', () => {
+    expect(['List', 'Inbox', 'Drafts', 'Toolbar', 'Save'].filter(label => sourceLayerRevealing(snapshot, layer(label)))).toEqual([])
   })
 })

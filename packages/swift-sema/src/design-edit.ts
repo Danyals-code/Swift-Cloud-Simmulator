@@ -1,24 +1,31 @@
 import { customizeCard, editsCardSurface } from './authoring-card'
 import { followCorners } from './authoring-border'
-import { editModifier } from './authoring-modifiers'
+import { editModifier, isRow } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
-import { argumentLayerProblem, canvasDropProblem, deploymentVersion, isHelperDefinition, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
-import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, type Node } from '@studio/swift-syntax'
+import { PRESENTATION_PARTS, VIEW_PARTS, argumentLayerProblem, canvasDropProblem, deploymentVersion, isHelperDefinition, type AuthoringNode, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
+import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, viewSiteAt, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { removeHelper } from './authoring-helpers'
 import { modifierArgumentProblem, structuralEditProblem, type StructuralKind } from './structural-check'
-import { applyPatches, type FeatureContext } from './authoring-context'
+import { applyPatches, lineIndent, namedStruct, type FeatureContext } from './authoring-context'
 import { pastedValues } from './authoring-clipboard'
 import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
 import { liveControl } from './authoring-behavior'
 import { TAPPABLE_WRAPPER, wrapperOf } from './authoring-structure'
 import { designControlRecipes, spreadRoomProblem, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
-import { retagDuplicate } from './authoring-picker-tags'
+import { nextTag, retagDuplicate, tagProblem } from './authoring-picker-tags'
 import { callAt, layerContext, layerProject, writeLayer } from './layer'
 
 /** The operations that act on a view's whole statement - its place, its copies, whether it is there at all - as the structural check knows them. */
 const STRUCTURAL: Partial<Record<DesignEditRequest['operation']['kind'], StructuralKind>> = { delete: 'delete', move: 'move', moveTo: 'moveTo', insert: 'insert', paste: 'insert', hide: 'hide', show: 'show', 'layer-duplicate': 'duplicate', 'layer-wrap': 'wrap', 'layer-reparent': 'reparent', 'make-tappable': 'wrap' }
+
+/** What a toolbar takes besides views: one that holds any of these takes nothing else (Wave 4a). */
+const TOOLBAR_CONTENT: ReadonlySet<string> = new Set(['ToolbarItem', 'ToolbarItemGroup', 'ToolbarSpacer', 'DefaultToolbarItem', 'ToolbarTitleMenu'])
+/** Whether what is listed under `layer` is toolbar items, Apple's or the project's own, rather than views. */
+function holdsToolbarItems(ctx: FeatureContext, layer: AuthoringNode | undefined): boolean {
+  return !!layer && ctx.nodes.some(n => n.parentId === layer.id && (TOOLBAR_CONTENT.has(n.name) || n.kind === 'component' && !!namedStruct(ctx, n.name)?.inherits.some(t => t.name === 'ToolbarContent' || t.name === 'CustomizableToolbarContent')))
+}
 
 /** Plans against an immutable source revision. Commit must compare the whole project again. */
 export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
@@ -72,7 +79,8 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     try {
       const shadowToken = model.styles?.find(style => style.kind === 'shadow' && style.form === 'token')?.name
       // A border takes the view's new corners in the same step (D8).
-      const text = followCorners(file.text, editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget, { shadowToken }), file.id, node.source.start)
+      const byId = (id: string | undefined) => model.nodes.find(n => n.id === id)
+      const text = followCorners(file.text, editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget, { shadowToken, row: isRow(node, byId) }), file.id, node.source.start)
       return finish(request.files.map(f => f.id === file.id ? { ...f, text } : f), { file: file.id, offset: node.source.start })
     } catch (error) { return reject(error instanceof Error ? error.message : 'This modifier change could not be planned.') }
   }
@@ -105,9 +113,20 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   // Where a structural change acts: the view itself, or for a row design's insert the collection it repeats in.
   /** A view added by this edit, from the library or pasted. */
   const adding = operation.kind === 'insert' || operation.kind === 'paste' ? operation : undefined
+  /** What an insert writes, when it is more than the snippet: an option's tag, or the toolbar item it goes in. */
+  let adds: string | undefined
   /** A paste that goes after the view even when it is a container. */
   const beside = operation.kind === 'paste' && !!operation.beside
   const offset = node?.kind === 'template' && adding ? model.nodes.find(n => n.id === node.parentId)?.source.start ?? request.target.start : request.target.start
+  /** A slot written as a closure, a toolbar's or a section's header, takes what Add brings as its last view (Wave 4a). */
+  const intoSlot = node?.kind === 'branch' && !!adding && !beside && file.text[offset] === '{'
+  /** What the selected view is listed under. */
+  const holder = node && model.nodes.find(n => n.id === node.parentId)
+  /** Where what Add brings is listed once added: the slot, the container it goes in, or what holds the selected view (Wave 4a). */
+  const landing = !adding ? undefined : intoSlot || !beside && node?.kind === 'view' && viewSiteAt(file.text, file.id, offset)?.container ? node : holder
+  if (landing?.kind === 'branch' && landing.name === PRESENTATION_PARTS.message) return reject('An alert’s message is a single text. Change its words instead.')
+  // `Slider`'s two value labels are one type, so a view added to either would leave them two.
+  if (landing?.kind === 'branch' && (landing.name === VIEW_PARTS.Slider!.slots.minimumValueLabel || landing.name === VIEW_PARTS.Slider!.slots.maximumValueLabel)) return reject('A slider’s minimum and maximum labels are one view each, of the same kind. Change them in Code.')
   if (operation.kind === 'layer-set' && node) {
     const expression = callAt(ast, node.source)
     if (!expression || !node.layer) return reject('This view no longer has an editable modifier chain. Select it again.')
@@ -120,10 +139,11 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   } else if (operation.kind === 'property' && node) {
     const expression = callAt(ast, node.source)
     if (!expression) return reject('This source expression cannot be edited safely.')
-    const recipe = designControlRecipes(node, expression, file.text, layerProject(ast, request.deploymentTarget, request.files), request.deploymentTarget).find(r => r.control.id === operation.control)
+    const recipe = designControlRecipes(node, expression, file.text, layerProject(ast, request.deploymentTarget, request.files), request.deploymentTarget, id => model.nodes.find(n => n.id === id)).find(r => r.control.id === operation.control)
     if (!recipe) return reject('This property is controlled by Swift or is outside the editable subset.')
     const invalid = validateControlValue(recipe.control, operation.value) ?? recipe.problem?.(operation.value)
       ?? (operation.control === 'spacing' && operation.value === 'auto' && recipe.control.value !== 'auto' ? spreadRoomProblem(model.nodes, node) : null)
+      ?? (operation.control === 'tag' ? tagProblem(context, node, recipe.control.source, operation.value) : null)
     if (invalid) return reject(invalid)
     if (operation.value === recipe.control.value || recipe.control.kind === 'number' && recipe.control.value !== '' && Number(operation.value) === Number(recipe.control.value)) {
       return materializeCard ? finish(request.files, { file: file.id, offset: node.source.start }) : { ok: true, projectId: request.projectId, baseRevision: request.baseRevision, changes: [], selection: { file: file.id, offset: node.source.start } }
@@ -186,8 +206,18 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           const live = node && operation.kind === 'insert' ? liveControl(context, node, operation.snippet) : null
           const brought = node && operation.kind === 'paste' ? pastedValues(context, node, operation.values) : undefined
           if (brought && 'problem' in brought) return reject(brought.problem)
+          // An option added to a Picker takes the tag after its last one, so choosing it selects it (Wave 4a).
+          const picker = operation.kind === 'insert' && !/\.tag\(/.test(operation.snippet) && landing?.kind === 'view' && landing.name === 'Picker' ? landing : undefined
+          let tag: string | undefined
+          try { tag = picker && nextTag(context, picker, /^Text\("([^"\\]*)"\)$/.exec(operation.snippet)?.[1] || 'Option') } catch (error) { return reject(error instanceof Error ? error.message : 'This picker’s options are tagged in code. Add it in Code.') }
+          if (tag) adds = `${live?.snippet ?? operation.snippet}.tag(${tag})`
+          // A view that lands among toolbar items goes in an item of its own, the plainest one, as a toolbar holds items or views, never both (Wave 4a).
+          if (holdsToolbarItems(context, landing) && !TOOLBAR_CONTENT.has(/^\w+/.exec(operation.snippet)?.[0] ?? '')) {
+            const unit = lineIndent(context, file.id, offset).unit
+            adds = `ToolbarItem {\n${(live?.snippet ?? operation.snippet).split('\n').map(line => line && unit + line).join('\n')}\n}`
+          }
           // The list itself takes a new last row; its Row template takes the view in every row.
-          const inserted = insertView(file.text, file.id, offset, live?.snippet ?? operation.snippet, refuse, { asListRow: !beside && node?.kind === 'collection', beside })
+          const inserted = insertView(file.text, file.id, offset, adds ?? live?.snippet ?? operation.snippet, refuse, { asListRow: !beside && node?.kind === 'collection', beside, slot: intoSlot })
           const wraps = inserted?.wraps
           changed = inserted
           const member = live?.member ?? brought?.member
@@ -213,9 +243,10 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   if (structural) {
     const problem = structuralEditProblem({
       file: file.id, before: file.text, after: changed.text, view: node?.source ?? request.target,
-      ...(wrap ? { kind: 'wrap', adds: wrap } : { kind: structural, adds: adding?.snippet }),
-      toward: operation.kind === 'moveTo' ? operation.targetOffset : adding ? offset : undefined,
-      inside: operation.kind === 'moveTo' ? operation.position === 'inside' : beside ? false : undefined,
+      ...(wrap ? { kind: 'wrap', adds: wrap } : { kind: structural, adds: adds ?? adding?.snippet }),
+      // Inside a slot's closure is where it lands, as a statement of it would be.
+      toward: operation.kind === 'moveTo' ? operation.targetOffset : adding ? offset + (intoSlot ? 1 : 0) : undefined,
+      inside: operation.kind === 'moveTo' ? operation.position === 'inside' : beside || intoSlot ? false : undefined,
       landed: !wrap && structural !== 'delete' && structural !== 'hide' && structural !== 'show' ? changed.offset : undefined,
     })
     if (problem) return reject(problem)

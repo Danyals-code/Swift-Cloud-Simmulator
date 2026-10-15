@@ -132,6 +132,13 @@ export interface BehaviorSettings {
   /** The Button's title is plain text, which a switch can change while it is on. */
   readonly titled?: boolean
   /**
+   * What a tap on the Button shows, when its action sets the value an alert or a dialog is
+   * presented by (Wave 4a). `readOnly` says why When tapped can't write it back exactly, as
+   * for a title with values in it or a text field among its buttons: it is then described for
+   * display, its words as the code writes them, and Replace with an alert or options is refused.
+   */
+  readonly shows?: { readonly type: 'alert' | 'dialog'; readonly title: string; readonly message?: string; readonly actions: readonly AlertActionSpec[]; readonly readOnly?: string }
+  /**
    * Whether an appear animation can play on the view: it comes and goes by an `if` or a
    * `switch` (which then needs a state to animate on), or as a row of a changing
    * collection. Otherwise, why not.
@@ -160,6 +167,15 @@ export type BehaviorAction =
   | { readonly type: 'dismiss'; readonly state: string }
   | { readonly type: 'append'; readonly collection: string; readonly record: DesignRecord }
   | { readonly type: 'delete'; readonly collection: string; readonly id: DesignValue }
+  /** Asks before acting: `.alert(title, isPresented:)` with its buttons and message (Wave 4a). */
+  | { readonly type: 'alert'; readonly title: string; readonly message?: string; readonly actions: readonly AlertActionSpec[] }
+  /** Offers a choice: `.confirmationDialog(title, isPresented:)` with its buttons and message (Wave 4a). */
+  | { readonly type: 'dialog'; readonly title: string; readonly message?: string; readonly actions: readonly AlertActionSpec[] }
+/** One button of an alert or dialog that a tap action adds: its title, and the role iOS draws it with. */
+export interface AlertActionSpec {
+  readonly title: string
+  readonly role?: 'destructive' | 'cancel'
+}
 /** A value inside a view that a copy of it may write differently. */
 export interface CopyValue {
   readonly kind: 'text' | 'symbol' | 'number' | 'color' | 'action'

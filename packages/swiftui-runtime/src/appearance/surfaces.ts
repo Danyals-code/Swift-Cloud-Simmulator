@@ -22,6 +22,16 @@ export const SURFACES = {
   sheet: { radius: 34, margin: 8, top: 10, barTop: 16, maxWidth: 640, grabberWidth: 58, grabberHeight: 4 },
   alert: { width: 320, radius: 34, buttonHeight: 48, margin: 24 },
   menu: { width: 280, radius: 24, row: 44, margin: 12 },
+  // A view's context menu, measured in the iOS 27 simulator (docs/parity/native/iphone18pro-system-ui):
+  // a title is `title` in from the panel's edge, or `titleWithoutIcons` in a menu none of
+  // whose rows has an icon, an icon centred `iconCentre` in. The panel is `gap` from the
+  // view it is open on, and `margin` from the screen's edges (Wave 4a).
+  contextMenu: { width: 250, radius: 32, row: 42, paddingY: 10, inset: 25, iconCentre: 40, title: 65, titleWithoutIcons: 29, dim: 0.2, gap: 16, margin: 16 },
+  // A list row's swipe action, measured there too (Wave 4a): `inset` from the row's top and
+  // bottom, `gap` from the next action, the open row and the card's edge, `padding` each side
+  // of what it draws, or `iconOnlyWidth` wide for an icon alone, with corners of `radius`, or
+  // `titleRadius` for a title alone, and its icon `iconToTitle` from its title.
+  swipeAction: { inset: 4, gap: 10, padding: 13, iconOnlyWidth: 60, radius: 22, titleRadius: 15, iconToTitle: 6 },
 } as const
 
 export type ListAppearance = 'plain' | 'inset' | 'grouped' | 'insetGrouped' | 'sidebar'

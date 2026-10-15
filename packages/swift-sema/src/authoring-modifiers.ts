@@ -3,6 +3,7 @@ import { Parser, afterOffMarkers, commentFollows, hasHumanComment, offMarker, of
 import { roundedCorners, viewCallChain } from './design-controls'
 import { NEW_BORDER, borderOf, borderSource, cornersOf, type Corners } from './authoring-border'
 import { authoringViewMinimum } from './authoring-view'
+import { indentAt } from './authoring-context'
 import { APPLE_VIEW_MODIFIERS, KEEPS_TEXT, MODIFIER_CATEGORIES, SUPPORTED_MODIFIERS, isAppleCall } from './builtins'
 import { modifierPrefix } from './layer/chain-edit'
 import { runRefusal } from './layer/context'
@@ -32,10 +33,16 @@ interface CatalogEntry {
   /** Where a new one goes: after the last modifier in the same or an earlier slot. */
   readonly slot: number
   readonly description: string
-  /** `indent` is the indentation of the view's modifiers when each is on a line of its own, and null on one line. */
-  readonly source: (options: { target: number; shadowToken?: string; corners: Corners; indent: string | null }) => string
+  /**
+   * `indent` is the indentation of the view's modifiers when each is on a line of its own, and
+   * null on one line; `line` is the indentation of the line the view starts on, and `unit` one
+   * level of it.
+   */
+  readonly source: (options: { target: number; shadowToken?: string; corners: Corners; indent: string | null; line: string; unit: string }) => string
   readonly minimumIOS?: number
   readonly only?: readonly string[]
+  /** Offered on rows of a list alone (Wave 4a): views in a List, a Form or a Section. */
+  readonly row?: true
   readonly hidden?: boolean
 }
 
@@ -88,7 +95,13 @@ const CATALOG: readonly CatalogEntry[] = [
   { name: 'scrollIndicators', label: 'Scroll indicators', category: 'appearance', slot: SLOT.behaviour, description: 'Show or hide the scroll bars', minimumIOS: 16, only: ['ScrollView', 'List', 'Form'], source: () => '.scrollIndicators(.visible)' },
   { name: 'scrollContentBackground', label: 'Scroll background', category: 'appearance', slot: SLOT.behaviour, description: 'Show or hide the list background', minimumIOS: 16, only: ['ScrollView', 'List', 'Form'], source: () => '.scrollContentBackground(.hidden)' },
   { name: 'imageScale', label: 'Symbol size', category: 'appearance', slot: SLOT.behaviour, description: 'Small, medium or large', minimumIOS: 13, only: ['Image', 'Label'], source: () => '.imageScale(.large)' },
-  { name: 'listRowSeparator', label: 'Row separator', category: 'appearance', slot: SLOT.behaviour, description: 'Show or hide the line under a row', minimumIOS: 15, source: () => '.listRowSeparator(.hidden)' },
+  { name: 'listRowBackground', label: 'Row background', category: 'appearance', slot: SLOT.behaviour, description: 'A color behind the row', row: true, source: () => '.listRowBackground(Color.yellow)' },
+  { name: 'listRowInsets', label: 'Row insets', category: 'layout', slot: SLOT.behaviour, description: 'Space around the row’s content', row: true, source: () => '.listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))' },
+  { name: 'listRowSeparatorTint', label: 'Separator color', category: 'appearance', slot: SLOT.behaviour, description: 'Color of the line under a row', minimumIOS: 15, row: true, source: () => '.listRowSeparatorTint(Color.red)' },
+  { name: 'listRowSeparator', label: 'Row separator', category: 'appearance', slot: SLOT.behaviour, description: 'Show or hide the line under a row', minimumIOS: 15, row: true, source: () => '.listRowSeparator(.hidden)' },
+  // Their buttons go in a slot of their own, each on a line, which Add with the slot selected adds to (Wave 4a).
+  { name: 'swipeActions', label: 'Swipe actions', category: 'behavior', slot: SLOT.behaviour, description: 'Buttons a swipe across the row shows', minimumIOS: 15, row: true, source: options => closureSource('swipeActions', 'Button("Delete", systemImage: "trash", role: .destructive) { }', options) },
+  { name: 'contextMenu', label: 'Context menu', category: 'behavior', slot: SLOT.behaviour, description: 'Buttons a long press shows', source: options => closureSource('contextMenu', 'Button("Copy") { }', options) },
   { name: 'listRowSpacing', label: 'Row spacing', category: 'appearance', slot: SLOT.behaviour, description: 'Space between rows', minimumIOS: 17, only: ['List', 'Form'], source: () => '.listRowSpacing(8)' },
   { name: 'listSectionSpacing', label: 'Section spacing', category: 'appearance', slot: SLOT.behaviour, description: 'Space between sections', minimumIOS: 17, only: ['List', 'Form'], source: () => '.listSectionSpacing(24)' },
   { name: 'padding', label: 'Padding', category: 'layout', slot: SLOT.padding, description: 'Space around it', source: () => '.padding(16)' },
@@ -113,6 +126,11 @@ const CATALOG: readonly CatalogEntry[] = [
   { name: 'navigationTitle', label: 'Screen title', category: 'behavior', slot: SLOT.behaviour, description: 'The title in the navigation bar', minimumIOS: 14, source: () => '.navigationTitle("Title")' },
   { name: 'navigationBarTitleDisplayMode', label: 'Title size', category: 'behavior', slot: SLOT.behaviour, description: 'Large or inline title', minimumIOS: 14, source: () => '.navigationBarTitleDisplayMode(.inline)' },
 ]
+/** A modifier whose closure holds `view`, written over lines of its own at the chain's indentation, or the view's. */
+function closureSource(name: string, view: string, { indent, line, unit }: { indent: string | null; line: string; unit: string }): string {
+  const at = indent ?? line
+  return `.${name} {\n${at}${unit}${view}\n${at}}`
+}
 /**
  * Each entry by its name, the first of a name as `find` would give it, and the iOS it needs,
  * its own or its capability's. Every view read looks these up, so they are worked out once.
@@ -249,7 +267,7 @@ function heldInPlace(parsed: { base: CallExpr; end: number }, text: string, file
  * false while the view's source has a problem to resolve first, and a run of joined text
  * (`node.textRun`) takes only what keeps it a Text (`KEEPS_TEXT`).
  */
-export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, allowEdits = true }: { deploymentTarget?: string; allowEdits?: boolean } = {}): { modifiers: AuthoringModifier[]; modifierCatalog: readonly ModifierCatalogEntry[] } {
+export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, allowEdits = true, row = false }: { deploymentTarget?: string; allowEdits?: boolean; row?: boolean } = {}): { modifiers: AuthoringModifier[]; modifierCatalog: readonly ModifierCatalogEntry[] } {
   const run = !!node.textRun
   const parsed = segmentsOf(expr, text)
   if (!parsed) return { modifiers: [], modifierCatalog: [] }
@@ -309,7 +327,21 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { d
   // A project's own modifier may return anything, so nothing is added beside it; Apple's return `some View`.
   const unknown = segments.some(segment => segment.call && !isAppleCall(nameOf(segment.call)))
   const available = editable && !unknown
-  return { modifiers, modifierCatalog: catalogOf({ name: OFFERED_TO.has(node.name) ? node.name : '', tab: node.name === 'Tab' && node.kind !== 'component', run, available, unknown, version, allowEdits, locked }) }
+  return { modifiers, modifierCatalog: catalogOf({ name: OFFERED_TO.has(node.name) ? node.name : '', tab: node.name === 'Tab' && node.kind !== 'component', run, row, available, unknown, version, allowEdits, locked }) }
+}
+
+/** What holds rows: a view in one is a row of a list (Wave 4a). */
+const ROW_HOLDERS: ReadonlySet<string> = new Set(['List', 'Form', 'Section'])
+/**
+ * Whether a view is a row of a list (Wave 4a): a view of a List, a Form or a Section, or of
+ * the row template of a List's data or of a ForEach in one of them. A Section holds rows.
+ */
+export function isRow(node: AuthoringNode, byId: (id: string | undefined) => AuthoringNode | undefined): boolean {
+  const parent = byId(node.parentId)
+  if (node.name === 'Section') return false
+  if (parent?.kind !== 'template') return parent?.kind === 'view' && ROW_HOLDERS.has(parent.name)
+  const data = byId(parent.parentId)
+  return data?.name === 'List' || data?.name === 'ForEach' && ROW_HOLDERS.has(byId(data.parentId)?.name ?? '')
 }
 
 /** What decides the modifiers a view is offered, and why one is not. */
@@ -318,6 +350,8 @@ interface CatalogFacts {
   readonly name: string
   readonly tab: boolean
   readonly run: boolean
+  /** A row of a list, which is offered the row settings. */
+  readonly row: boolean
   readonly available: boolean
   readonly unknown: boolean
   readonly version: number
@@ -333,11 +367,11 @@ const OFFERED_TO: ReadonlySet<string> = new Set(CATALOG.flatMap(entry => entry.o
 const catalogs = new Map<string, readonly ModifierCatalogEntry[]>()
 
 function catalogOf(facts: CatalogFacts): readonly ModifierCatalogEntry[] {
-  const { name, tab, run, available, unknown, version, allowEdits, locked } = facts
-  const key = [name, tab, run, available, unknown, version, allowEdits, locked].join('|')
+  const { name, tab, run, row, available, unknown, version, allowEdits, locked } = facts
+  const key = [name, tab, run, row, available, unknown, version, allowEdits, locked].join('|')
   const built = catalogs.get(key)
   if (built) return built
-  const catalog = CATALOG.filter(entry => !entry.only || entry.only.includes(name)).map(entry => {
+  const catalog = CATALOG.filter(entry => (!entry.only || entry.only.includes(name)) && (!entry.row || row)).map(entry => {
     const minimum = Math.max(CATALOG_MINIMUM.get(entry)!, run ? KEEPS_TEXT[entry.name] ?? 13 : 13)
     const styleOnly = !run || entry.name in KEEPS_TEXT
     const supported = available && styleOnly && version >= minimum
@@ -350,17 +384,19 @@ function catalogOf(facts: CatalogFacts): readonly ModifierCatalogEntry[] {
 }
 
 /** Move whole segments; never reconstruct an existing modifier or its arguments. */
-export function editModifier(node: AuthoringNode, expr: Expr, text: string, operation: ModifierOperation, deploymentTarget?: string, options: { shadowToken?: string } = {}): string {
+export function editModifier(node: AuthoringNode, expr: Expr, text: string, operation: ModifierOperation, deploymentTarget?: string, options: { shadowToken?: string; row?: boolean } = {}): string {
   const parsed = segmentsOf(expr, text)
   if (!parsed) throw new Error('Select a view with an editable modifier chain.')
-  const model = modifierModel(node, expr, text, { deploymentTarget })
+  const model = modifierModel(node, expr, text, { deploymentTarget, row: options.row })
   const { segments } = parsed
   const slices = segments.map(s => text.slice(s.start, s.end))
   const chainStart = segments[0]?.start ?? expr.span.end
   const rebuild = (parts: readonly string[]) => text.slice(0, parsed.base.span.end) + text.slice(parsed.base.span.end, chainStart) + parts.join('') + text.slice(parsed.end)
   if (operation.kind === 'modifier-add') {
-    const entry = CATALOG.find(c => c.name === operation.name)
-    if (!entry || !model.modifierCatalog.find(c => c.name === entry.name)?.available) throw new Error('This modifier cannot be added to the selected view.')
+    const entry = CATALOG.find(c => c.name === operation.name), offered = entry && model.modifierCatalog.find(c => c.name === entry.name)
+    // A row's setting off a row says what it needs, and one the view is offered says why not (Wave 4a).
+    if (entry?.row && !options.row) throw new Error(`${entry.label} can only be added to a row of a List, a Form or a Section.`)
+    if (!entry || !offered?.available) throw new Error(offered?.reason ?? 'This modifier cannot be added to the selected view.')
     let index: number
     if (operation.before !== undefined) {
       index = model.modifiers.findIndex(m => m.id === operation.before)
@@ -380,7 +416,8 @@ export function editModifier(node: AuthoringNode, expr: Expr, text: string, oper
     const slots = chainSlots(expr, text)
     const prefix = slots ? modifierPrefix(slots, text) : ''
     const corners = cornersOf(viewCallChain(expr), text)
-    return text.slice(0, at) + prefix + entry.source({ target: deploymentVersion(deploymentTarget), shadowToken: options.shadowToken, corners, indent: prefix ? prefix.replace(/^\r?\n/, '') : null }) + text.slice(at)
+    const { indent: line, unit } = indentAt(text, expr.span.start)
+    return text.slice(0, at) + prefix + entry.source({ target: deploymentVersion(deploymentTarget), shadowToken: options.shadowToken, corners, indent: prefix ? prefix.replace(/^\r?\n/, '') : null, line, unit }) + text.slice(at)
   }
   const index = model.modifiers.findIndex(m => m.id === operation.modifier)
   if (index < 0) throw new Error('The modifier identity changed. Select the view again.')

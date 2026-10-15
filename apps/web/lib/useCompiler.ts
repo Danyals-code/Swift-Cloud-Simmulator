@@ -191,6 +191,8 @@ export function useCompiler({
   const fontsRef = useRef<Promise<MeasuredFontData[]> | null>(null)
   /** The view the canvas has selected, whose geometry every result carries; told to each new worker. */
   const measureRef = useRef<SourceSpan | null>(null)
+  /** Whether that view's selection draws a row swiped open or a menu up (Wave 4a), which only a redraw closes. */
+  const revealingRef = useRef(false)
   /** The compile on its way, by revision, 0 for none: a relayout for the selection's geometry waits for its answer instead. */
   const compilingRef = useRef(0)
 
@@ -536,11 +538,14 @@ export function useCompiler({
    * The view the canvas's handles are on (Wave 2b), or null. A setting in the worker, so
    * every later result carries its geometry. The page already drawn is redrawn for it with
    * no draft, which lays out only the trees the view is in and runs nothing, unless a
-   * compile is on its way, whose answer will carry it.
+   * compile is on its way, whose answer will carry it. A deselection redraws it only when the
+   * selection it leaves drew a row swiped open or a menu up, `revealing` (Wave 4a).
    */
   const latestResult = useRef<CompileResult | null>(null)
   useEffect(() => { latestResult.current = state.result }, [state.result])
-  const setMeasureTarget = useCallback((target: SourceSpan | null) => {
+  const setMeasureTarget = useCallback((target: SourceSpan | null, revealing = false) => {
+    const closes = revealingRef.current
+    revealingRef.current = !!target && revealing
     if (measuring(measureRef.current, target)) return
     measureRef.current = target
     const handle = handleRef.current
@@ -550,7 +555,7 @@ export function useCompiler({
         await handle.ready
         if (handle !== handleRef.current || !measuring(measureRef.current, target)) return
         await handle.api.setMeasureTarget(target)
-        if (!target || !handle.compiled || compilingRef.current || paintedRef.current < 0 || sameStart(latestResult.current?.geometry?.view, target)) return
+        if (!handle.compiled || compilingRef.current || paintedRef.current < 0 || (target ? sameStart(latestResult.current?.geometry?.view, target) : !closes)) return
         await refine(await handle.api.endLayerDraft(++revisionRef.current), handle)
       } catch { /* The normal compile path reports a worker failure. */ }
     })()

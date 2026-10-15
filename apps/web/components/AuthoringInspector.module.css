@@ -157,6 +157,12 @@ details.settingsSection[open] > summary + * { margin-top: 12px; }
 .valueFlow { display: flex; justify-content: space-around; align-items: center; min-height: var(--control-height); padding: 4px 8px; border-radius: var(--radius-md); background: var(--color-xc-bar); font-size: var(--text-body); color: var(--color-xc-text-2); }
 .valueFlow strong { font-weight: 600; color: var(--color-xc-text); }
 .dependencies { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Show alert's buttons (Wave 4a): a title, its role as wide as the panel's labels, and a remove button on each row, then Add button. */
+.alertButtons { display: grid; gap: 4px; min-width: 0; }
+.alertButtons > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, 38%) var(--control-height); gap: 4px; align-items: center; }
+.alertButtons > div > input, .alertButtons > div > select { width: 100%; min-width: 0; height: var(--control-height); }
+.alertButtons > div > button { display: grid; place-items: center; width: var(--control-height); height: var(--control-height); padding: 0; }
+.alertButtons > button { justify-self: start; min-height: var(--control-height-sm); padding: 2px 8px; }
 .contextLinks { display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* Choose a symbol: a grid of tiles, the chosen one selected. */

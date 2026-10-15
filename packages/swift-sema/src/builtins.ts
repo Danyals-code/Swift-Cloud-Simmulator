@@ -95,7 +95,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // lists and forms
   'searchable', 'onDelete', 'contextMenu', 'badge', 'presentationBackgroundInteraction', 'inspector',
   'keyboardType', 'submitLabel', 'onSubmit', 'textInputAutocapitalization', 'autocorrectionDisabled',
-  'listRowSeparator', 'listRowInsets', 'scrollIndicators',
+  'listRowSeparator', 'listRowSeparatorTint', 'listRowInsets', 'scrollIndicators', 'swipeActions',
   // control styles, each of which changes what is drawn
   'toggleStyle', 'pickerStyle', 'labelStyle', 'progressViewStyle', 'gaugeStyle',
   'controlSize', 'buttonBorderShape', 'monospaced',
@@ -233,7 +233,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   // presentation and chrome
   'navigationBarBackButtonHidden', 'statusBarHidden',
   'popoverTip',
-  'searchScopes', 'searchSuggestions', 'onMove', 'swipeActions',
+  'searchScopes', 'searchSuggestions', 'onMove',
   'fileImporter', 'fileExporter',
   // controls
   'menuStyle', 'datePickerStyle',
@@ -305,7 +305,7 @@ export const MODIFIER_CATEGORIES: Readonly<Record<'behavior' | 'layout' | 'text'
 export const OTHER_APPLE_MODIFIERS: ReadonlySet<string> = new Set([
   'containerShape', 'backgroundStyle', 'colorInvert', 'luminanceToAlpha', 'containerBackground', 'colorScheme', 'listItemTint',
   'symbolEffectsRemoved', 'hoverEffect', 'hoverEffectDisabled', 'privacySensitive', 'headerProminence', 'badgeProminence',
-  'listRowSeparatorTint', 'listSectionSeparatorTint', 'invalidatableContent', 'backgroundExtensionEffect', 'glassEffectID',
+  'listSectionSeparatorTint', 'invalidatableContent', 'backgroundExtensionEffect', 'glassEffectID',
   'glassEffectUnion', 'glassEffectTransition', 'buttonSizing', 'labelsHidden', 'scrollIndicatorsFlash', 'scrollEdgeEffectStyle',
   'scrollEdgeEffectHidden', 'navigationViewStyle', 'navigationSubtitle', 'toolbarColorScheme', 'toolbarBackgroundVisibility',
   'toolbarVisibility', 'toolbarTitleDisplayMode', 'toolbarRole', 'persistentSystemOverlays', 'statusBar', 'tabViewBottomAccessory',

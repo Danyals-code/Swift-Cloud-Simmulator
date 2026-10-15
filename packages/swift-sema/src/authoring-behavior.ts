@@ -1,14 +1,15 @@
 import { Lexer, type CallExpr, type StructDecl } from '@studio/swift-syntax'
 import { deploymentVersion, isHelperDefinition, tappableProblem } from '@studio/shared'
-import type { AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
-import { allDeclarations, callOf, enumCases, expressionOf, hasComments, identifier, insertMember, layerById, literal, modifierIndent, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
+import type { AlertActionSpec, AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
+import { allDeclarations, callOf, enumCases, expressionOf, hasComments, identifier, insertMember, layerById, lineIndent, literal, modifierIndent, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { collectionFor, recordsSwift } from './authoring-collections'
 import { namedActions } from './authoring-components'
 import { styleExpression } from './authoring-resources'
 import { insideNavigationStack } from './authoring-navigation'
 import { appRoot } from './authoring-navigation-app'
 import { screenStateInputs } from './authoring-states'
-import { viewCallChain } from './design-controls'
+import { dotOf } from './authoring-modifiers'
+import { buttonRole, literalText, swiftString, viewCallChain } from './design-controls'
 
 /**
  * The values a view's states can change. A screen's own definition also offers what its
@@ -128,13 +129,100 @@ export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): Beha
   const bindingState = argument && inputs.find(s => raw(ctx, argument.value.span) === '$' + s.name)
   const type = label === 'text' ? 'String' : label === 'isOn' ? 'Bool' : bindingState?.type ?? (node.name === 'Slider' ? 'Double' : node.name === 'DatePicker' ? 'Date' : node.name === 'ColorPicker' ? 'Color' : 'Int')
   const collections = node.name === 'Button' ? collectionLayers(ctx, node.owner).flatMap(n => { const c = collectionFor(ctx, n); return c ? [c] : [] }).filter((c, i, a) => a.findIndex(other => other.name === c.name) === i) : []
-  const withTitle = node.name === 'Button' && call.args.length === 1 && call.args[0]?.label === null
+  // A title, with a symbol and a role or not (Wave 4a): `Button("Delete", role: .destructive) { }`.
+  const withTitle = node.name === 'Button' && call.args[0]?.label === null && call.args.every((a, i) => !i || a.label === 'systemImage' || a.label === 'role')
   const canConfigureAction = (withTitle || labelledButton(call)) && !!call.trailingClosure && call.trailingClosure.params.length === 0
   // Any other view When tapped can make tappable, as a card or a row is (D16).
   const canMakeTappable = !canConfigureAction && !tappableProblem(ctx.nodes, node)
   const site = deploymentVersion(ctx.deploymentTarget) < 15 ? { problem: 'An appear animation needs an iOS 15 deployment target.' } : appearSite(ctx, node)
   const appear = 'problem' in site ? { problem: site.problem } : { by: site.by }
-  return { appear, states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' || canMakeTappable ? tapDestinations(ctx, node) : [], canConfigureAction, canMakeTappable, titled: withTitle && call.args[0]!.value.kind === 'stringLiteral', currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined }
+  return { appear, states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' || canMakeTappable ? tapDestinations(ctx, node) : [], canConfigureAction, canMakeTappable, titled: withTitle && call.args[0]!.value.kind === 'stringLiteral', shows: canConfigureAction ? shownOnTap(ctx, node, call) : undefined, currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined }
+}
+
+/** Each owner's alerts and confirmation dialogs, by the modifier that writes them: read from their layers once. */
+const presentationCache = new WeakMap<FeatureContext, Map<string, CallExpr[]>>()
+function presentationsOf(ctx: FeatureContext, owner: string): readonly CallExpr[] {
+  let byOwner = presentationCache.get(ctx)
+  if (!byOwner) {
+    presentationCache.set(ctx, byOwner = new Map())
+    for (const layer of ctx.nodes) {
+      if (layer.kind !== 'branch' || layer.name !== 'Alert' && layer.name !== 'Confirmation dialog') continue
+      const view = layerById(ctx, layer.parentId), expression = view && expressionOf(ctx, view)
+      const modifier = expression && viewCallChain(expression)?.modifiers.find(m => m.span.end === layer.source.end)
+      if (modifier) byOwner.set(layer.owner, [...byOwner.get(layer.owner) ?? [], modifier])
+    }
+  }
+  return byOwner.get(owner) ?? []
+}
+/** The alert or dialog of a Button's screen its action presents, by setting the value it is presented by to true, and that value. */
+function presentedOnTap(ctx: FeatureContext, node: AuthoringNode, call: CallExpr): { readonly modifier: CallExpr; readonly state: string } | undefined {
+  const [only, more] = call.trailingClosure?.body.statements ?? []
+  const state = !more && only?.kind === 'exprStmt' && only.expression.kind === 'assign' && only.expression.operator === '=' && only.expression.target.kind === 'identifier' && raw(ctx, only.expression.value.span) === 'true' ? only.expression.target.name : undefined
+  const modifier = state && presentationsOf(ctx, node.owner).find(m => m.args.some(a => a.label === 'isPresented' && raw(ctx, a.value.span) === '$' + state))
+  return modifier ? { modifier, state: state! } : undefined
+}
+
+type Shows = NonNullable<BehaviorSettings['shows']>
+/** An alert or a dialog as When tapped reads it, with what writing it again keeps. */
+interface ReadPresentation {
+  readonly shows: Shows
+  /** What each plain button that does something does, as written, by its title: kept when it is written again. */
+  readonly kept: readonly { readonly title: string; readonly action: string }[]
+  /** A dialog's `titleVisibility:`, as written. */
+  readonly titleVisibility?: string
+}
+/**
+ * An alert or a dialog a tap shows, read as When tapped's Show alert and Show options write
+ * it (Wave 4a). Only a title of plain words, plain buttons with a role or none, and one Text
+ * of plain words as its message can be written back exactly. Any other is still described,
+ * its words as the code writes them, with `readOnly` saying why, so that nothing in it is
+ * turned into words or lost.
+ */
+function readPresentation(ctx: FeatureContext, modifier: CallExpr): ReadPresentation {
+  const type = modifier.callee.kind === 'memberAccess' && modifier.callee.member === 'alert' ? 'alert' : 'dialog'
+  let readOnly: string | undefined
+  const refuse = (reason: string) => { readOnly ??= `${reason} Change it in Code.` }
+  const title = modifier.args[0]?.label === null ? modifier.args[0].value : undefined
+  const closure = (label: string) => { const value = modifier.args.find(a => a.label === label)?.value; return value?.kind === 'closure' ? value : undefined }
+  // Written with labels, `actions:` comes first, and a closure after the parentheses is its message.
+  const actions = closure('actions') ?? modifier.trailingClosure ?? undefined
+  const message = closure('message') ?? (closure('actions') ? modifier.trailingClosure ?? undefined : undefined)
+  for (const arg of modifier.args) {
+    if (arg.label === 'presenting') refuse(`This ${type} shows the value it presents.`)
+    else if (!(arg.label === null && arg.value === title || arg.label === 'isPresented' || arg.label === 'actions' || arg.label === 'message' || arg.label === 'titleVisibility' && type === 'dialog')) refuse(`This ${type} has settings When tapped doesn’t know.`)
+  }
+  // SwiftUI's older `.alert(isPresented:) { Alert(…) }` has its title inside.
+  if (!title) refuse(`This ${type} is written in a form When tapped doesn’t write.`)
+  else if (literalText(title) === undefined) refuse(`This ${type}’s title is more than plain words.`)
+  const described: AlertActionSpec[] = [], kept: { title: string; action: string }[] = []
+  for (const statement of actions?.body.statements ?? []) {
+    const chain = statement.kind === 'exprStmt' && statement.expression.kind === 'call' ? viewCallChain(statement.expression) : undefined
+    const button = chain?.base.callee.kind === 'identifier' && chain.base.callee.name === 'Button' ? chain.base : undefined
+    if (!button) { refuse(`This ${type} holds more than buttons.`); continue }
+    const titled = button.args[0]?.label === null ? button.args[0].value : undefined, roleArgument = button.args.find(a => a.label === 'role')
+    const words = literalText(titled), role = buttonRole(roleArgument && raw(ctx, roleArgument.value.span))
+    const closed = button.trailingClosure && !button.trailingClosure.params.length ? button.trailingClosure : undefined
+    if (words === undefined || !role || !closed || chain!.modifiers.length || button.args.some(a => a.value !== titled && a !== roleArgument)) refuse(`One of this ${type}’s buttons is more than a title and a role.`)
+    else if (closed.body.statements.length) kept.push({ title: words, action: raw(ctx, closed.span) })
+    const shown = words ?? raw(ctx, (titled ?? button.args.find(a => a.label === 'label')?.value ?? button).span)
+    described.push(role === 'destructive' || role === 'cancel' ? { title: shown, role } : { title: shown })
+  }
+  const [text, more] = message?.body.statements ?? []
+  const said = text?.kind === 'exprStmt' && text.expression.kind === 'call' ? viewCallChain(text.expression) : undefined
+  const words = said?.base.callee.kind === 'identifier' && said.base.callee.name === 'Text' && !said.modifiers.length && said.base.args.length === 1 && said.base.args[0]!.label === null && !said.base.trailingClosure ? literalText(said.base.args[0]!.value) : undefined
+  if (text && (more || words === undefined)) refuse(`This ${type}’s message is more than one plain text.`)
+  const dot = modifier.callee.kind === 'memberAccess' ? modifier.callee.memberSpan.start : modifier.span.start
+  if (hasComments(ctx, { file: modifier.span.file, start: dot, end: modifier.span.end })) refuse(`This ${type} has comments in it, which only Code keeps.`)
+  const visibility = modifier.args.find(a => a.label === 'titleVisibility')
+  return {
+    shows: { type, title: literalText(title) ?? (title ? raw(ctx, title.span) : ''), message: text ? words ?? raw(ctx, text.span) : undefined, actions: described, readOnly },
+    kept, titleVisibility: visibility && raw(ctx, visibility.value.span),
+  }
+}
+/** What a tap on a Button shows (Wave 4a): an alert or a dialog of its screen presented by the value its action sets to true. */
+function shownOnTap(ctx: FeatureContext, node: AuthoringNode, call: CallExpr): Shows | undefined {
+  const modifier = presentedOnTap(ctx, node, call)?.modifier
+  return modifier && readPresentation(ctx, modifier).shows
 }
 
 /** Each owner's collection layers, in their order: every Button asks for its own owner's. */
@@ -187,7 +275,8 @@ function tapDestinations(ctx: FeatureContext, node: AuthoringNode): readonly str
 
 /** `Button { … } label: { … }`: the action is the trailing closure, and what it shows is its label (D16). */
 function labelledButton(call: CallExpr): boolean {
-  return call.callee.kind === 'identifier' && call.callee.name === 'Button' && call.args.length === 1 && call.args[0]!.label === 'label' && call.args[0]!.value.kind === 'closure'
+  const label = call.args.at(-1)
+  return call.callee.kind === 'identifier' && call.callee.name === 'Button' && label?.label === 'label' && label.value.kind === 'closure' && call.args.every(a => a === label || a.label === 'role')
 }
 function namedState(ctx: FeatureContext, node: AuthoringNode, name: string): StateInput {
   const input = stateInputs(ctx, node).find(s => s.name === name)
@@ -297,9 +386,12 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
     if (!settings.destinations.includes(action.destination)) throw new Error('Choose a local View that has a supported no-argument initializer.')
     if (action.type === 'navigate') {
       if (!insideNavigationStack(ctx.nodes, node)) throw new Error('Place this Button inside a NavigationStack before configuring navigation.')
+      if (call.args.some(a => a.label === 'role')) throw new Error('A link has no role. Set Role to None, then choose where it goes.')
       // A card stays the link's label, as `NavigationLink { Detail() } label: { … }` writes it (D16).
-      const label = call.args[0]!
+      const label = call.args[0]!, symbol = call.args.find(a => a.label === 'systemImage')
       if (label.label === 'label' && label.labelSpan) return [{ file: call.span.file, start: call.span.start, end: label.labelSpan.start, text: `NavigationLink { ${action.destination}() } ` }]
+      // A link has no symbol of its own, so the button's is kept in its label.
+      if (symbol) return [patch(call.span, `NavigationLink { ${action.destination}() } label: { Label(${raw(ctx, label.value.span)}, systemImage: ${raw(ctx, symbol.value.span)}) }`)]
       return [patch(call.span, `NavigationLink(${raw(ctx, label.value.span)}, destination: ${action.destination}())`)]
     }
     const expression = expressionOf(ctx, node)!
@@ -310,6 +402,24 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
     // On a line of its own under the view, indented as a modifier is (D13).
     const modifier = `.${action.type === 'cover' ? 'fullScreenCover' : 'sheet'}(isPresented: $${name}) { ${action.destination}() }`
     patches.push({ file: node.source.file, start: node.source.end, end: node.source.end, text: `\n${modifierIndent(ctx, node)}${modifier}` })
+    body = `${name} = true`
+  } else if (action.type === 'alert' || action.type === 'dialog') {
+    if (deploymentVersion(ctx.deploymentTarget) < 15) throw new Error(action.type === 'alert' ? 'An alert shown on tap needs an iOS 15 deployment target.' : 'Options shown on tap need an iOS 15 deployment target.')
+    // One the button shows already is rewritten where it is, with the value that shows it,
+    // and the button's action, which sets that value already, stays as it is written.
+    const shown = presentedOnTap(ctx, node, call)
+    if (shown) {
+      const read = readPresentation(ctx, shown.modifier)
+      if (read.shows.readOnly) throw new Error(read.shows.readOnly)
+      const file = shown.modifier.span.file, at = dotOf(shown.modifier, ctx.files.find(f => f.id === file)?.text ?? ''), { indent, unit } = lineIndent(ctx, file, at)
+      return [{ file, start: at, end: shown.modifier.span.end, text: presentationSwift(action, shown.state, indent, unit, read) }]
+    }
+    const base = action.type === 'alert' ? 'isShowingAlert' : 'isShowingOptions'
+    let name = base
+    for (let suffix = 2; nameTaken(ctx, node, owner, name); suffix++) name = base + suffix
+    patches.push(insertMember(ctx, owner, `@State private var ${name} = false`))
+    const indent = modifierIndent(ctx, node)
+    patches.push({ file: node.source.file, start: node.source.end, end: node.source.end, text: `\n${indent}${presentationSwift(action, name, indent, lineIndent(ctx, node.source.file, node.source.start).unit)}` })
     body = `${name} = true`
   } else {
     const info = settings.collections.find(c => c.name === action.collection && c.mutable)
@@ -324,6 +434,29 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
   }
   patches.push(patch(call.trailingClosure.span, `{ ${body} }`))
   return patches
+}
+
+/**
+ * An alert or a confirmation dialog a tap shows, as Apple's examples write it: its buttons
+ * one to a line, each with its role, then its message as a Text. With no buttons given it
+ * has the OK iOS would show anyway, so the designer has a layer to change. Written again in
+ * place of one `read` (Wave 4a), each button that did something does it still, matched by
+ * its title, and a dialog keeps its `titleVisibility:`; an alert always shows its title, so
+ * it has none. A button that did something and is no longer there is refused, never lost.
+ */
+function presentationSwift(action: Extract<BehaviorAction, { type: 'alert' | 'dialog' }>, name: string, indent: string, unit: string, read?: ReadPresentation): string {
+  if (typeof action.title !== 'string' || !Array.isArray(action.actions) || action.message !== undefined && typeof action.message !== 'string' || action.actions.some(a => typeof a?.title !== 'string' || a.role !== undefined && a.role !== 'destructive' && a.role !== 'cancel')) throw new Error('Give the alert a title and buttons with a title and a role of None, Destructive or Cancel.')
+  const inner = indent + unit, unused = [...read?.kept ?? []]
+  const buttons = (action.actions.length ? action.actions : [{ title: 'OK' }]).map((button: AlertActionSpec) => {
+    const kept = unused.findIndex(k => k.title === button.title)
+    const does = kept < 0 ? '{ }' : unused.splice(kept, 1)[0]!.action
+    return `${inner}Button(${swiftString(button.title)}${button.role ? `, role: .${button.role}` : ''}) ${does}\n`
+  }).join('')
+  const lost = unused[0]
+  if (lost) throw new Error(`This ${read!.shows.type}’s ${lost.title} button does something when tapped. Keep a button called ${lost.title}, or change it in Code.`)
+  const message = action.message === undefined ? '' : ` message: {\n${inner}Text(${swiftString(action.message)})\n${indent}}`
+  const visibility = action.type === 'dialog' && read?.titleVisibility ? `, titleVisibility: ${read.titleVisibility}` : ''
+  return `.${action.type === 'alert' ? 'alert' : 'confirmationDialog'}(${swiftString(action.title)}, isPresented: $${name}${visibility}) {\n${buttons}${indent}}${message}`
 }
 /**
  * How a view comes and goes, which is when a transition plays: by an if or a switch, or as
