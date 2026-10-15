@@ -2,9 +2,10 @@
 
 import { Fragment, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { Diagnostic, PagePreview } from '@studio/shared'
-import { canRename, designScreenPath, DETACHED_GROUP, emptyScreensNote, SHEETS_GROUP, type DesignComponent, type DesignScreenNode, type DesignTree } from '../lib/designTree'
+import { canRename, designScreenPath, DETACHED_GROUP, emptyScreensNote, PREVIEWS_GROUP, SHEETS_GROUP, type DesignComponent, type DesignScreenNode, type DesignTree } from '../lib/designTree'
 import type { ScreenCommand } from '../lib/screens'
 import type { NavigatorLayout } from '../lib/layout'
+import { PAGE_KINDS } from '../lib/pageKinds'
 import { Icon, type IconName } from './ui/Icon'
 import { MenuButton, type MenuItem } from './ui/Menu'
 import styles from './DesignNavigator.module.css'
@@ -102,7 +103,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
     const expandable = withLayers && selected || node.children.length > 0
     const expanded = expandable && isOpen(node.id)
     return <Fragment key={node.id}>
-      <Row id={node.id} depth={depth} icon={node.presentation === 'sheet' || node.presentation === 'cover' || node.presentation === 'popover' ? 'sheet' : 'phone'} label={node.name} detail={detail}
+      <Row id={node.id} depth={depth} icon={PAGE_KINDS[node.presentation].icon} label={node.name} detail={detail}
         selected={selected && level === 'screen'} current={selected && level !== 'screen'} expandable={expandable} expanded={expanded} onToggle={() => toggle(node.id)}
         onClick={() => onSelectScreen(node.page)} actions={screenActions(node)} onAction={value => onScreenAction(node, value)} testId="design-screen" />
       {expanded && withLayers && selected && <div className={styles.layers} data-testid="design-screen-layers">{renderLayers({ embedded: true, query, indent: BASE + (depth + 1) * INDENT })}</div>}
@@ -116,6 +117,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
       <GroupRow id={DETACHED_GROUP} depth={depth} label="Not linked yet" count={tree.detached.length} expanded={isOpen(DETACHED_GROUP)} onToggle={() => toggle(DETACHED_GROUP)} title="Screens nothing navigates to yet. Add a Navigate to action to connect one." />
       {isOpen(DETACHED_GROUP) && tree.detached.map(node => screenRows(node, depth + 1, withLayers))}
     </>}
+    {(!focus || path.includes(PREVIEWS_GROUP)) && !!tree.previews.length && <><GroupRow id={PREVIEWS_GROUP} depth={depth} label="Previews" count={tree.previews.length} expanded={isOpen(PREVIEWS_GROUP)} onToggle={() => toggle(PREVIEWS_GROUP)} title="Each #Preview in the code, drawn on its own. The app doesn't show these." />{isOpen(PREVIEWS_GROUP) && tree.previews.map(node => screenRows(node, depth + 1, withLayers))}</>}
     {!tree.lanes.length && !tree.detached.length && <p className={styles.empty}>{empty.text}{empty.at && <> <button type="button" className={styles.emptyAction} onClick={() => onReveal(empty.at!.file, empty.at!.offset)}>Show in Code</button></>}</p>}
   </>
   const sheetsGroup = (depth: number, withLayers: boolean) => !tree.sheets.length ? null : <>

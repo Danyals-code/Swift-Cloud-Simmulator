@@ -1,6 +1,7 @@
 import type { LogLevel, SourceSpan } from '@studio/shared'
 import { hasCornerRadii } from '@studio/shared'
 import {
+  array,
   asKeyPath,
   readKeyPath,
   bool,
@@ -846,6 +847,9 @@ export class SwiftUIHost implements InterpreterHost {
       return view({ name, args: [{ label: 'icon', value: configuration.fields.get('icon')! }], children: title ? [title] : [], modifiers: [], action: null, span: call.span })
     }
     if (name === 'Binding') return this.makeBinding(call)
+    // `NavigationPath()` holds values of any type, each pushed by the destination for its type,
+    // which is what a list of them is to a stack: `append`, `removeLast` and `count` are the list's.
+    if (name === 'NavigationPath') return array(call.args[0]?.value.kind === 'array' ? call.args[0].value.elements.map(copyValue) : [])
     // `UIColor(red:green:blue:alpha:)` is a colour like any other, bridged by `Color(uiColor:)`.
     if (name === 'Color' || name === 'UIColor') return this.makeColor(call)
     if (name === 'withAnimation') return this.runWithAnimation(call)
@@ -913,6 +917,9 @@ export class SwiftUIHost implements InterpreterHost {
     const legacy = LEGACY_STYLE_TOKENS.get(name)
     if (legacy) return token(legacy)
 
+    // `Alert(title:message:dismissButton:)` in an `.alert(isPresented:)`, as alerts were written
+    // before iOS 15: the alert draws what it is given (`alertButtons`).
+    if (name === 'Alert') return view({ name, args: toArgs(call), children: [], modifiers: [], action: null, span: call.span })
     if (!VIEW_NAMES.has(name)) {
       // A view nothing declares, which the checker has warned about, is a placeholder
       // named after it. What it was given is never run: there is no telling what it
@@ -1510,17 +1517,21 @@ export class SwiftUIHost implements InterpreterHost {
         : call.trailingClosure ?? asClosure(call.args.find(arg => arg.label === 'menuItems')?.value)
       : call.trailingClosure
     const action = EVENT_MODIFIERS.has(member) ? (call.trailingClosure ?? eventArgument(call)) : null
-    return {
+    const modifier: { -readonly [K in keyof ModifierValue]: ModifierValue[K] } = {
       name: member,
       args: [...toArgs(call), ...this.eagerContent(member, call)],
       span: call.span,
       // Unevaluated on purpose: a sheet's content must not run while it is down.
       closure: deferred,
-      ...(action ? { action } : {}),
-      // Only where there is something deferred to run later. Every other modifier
-      // resolves inside the scope it was written in and has no use for this.
-      ...(deferred ? { environment: this.environment.snapshot() } : {}),
     }
+    if (action) modifier.action = action
+    // Only where there is something deferred to run later. Every other modifier resolves
+    // inside the scope it was written in and has no use for this.
+    if (deferred) modifier.environment = this.environment.snapshot()
+    // An alert's or a dialog's title is kept where it is written, for the layer its words are drawn as.
+    const title = deferred && (member === 'alert' || member === 'confirmationDialog') ? call.args.find((arg) => arg.label === null) : undefined
+    if (title) modifier.titleSpan = title.span
+    return modifier
   }
 
   private eagerContent(member: string, call: HostCall): ViewArg[] {

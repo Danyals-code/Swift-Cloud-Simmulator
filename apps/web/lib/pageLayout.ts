@@ -1,4 +1,5 @@
 import type { PagePreview } from '@studio/shared'
+import { PAGE_KINDS, pageRoots, reachedAs, type PageKind } from './pageKinds'
 
 /**
  * Where each screen goes on the canvas.
@@ -18,12 +19,13 @@ export interface PageSlot {
   /** 0 is the screen itself; 1… are its states, below it in its frame. */
   readonly stateIndex: number
   /** How the screen is reached from the one to its left. */
-  readonly presentation: 'root' | 'push' | 'sheet' | 'cover' | 'popover'
+  readonly presentation: PageKind
   /** The screen it is reached from, for the arrow. */
   readonly parentId?: string
 }
 
-const PRESENTED = new Set(['sheet', 'cover', 'popover'])
+/** Whether a page is a screen presented on its own, drawn once however many screens open it. */
+const presentedScreen = (page: PagePreview) => PAGE_KINDS[reachedAs(page, true)].presented === 'screen'
 
 /**
  * Lanes, columns and branch rows for every screen, states excluded.
@@ -33,11 +35,9 @@ const PRESENTED = new Set(['sheet', 'cover', 'popover'])
  * narrows to the lane holding that root.
  */
 export function pageSlots(pages: readonly PagePreview[], visibleRootId?: string, sameScreen: (page: PagePreview) => string = page => page.id): readonly PageSlot[] {
-  const byId = new Map(pages.map(page => [page.id, page]))
-  const roots = pages.filter(page => !page.parentId || !byId.has(page.parentId))
-  const running = roots.filter(page => !page.standalone)
-  const detached = roots.filter(page => page.standalone)
-  const all = [...running.map(root => [root]), ...(detached.length ? [detached] : [])].map((laneRoots, lane) => ({ laneRoots, lane }))
+  // Screens nothing links to yet share a lane, and the `#Preview`s the app doesn't run another.
+  const { running, detached, previews } = pageRoots(pages)
+  const all = [...running.map(root => [root]), ...[detached, previews].filter(lane => lane.length)].map((laneRoots, lane) => ({ laneRoots, lane }))
   // A root that names no lane - a stale selection, or a page id that is not a root -
   // shows the whole app instead of an empty canvas.
   const narrowed = all.filter(({ laneRoots }) => laneRoots.some(root => root.id === visibleRootId))
@@ -54,7 +54,7 @@ export function pageSlots(pages: readonly PagePreview[], visibleRootId?: string,
         if (visited.has(page.id)) continue
         visited.add(page.id)
         for (const child of childrenOf(page.id)) {
-          if (PRESENTED.has(child.kind ?? '') && !drawn.has(sameScreen(child))) drawn.set(sameScreen(child), child.id)
+          if (presentedScreen(child) && !drawn.has(sameScreen(child))) drawn.set(sameScreen(child), child.id)
           next.push(child)
         }
       }
@@ -68,20 +68,22 @@ export function pageSlots(pages: readonly PagePreview[], visibleRootId?: string,
     const place = (page: PagePreview, column: number, branchRow: number, parentId?: string) => {
       if (placed.has(page.id)) return
       placed.add(page.id)
-      const presentation = !parentId ? 'root' : PRESENTED.has(page.kind ?? '') ? page.kind as PageSlot['presentation'] : 'push'
-      result.push({ page, lane, column, branchRow, stateIndex: 0, presentation, ...(parentId ? { parentId } : {}) })
+      result.push({ page, lane, column, branchRow, stateIndex: 0, presentation: reachedAs(page, !!parentId), ...(parentId ? { parentId } : {}) })
       let first = true
       for (const child of childrenOf(page.id)) {
         if (placed.has(child.id)) continue
-        if (PRESENTED.has(child.kind ?? '') && drawn.get(sameScreen(child)) !== child.id) continue
+        if (presentedScreen(child) && drawn.get(sameScreen(child)) !== child.id) continue
         const row = first ? branchRow : rows++
         first = false
         place(child, column + 1, row, page.id)
       }
     }
-    // A tab's lane has one root, in row 0. Screens nothing links to yet share the
-    // last lane, each starting its own row below the one before.
-    for (const root of laneRoots) place(root, 0, rows++)
+    // A tab's lane has one root, in row 0. Screens nothing links to yet share a lane,
+    // each starting its own row below the one before; previews sit side by side, as in Xcode.
+    for (const [index, root] of laneRoots.entries()) {
+      if (reachedAs(root, false) === 'preview') place(root, index, 0)
+      else place(root, 0, rows++)
+    }
   }
   // Anything the walk could not reach - a screen in a parent cycle, or one hanging
   // off a copy of a shared sheet that is not the drawn one - is still a screen the
@@ -90,9 +92,9 @@ export function pageSlots(pages: readonly PagePreview[], visibleRootId?: string,
   if (last && lanes.length === all.length) {
     let rows = result.filter(slot => slot.lane === last.lane).reduce((most, slot) => Math.max(most, slot.branchRow + 1), 0)
     for (const page of pages) {
-      if (placed.has(page.id) || PRESENTED.has(page.kind ?? '') && drawn.get(sameScreen(page)) !== page.id) continue
+      if (placed.has(page.id) || presentedScreen(page) && drawn.get(sameScreen(page)) !== page.id) continue
       placed.add(page.id)
-      result.push({ page, lane: last.lane, column: 0, branchRow: rows++, stateIndex: 0, presentation: 'root' })
+      result.push({ page, lane: last.lane, column: 0, branchRow: rows++, stateIndex: 0, presentation: reachedAs(page, false) })
     }
   }
   return result
@@ -191,9 +193,9 @@ export function canvasLayout(pages: readonly PagePreview[], options: CanvasOptio
   const sameScreen = options.sameScreen ?? (page => page.id)
   const shown = new Map(slots.map(slot => [sameScreen(slot.page), slot.page.id]))
   for (const page of pages) {
-    if (!page.parentId || !PRESENTED.has(page.kind ?? '') || slots.some(slot => slot.page.id === page.id)) continue
+    if (!page.parentId || !presentedScreen(page) || slots.some(slot => slot.page.id === page.id)) continue
     const target = shown.get(sameScreen(page))
-    if (target && slots.some(slot => slot.page.id === page.parentId)) add({ from: page.parentId, to: target, kind: page.kind as CanvasArrow['kind'] })
+    if (target && slots.some(slot => slot.page.id === page.parentId)) add({ from: page.parentId, to: target, kind: reachedAs(page, true) })
   }
   return { slots, phones, frames, lanes, arrows, width: Math.max(width, frame.width + CANVAS.lanePad * 2), height: Math.max(y - CANVAS.lanePad, cell) }
 }

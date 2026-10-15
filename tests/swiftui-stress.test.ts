@@ -33,7 +33,6 @@ function tap(r: CompileResult, label: string) {
 const gaps: Record<string, string> = {
   'state-initializer': "Cannot find '_count'",
   'value-textfield': 'value/format/formatter', 'multiline-textfield': 'axis-based multiline',
-  'navigation-path': 'bound navigation paths', 'navigation-boolean': 'binding-driven destinations',
   'grid-cell-span': 'gridCellColumns', 'safe-area-padding': 'safeAreaPadding',
   'preferred-scheme': 'preferredColorScheme', 'symbol-effects': 'symbolEffect',
   'scroll-reader': 'ScrollViewReader', 'custom-environment': '@Environment(featureEnabled)',
@@ -53,6 +52,7 @@ const visible: Record<string, string[]> = {
   'optional-binding': ['Present'], 'enum-picker': ['Saved'],
   'generic-view-builder': ['Inside'], 'stored-view-builder': ['Inside'],
   'custom-modifier': ['Card'], 'sheet-item': ['Selected'], 'modern-tab': ['Saved content'],
+  'navigation-path': ['Detail'], 'navigation-boolean': ['Detail'],
   'background-in-shape': ['Card'], 'overlay-builder': ['Base', 'Badge'],
   'bold-false': ['Normal'], 'italic-false': ['Normal'],
   'line-limit-range': ['Long enough to wrap over many lines'], 'viewthatfits': ['Short'],

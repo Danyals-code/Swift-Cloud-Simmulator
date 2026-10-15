@@ -36,11 +36,18 @@ export const VIEW_PARTS: Readonly<Record<string, ViewParts>> = {
 /** The slot a modifier gives the views it takes: `.overlay { … }` is the view's Overlay. */
 export const MODIFIER_SLOTS: Readonly<Record<string, string>> = {
   background: 'Background', overlay: 'Overlay', toolbar: 'Toolbar', sheet: 'Sheet', fullScreenCover: 'Full screen cover',
-  navigationDestination: 'Destination', safeAreaInset: 'Safe area inset',
+  navigationDestination: 'Destination', safeAreaInset: 'Safe area inset', alert: 'Alert', confirmationDialog: 'Confirmation dialog',
 }
 
+/**
+ * The parts of an alert or a confirmation dialog besides its title, each a slot within its
+ * own (Wave 3b): by the argument label that writes it, `trailing` for the closure after the
+ * parentheses, which is its actions.
+ */
+export const PRESENTATION_PARTS: Readonly<Record<string, string>> = { trailing: 'Actions', actions: 'Actions', message: 'Message' }
+
 /** Every slot name a view's content can be listed under besides its own: its parts' and its modifiers'. */
-export const CONTENT_SLOT_NAMES: ReadonlySet<string> = new Set([...Object.values(MODIFIER_SLOTS), ...Object.values(VIEW_PARTS).flatMap(parts => Object.values(parts.slots))])
+export const CONTENT_SLOT_NAMES: ReadonlySet<string> = new Set([...Object.values(MODIFIER_SLOTS), ...Object.values(PRESENTATION_PARTS), ...Object.values(VIEW_PARTS).flatMap(parts => Object.values(parts.slots))])
 
 /** The views the preview draws `label:` and `icon:` views of as layers of their own (`drawnAsLayers`). */
 export const LAYERED_LABEL_VIEWS: ReadonlySet<string> = new Set(Object.entries(VIEW_PARTS).flatMap(([name, parts]) => parts.drawnAsLayers ? [name] : []))

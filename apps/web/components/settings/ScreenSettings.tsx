@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { LAYOUT_WORDS, stackLayoutOf, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type DesignValue, type PreviewInput, type PreviewScenario, type ResourceOperation, type SharedStyle, type SourceSpan, type StateInput } from '@studio/shared'
-import { canRename, screenRemovalRefusal, type DesignScreenNode, type DesignTree } from '../../lib/designTree'
+import { canRename, describeScreen, screenRemovalRefusal, type DesignScreenNode, type DesignTree } from '../../lib/designTree'
 import type { ScreenCommand } from '../../lib/screens'
 import { screenOverrideModifier, screenRoot, screenTitleControl, scenarioKey, scenarioScreen, lacksNavigationBar } from '../../lib/screens'
 import { describeState, stateSuggestions } from '../../lib/screenStates'
@@ -63,7 +63,9 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
   const code = definition?.source ?? screen.page.source
   const root = screenRoot(snapshot, definition)
   const title = screenTitleControl(snapshot, definition)
-  const presentation = describePresentation(screen, tree)
+  const presentation = describeScreen(screen, tree)
+  // A `#Preview` is drawn on its own, with no screen's settings or states (Wave 3b).
+  const preview = screen.presentation === 'preview'
   const run = async (task: Promise<string | null>) => setError(await task)
   // Duplicate and Remove are planned edits: a refusal shows at the foot of the canvas, as every one does, so it is not said here again.
   const plan = async (task: Promise<string | null>) => { setError(null); await task }
@@ -73,7 +75,7 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
   return <div className={styles.panel} data-testid="screen-settings">
     <div className={styles.lede}><strong>{screen.name}</strong><small>{presentation}</small></div>
     <section className={styles.section} aria-label="Screen">
-      {!screen.view && <p className={styles.note}>This screen is written inside another screen’s code, so it has no settings of its own here. Open it in Code to change it.</p>}
+      {!screen.view && <p className={styles.note}>{preview ? 'A #Preview has no settings of its own here. Open it in Code to change it.' : 'This screen is written inside another screen’s code, so it has no settings of its own here. Open it in Code to change it.'}</p>}
       {screen.shared && <p className={styles.note}>Its view draws other screens too, so it is named by its title.</p>}
       {canRename(screen) && <div className={styles.row}><label htmlFor="screen-name">Name</label><input id="screen-name" aria-label="Screen name" maxLength={100} value={name} disabled={busy} onChange={event => setName(event.target.value)} onBlur={() => { if (name.trim() && name !== screen.name) void run(onScreenCommand({ kind: 'rename', view: screen.view!, name })) }} onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); if (event.key === 'Escape') setName(screen.name) }} /></div>}
       {title ? <PropertyControl key={`${title.node.id}:${title.control.value}`} control={title.control} label="Title" onChange={(id, value) => onNodeChange(title.node, id, value)} />
@@ -100,7 +102,7 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
         return <div key={item.modifier} className={styles.row}><span>{item.label}</span><button type="button" className={styles.inherit} disabled={busy || !available} title={available ? undefined : 'This screen’s first view cannot take this override yet.'} onClick={() => void run(onNodeCommand(root, { kind: 'modifier-add', name: item.modifier }))}>From App · Override</button></div>
       })}
     </section>}
-    <ScreenStates key={screen.id} screen={screen} snapshot={snapshot} busy={busy} scenarios={scenarios} active={activeScenario} onSelect={onSelectScenario} onSave={onSaveScenario} onDelete={onDeleteScenario} onCreateValue={onCreateStateValue} />
+    {!preview && <ScreenStates key={screen.id} screen={screen} snapshot={snapshot} busy={busy} scenarios={scenarios} active={activeScenario} onSelect={onSelectScenario} onSave={onSaveScenario} onDelete={onDeleteScenario} onCreateValue={onCreateStateValue} />}
     <section className={styles.section} aria-label="Screen actions">
       <div className={styles.actions}>
         {screen.view && <button type="button" className={styles.button} disabled={busy} onClick={() => void plan(onScreenCommand({ kind: 'duplicate', view: screen.view! }))}>Duplicate</button>}
@@ -117,22 +119,6 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
 function rootLabel(node: AuthoringNode): string {
   const layout = stackLayoutOf(node.name)
   return layout ? LAYOUT_WORDS[layout].toLowerCase() : ({ List: 'list', ScrollView: 'scroll area', Form: 'form' } as Record<string, string>)[node.name] ?? 'first view'
-}
-
-/** Why Remove is off: the planner refuses a tab, the screen the app starts on, and a screen another one opens. */
-
-function describePresentation(screen: DesignScreenNode, tree: DesignTree): string {
-  const byId = new Map<string, DesignScreenNode>()
-  const index = (node: DesignScreenNode) => { byId.set(node.id, node); node.children.forEach(index) }
-  tree.lanes.forEach(lane => index(lane.root)); tree.sheets.forEach(sheet => index(sheet.screen)); tree.detached.forEach(index)
-  const lane = tree.lanes.find(candidate => candidate.root.id === screen.id)
-  if (lane) return lane.tab ? `Tab · ${lane.name}` : 'The app starts here'
-  if (tree.detached.some(node => node.id === screen.id)) return 'Not linked yet · add Navigate to on a button to connect it'
-  const sheet = tree.sheets.find(candidate => candidate.screen.id === screen.id)
-  const kind = screen.presentation === 'cover' ? 'Full screen' : screen.presentation === 'popover' ? 'Popover' : 'Sheet'
-  if (sheet) return `${kind} · opened from ${sheet.openers.map(id => byId.get(id)?.name ?? 'a screen').join(', ')}`
-  const parent = [...byId.values()].find(candidate => candidate.children.some(child => child.id === screen.id))
-  return parent ? `Pushed from ${parent.name}` : 'Screen'
 }
 
 /**

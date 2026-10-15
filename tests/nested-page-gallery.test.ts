@@ -17,7 +17,8 @@ function run(body: string, declarations = '', state = '') {
 @main struct ExampleApp: App { var body: some Scene { WindowGroup { ContentView() } } }
 struct ContentView: View { ${state}; var body: some View { ${body} } }
 ${declarations}` }], revision: ++revision })
-  expect(result.diagnostics).toEqual([])
+  // A screen the gallery can't draw is listed, as `pagesNotDrawn` says, and is no fault of the code.
+  expect(result.diagnostics.filter(d => !result.pagesNotDrawn?.includes(d.message))).toEqual([])
   return result
 }
 function tap(result: CompileResult, label: string) {
@@ -93,7 +94,7 @@ it('uses current shared state without dispatching preview actions or lifecycle h
   expect(texts(result.pages!.find(page => page.id === reading.id)!.tree)).toContain('The Secret Garden')
 })
 
-it('isolates deferred builders and skips unsafe sheets without disturbing live state', () => {
+it('isolates deferred builders and lists unsafe sheets without disturbing live state', () => {
   const result = run(`NavigationStack {
     VStack { Text("Count: \\(store.count)"); NavigationLink("Open", value: 1) }
       .navigationDestination(for: Int.self) { value in
@@ -111,6 +112,7 @@ struct ImpureDetail: View {
   expect(texts(result.renderTree!)).toContain('Count: 0')
   expect(result.pages!.filter(page => page.kind === 'destination')).toHaveLength(1)
   expect(result.pages!.filter(page => page.kind === 'sheet')).toHaveLength(0)
+  expect(result.pagesNotDrawn).toEqual([expect.stringMatching(/^"Sheet" isn't drawn on the Design canvas: Swift runtime failure/)])
   expect(texts(rerender(++revision).renderTree!)).toContain('Count: 0')
 })
 

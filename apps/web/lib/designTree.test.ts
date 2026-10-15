@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { SCREEN_REMOVAL_REFUSALS, type Diagnostic } from '@studio/shared'
 import { applyEvent, compile, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { templateById } from '@studio/project-model/templates'
-import { designScreenPath, designScreens, designTree, emptyScreensNote, liveDesignScreen, screenRemovalRefusal } from './designTree'
+import { canvasLanes, describeScreen, designScreenPath, designScreens, designTree, emptyScreensNote, focusedDesignScreen, liveDesignScreen, screenRemovalRefusal } from './designTree'
+import { pageSlots } from './pageLayout'
 import { screenCatalog, type DesignScreen } from './screens'
 
 /**
@@ -205,7 +206,7 @@ describe('the screen Preview is showing', () => {
 
   it('is the screen a tapped row pushed, not the tab it was pushed from', () => {
     const tree = designed()
-    expect(shown(tree, tap(running(), 'Preferences'))).toEqual(['Preferences', 'push', 1])
+    expect(shown(tree, tap(running(), 'Preferences'))).toEqual(['Preferences', 'destination', 1])
   })
 
   // A screen given a name in the studio is drawn with an id of its own, which the running tab does not share.
@@ -242,5 +243,91 @@ describe('the screens Remove cannot take', () => {
     expect(refusal(tree, 'Overview')).toBe(SCREEN_REMOVAL_REFUSALS.tab)
     expect(refusal(tree, 'Preferences')).toBe(SCREEN_REMOVAL_REFUSALS.opened)
     expect(refusal(tree, 'New task')).toBe(SCREEN_REMOVAL_REFUSALS.opened)
+  })
+})
+
+/**
+ * A `#Preview` selected on the canvas is the screen Design is about (Wave 3b). Previews were
+ * left out of the screens looked up, so selecting one named the app's first screen in the
+ * breadcrumb, Screen settings and the Screens list.
+ */
+describe('a #Preview selected on the canvas', () => {
+  function previewed() {
+    resetPipelineState()
+    setFontMetrics([])
+    const text = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { HomeScreen() } } }
+struct HomeScreen: View { var body: some View { Text("Home") } }
+#Preview("Short") { VStack { Text("Short preview") } }
+`
+    const result = compile({ files: [{ id: 'App.swift', text }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1, allPages: true })
+    expect(result.pages!.map(page => [page.name, page.kind])).toEqual([['Main page', 'root'], ['Short', 'preview']])
+    return { pages: result.pages!, tree: designTree(result.pages, result.authoring, screenCatalog(result.authoring, result.pages, [])) }
+  }
+
+  it('is one of the screens Design looks up, after the app’s', () => {
+    const { tree } = previewed()
+    expect(designScreens(tree).map(screen => screen.name)).toEqual(['Home', 'Short'])
+  })
+
+  it('is the screen the breadcrumb, Screen settings and Screens list are about, not the app’s first', () => {
+    const { pages, tree } = previewed()
+    const focused = focusedDesignScreen(designScreens(tree), { selected: pages.find(page => page.name === 'Short')!.id })
+    expect([focused?.name, focused?.page.kind, focused?.view]).toEqual(['Short', 'preview', undefined])
+  })
+})
+
+/**
+ * How Screen settings say each screen is reached, and the canvas's lanes, from one table of
+ * page kinds (Wave 3b): a confirmation dialog has one name everywhere.
+ */
+describe('each kind of screen', () => {
+  const APP = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { HomeScreen() } } }
+struct HomeScreen: View {
+  @State private var composing = false
+  @State private var confirming = false
+  @State private var archiving = false
+  var body: some View {
+    NavigationStack {
+      VStack { NavigationLink("More") { Text("More page").navigationTitle("More") } }
+        .navigationTitle("Home")
+        .sheet(isPresented: $composing) { Text("Compose").navigationTitle("Compose") }
+        .alert("Delete the draft?", isPresented: $confirming) { Button("Delete", role: .destructive) { } }
+        .confirmationDialog("Archive?", isPresented: $archiving) { Button("Archive") { } }
+    }
+  }
+}
+struct DraftScreen: View { var body: some View { Text("Draft") } }
+#Preview("Short") { VStack { Text("Short preview") } }
+`
+  function drawn() {
+    resetPipelineState()
+    setFontMetrics([])
+    const saved = [{ view: 'DraftScreen', name: 'Draft' }]
+    const result = compile({ files: [{ id: 'App.swift', text: APP }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1, allPages: true, designScreens: saved })
+    expect(result.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    return { pages: result.pages!, tree: designTree(result.pages, result.authoring, screenCatalog(result.authoring, result.pages, saved)) }
+  }
+
+  it('says how it is reached in Screen settings', () => {
+    const { tree } = drawn()
+    expect(designScreens(tree).map(screen => [screen.name, describeScreen(screen, tree)])).toEqual([
+      ['Home', 'The app starts here'],
+      ['More', 'Pushed from Home'],
+      ['Delete the draft?', 'Alert · shown over Home'],
+      ['Archive?', 'Confirmation dialog · shown over Home'],
+      ['Compose', 'Sheet · opened from Home'],
+      ['Draft', 'Not linked yet · add Navigate to on a button to connect it'],
+      ['Short', 'A #Preview · drawn on its own, not in the app'],
+    ])
+  })
+
+  it('names the canvas’s lanes as the canvas numbers them: the app’s, then the screens not linked yet, then the previews', () => {
+    const { pages, tree } = drawn()
+    const lanes = canvasLanes(tree)
+    expect(lanes.names).toEqual(['Home', 'Not linked yet', 'Previews'])
+    expect(lanes.icons).toEqual([undefined, undefined, undefined])
+    expect(pageSlots(pages).filter(slot => !slot.parentId).map(slot => [slot.page.name, lanes.names[slot.lane]])).toEqual([['Home', 'Home'], ['Draft', 'Not linked yet'], ['Short', 'Previews']])
   })
 })

@@ -1826,7 +1826,7 @@ describe('F7: with a syntax error, every redraw shows the errors, never a blank 
     const good = compileView(viewSource('var body: some View { Text("Hello") }'))
     expect(good.renderTree!.notice).toBeUndefined()
     const broken = compileView(viewSource('var body: some View { Text("Hello" }'))
-    expect(broken.renderTree!.notice).toEqual({ title: '1 error', detail: "Expected ')' to close an argument list, found '}'." })
+    expect(broken.renderTree!.notice).toEqual({ title: '1 error', detail: "Expected ')' to close an argument list, found '}'.", span: expect.objectContaining({ file: 'App.swift' }) })
   })
 })
 

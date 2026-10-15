@@ -289,7 +289,7 @@ export class Interpreter {
       for (const decl of file.declarations) {
         if (decl.kind !== 'varDecl') continue
         const value = decl.initializer
-          ? this.evaluateExpecting(decl.initializer, this.globals, namedTypeOf(decl.typeAnnotation))
+          ? this.declared(this.evaluateExpecting(decl.initializer, this.globals, namedTypeOf(decl.typeAnnotation)), decl.typeAnnotation)
           : NIL
 
         if (decl.destructured) {
@@ -551,7 +551,7 @@ export class Interpreter {
           property.name,
           property.initializer
             ? copyValue(
-                this.evaluateExpecting(property.initializer, env, namedTypeOf(property.typeAnnotation)),
+                this.declared(this.evaluateExpecting(property.initializer, env, namedTypeOf(property.typeAnnotation)), property.typeAnnotation),
               )
             : NIL,
         )
@@ -595,7 +595,7 @@ export class Interpreter {
           : property.initializer
             ? this.evaluateExpecting(property.initializer, env, expected)
             : NIL
-      instance.fields.set(property.name, copyValue(value))
+      instance.fields.set(property.name, copyValue(this.declared(value, property.typeAnnotation)))
     }
 
     return instance
@@ -1060,7 +1060,7 @@ export class Interpreter {
       // Otherwise arguments are passed by value, so the callee cannot mutate the
       // caller's copy. A declared parameter type is also the context a contextual
       // member resolves against, which is what makes `select(.home)` mean anything.
-      const coerced = this.coerceToEnum(value ?? NIL, namedTypeOf(param.type ?? null))
+      const coerced = this.declared(this.coerceToEnum(value ?? NIL, namedTypeOf(param.type ?? null)), param.type ?? null)
       env.define(param.internalName, copyValue(coerced), true, param.span ?? span)
     }
   }
@@ -1548,6 +1548,12 @@ export class Interpreter {
     return array(decl.cases.map((c) => this.makeEnumCase(decl, c.name, [], span)))
   }
 
+  /** A project enum's cases that hold no values, each as a value: what a list of them can hold without inventing any. */
+  plainCases(typeName: string): SwiftValue[] {
+    const decl = this.enums.get(typeName)
+    return decl ? decl.cases.filter((c) => !c.associated.length).map((c) => this.makeEnumCase(decl, c.name, [], NOWHERE)) : []
+  }
+
   /**
    * The registered name of a type declared inside another one.
    *
@@ -1628,6 +1634,35 @@ export class Interpreter {
     if (statik === undefined) return undefined
     if (statik.kind !== 'function') return payload?.args?.length ? undefined : statik
     return this.callFunction(statik, (payload?.args ?? []).map(argument => ({ label: null, value: argument, span: NOWHERE })), NOWHERE)
+  }
+
+  /**
+   * A value given to a declaration of `type`. A list of a project type is one of that type,
+   * `ArrayValue.element`, so a case written into it, now or later, is a case of that type.
+   */
+  private declared(value: SwiftValue, type: TypeRef | null): SwiftValue {
+    const element = value.kind === 'array' ? elementTypeOf(type) : null
+    return element ? this.listOf(value as ArrayValue, element) : value
+  }
+
+  /**
+   * `list` as a list of `element`, each contextual case in it resolved against that type. Every
+   * caller copies what this returns, as a declaration copies its value, so its elements are the
+   * list's own unless one is a case to resolve.
+   */
+  private listOf(list: ArrayValue, element: string): ArrayValue {
+    if (list.element === element || (!this.enums.has(element) && !this.types.has(element))) return list
+    const elements = list.elements.some((item) => item.kind === 'opaque') ? list.elements.map((item) => this.coerceToEnum(item, element)) : list.elements
+    const typed: ArrayValue = { kind: 'array', elements, element }
+    if (list.unique) typed.unique = true
+    return typed
+  }
+
+  /** The arguments to a method of a list of `element`: `.detail` in `path.append(.detail)` is a case of it. */
+  private asElements(args: readonly CallArgument[], element: string): readonly CallArgument[] {
+    if (!args.some((arg) => arg.value.kind === 'opaque' || arg.value.kind === 'array')) return args
+    return args.map((arg) => arg.value.kind === 'opaque' ? { label: arg.label, value: this.coerceToEnum(arg.value, element), span: arg.span }
+      : arg.value.kind === 'array' ? { label: arg.label, value: this.listOf(arg.value, element), span: arg.span } : arg)
   }
 
   // ------------------------------------------------------------------ errors
@@ -1735,7 +1770,7 @@ export class Interpreter {
       case 'varDecl': {
         const expected = namedTypeOf(decl.typeAnnotation)
         const value = decl.initializer
-          ? this.evaluateExpecting(decl.initializer, env, expected)
+          ? this.declared(this.evaluateExpecting(decl.initializer, env, expected), decl.typeAnnotation)
           : NIL
 
         // `let (a, b) = pair` spreads one tuple across several names.
@@ -2561,7 +2596,7 @@ export class Interpreter {
     const builtin = callBuiltinMember(
       target,
       member,
-      allArgs,
+      target.kind === 'array' && target.element ? this.asElements(allArgs, target.element) : allArgs,
       (closure, closureArgs) => this.callClosure(closure, closureArgs, span),
       (reason) => this.trap(reason, span),
       (value) => {
@@ -3168,15 +3203,17 @@ export class Interpreter {
     // `selected = []` keeps a set a set: the target's type is the context, as above.
     const context = current.kind === 'enum' ? current.typeName : current.kind === 'array' && current.unique ? 'Set' : null
     const rhs = this.coerceToEnum(this.evaluateExpecting(valueExpr, env, context), context)
+    // `path = []` and `path += [.detail]` keep the list a list of what it held.
+    const kept = (value: SwiftValue) => current.kind === 'array' && current.element && value.kind === 'array' ? this.listOf(value, current.element) : value
 
     if (operator === '=') {
-      lvalue.set(copyValue(rhs))
+      lvalue.set(copyValue(kept(rhs)))
       return VOID
     }
 
     // `+=` and friends: read, apply the base operator, write back.
-    const combined = this.applyBinary(operator.slice(0, -1), lvalue.get(), rhs, span)
-    lvalue.set(copyValue(combined))
+    const combined = this.applyBinary(operator.slice(0, -1), lvalue.get(), kept(rhs), span)
+    lvalue.set(copyValue(kept(combined)))
     return VOID
   }
 
@@ -3776,6 +3813,13 @@ function namedTypeOf(type: { kind: string; name?: string } | null): string | nul
     return namedTypeOf((type as unknown as { wrapped: { kind: string; name?: string } }).wrapped)
   }
   return null
+}
+
+/** The type a list declared as `[Route]`, `[Route]?` or `Array<Route>` holds. */
+function elementTypeOf(type: TypeRef | null): string | null {
+  if (type?.kind === 'optionalType') return elementTypeOf(type.wrapped)
+  if (type?.kind === 'arrayType') return namedTypeOf(type.element)
+  return type?.kind === 'namedType' && type.name === 'Array' ? namedTypeOf(type.generics[0] ?? null) : null
 }
 
 /** A name made entirely of operator characters. */

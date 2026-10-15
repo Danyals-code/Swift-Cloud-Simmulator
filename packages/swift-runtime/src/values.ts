@@ -79,6 +79,12 @@ export interface ArrayValue {
    * an approximation, and a stable one is more useful in a preview than a wrong one.
    */
   unique?: boolean
+  /**
+   * The project type its declaration says it holds, `Route` in `[Route]`. Swift resolves a
+   * contextual case written into it, `path.append(.detail)`, against that type, and nothing
+   * else here says what `.detail` is.
+   */
+  element?: string
 }
 
 /**
@@ -528,10 +534,13 @@ export function copyValue(value: SwiftValue): SwiftValue {
   switch (value.kind) {
     case 'tuple':
       return { kind: 'tuple', elements: value.elements.map(copyValue), labels: value.labels }
-    case 'array':
-      return value.unique
+    case 'array': {
+      const copy: ArrayValue = value.unique
         ? { kind: 'array', elements: value.elements.map(copyValue), unique: true }
         : { kind: 'array', elements: value.elements.map(copyValue) }
+      if (value.element) copy.element = value.element
+      return copy
+    }
     case 'dictionary': {
       const entries = new Map<string, SwiftValue>()
       for (const [k, v] of value.entries) entries.set(k, copyValue(v))

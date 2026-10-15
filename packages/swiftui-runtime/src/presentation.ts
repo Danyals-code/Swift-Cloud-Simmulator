@@ -1,5 +1,5 @@
-import { LAYERED_LABEL_VIEWS, type Diagnostic, type SourceSpan, type ViewLayer } from '@studio/shared'
-import { exhausts } from './failures'
+import { LAYERED_LABEL_VIEWS, type Diagnostic, type PagePreview, type SourceSpan, type ViewLayer } from '@studio/shared'
+import { exhausts, toFailure } from './failures'
 import { labelArgView, layerLabel, tabIcon, viewLayers } from './view-hierarchy'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import {
@@ -13,10 +13,15 @@ import {
   str,
   truthy,
   typeNameOf,
+  Environment,
+  type ArrayValue,
   type ClosureValue,
+  type EnumValue,
   type ProjectionPayload,
+  type StructValue,
   type SwiftValue,
 } from '@studio/swift-runtime'
+import type { Stmt } from '@studio/swift-syntax'
 import {
   asSwiftValue,
   asView,
@@ -137,6 +142,10 @@ export interface Overlay {
   readonly screen?: Pick<ResolvedUI, 'content' | 'navigationBar' | 'tabBar' | 'search' | 'overlay'>
   readonly title: string
   readonly message: string
+  /** An alert's or a dialog's title as the layer it is drawn as, which a click on its words finds. */
+  readonly titleLayer?: ViewLayer
+  /** The views its message closure built, whose words `message` holds, as layers of their own. */
+  readonly messageViews?: readonly ViewValue[]
   /** Tapping outside dismisses, unless the presentation is non-interactive. */
   readonly dismiss: ViewIntent | null
   /** The handler id the dim layer reports, so the layout does not have to derive it. */
@@ -408,6 +417,10 @@ export interface ResolveContext {
    */
   styleBody?(style: SwiftValue, protocol: string, configuration: SwiftValue): readonly ViewValue[] | null
   readonly animation: AnimationPayload | null
+  /** Whether the program declares a view by this name, which the gallery names a page that shows one after. */
+  isView?(name: string): boolean
+  /** A project enum's cases that hold no values: what the gallery draws a path of them with. */
+  cases?(type: string): readonly SwiftValue[]
 }
 
 /** What a style's own body is drawn with: the control's stock style. */
@@ -454,14 +467,47 @@ export function resolveUI(views: readonly ViewValue[], ctx: ResolveContext, forc
   return new Resolver(ctx, forceTab, preview?.prefix, preview?.basePage).run(views)
 }
 
-export interface NestedPage {
+/** How a screen another opens is reached: pushed, or presented over it. */
+type NestedKind = Exclude<NonNullable<PagePreview['kind']>, 'root' | 'preview'>
+
+/**
+ * A screen another opens, as the gallery shows it under that one: its screen, or why the
+ * gallery can't draw it. A screen is listed with its reason, never dropped without a word.
+ */
+export type NestedPage = {
   readonly id: string
   readonly parentId: string
   readonly rootId: string
-  readonly kind: 'destination' | 'sheet' | 'cover' | 'popover'
+  readonly kind: NestedKind
   readonly name: string
   readonly source: SourceSpan
+} & ({ readonly ui: ResolvedUI } | { readonly notDrawn: string })
+
+/** Where a page goes: how it is reached, where that is written, and what it is called until it is drawn. */
+interface Place {
+  readonly kind: NestedKind
+  readonly source: SourceSpan
+  readonly name: string
+}
+
+/** Why a page isn't drawn, as the gallery lists it. */
+interface Refused {
+  readonly notDrawn: string
+}
+
+/** A page the gallery draws: its screen's content, the tab it is on, and the chrome around it. */
+interface Page {
+  readonly content: readonly ViewValue[]
+  readonly tab?: number
+  readonly dress: (ui: ResolvedUI, resolver: Resolver, id: string) => ResolvedUI
+}
+
+/** One page drawn, and what drawing it found; `page` when the screens it opens are drawn too. */
+interface Composed {
   readonly ui: ResolvedUI
+  readonly resolver: Resolver
+  readonly name: string
+  readonly page?: Page
 }
 
 /** Discover real routes with real sample values; never invoke their button actions. */
@@ -490,12 +536,16 @@ class Resolver {
   /** What each screen cut out of its containers leaves out, the root's and any sheet's. */
   private readonly notDrawn: NotDrawn[] = []
   private readonly warnings: Diagnostic[] = []
+  /** The list the screen's navigation stack is bound to, `NavigationStack(path:)`, when it is. */
+  private route: SwiftValue | undefined
 
   constructor(
     private readonly ctx: ResolveContext,
     private readonly forceTab?: number,
     private readonly prefix = 'v',
     private readonly basePage = false,
+    /** The one presentation drawn up, by its modifier's span, for its page in the gallery. */
+    private readonly forced?: SourceSpan,
   ) {}
 
   run(views: readonly ViewValue[]): ResolvedUI {
@@ -511,6 +561,8 @@ class Resolver {
       // A phone collapses a split view into a stack, so it is resolved as one.
       findView(withTabs.content, 'NavigationSplitView')
     const screen = nav ? this.resolveNavigation(nav) : { content: withTabs.content, navigationBar: null }
+    const route = nav ? labelled(nav.args, 'path') : undefined
+    this.route = route && (asProjection(route)?.get() ?? route)
     this.around = containersAbove(stamped, tabs, withTabs.content, nav)
     const searchAround = searchContainers(withTabs.content, nav, screen.navigationBar)
     this.notDrawn.push(
@@ -520,7 +572,8 @@ class Resolver {
 
     // A menu sits above everything, including a sheet: it is the thing the user just
     // opened, and it is the only one they can interact with while it is up.
-    const overlay = this.basePage ? null : this.findOverlay(screen.content, 0, this.around) ?? this.menuOverlay(screen.content)
+    const overlay = this.forced ? this.findOverlay(screen.content, 0, this.around)
+      : this.basePage ? null : this.findOverlay(screen.content, 0, this.around) ?? this.menuOverlay(screen.content)
 
     const screenLayers = (content: readonly ViewValue[], bar: NavigationBar | null | undefined): ViewLayer[] => [
       ...viewLayers(content),
@@ -549,7 +602,10 @@ class Resolver {
     if (overlay && this.ctx.includeViewHierarchy !== false) pageLayers.push({
       id: `page:overlay:${overlay.kind}`, name: overlay.title || overlay.screen?.navigationBar?.title || ({ sheet: 'Sheet', cover: 'Full screen', alert: 'Alert', dialog: 'Confirmation', popover: 'Popover', menu: 'Menu' })[overlay.kind],
       type: 'Presentation', page: { active: true },
-      children: screenLayers(overlay.screen?.content ?? overlay.views, overlay.screen?.navigationBar),
+      children: [
+        ...(overlay.titleLayer ? [overlay.titleLayer] : []), ...viewLayers(overlay.messageViews ?? []),
+        ...screenLayers(overlay.screen?.content ?? overlay.views, overlay.screen?.navigationBar),
+      ],
     })
 
     return {
@@ -571,51 +627,82 @@ class Resolver {
   /** One example per destination declaration, with bounded recursive discovery. */
   nestedPages(views: readonly ViewValue[], rootId: string, limit: number): readonly NestedPage[] {
     const root = this.run(views)
-    const out: NestedPage[] = []
+    const out: (NestedPage & { readonly ui: ResolvedUI })[] = []
+    /** Presentations the gallery can't draw, each with why. */
+    const skipped: NestedPage[] = []
     const seen = new Set<string>()
-    const queue = [{ ui: root, scope: this.previewScope, around: this.around, parentId: rootId, depth: 0 }]
+    const isView = (name: string) => this.ctx.isView?.(name) ?? false
+    /** Each screen to look for others in, with the path its stack is bound to, whose values a destination there may show. */
+    const queue: { ui: ResolvedUI; scope: readonly ViewValue[]; around: readonly ViewValue[]; parentId: string; depth: number; page: Page; route?: SwiftValue }[] =
+      [{ ui: root, scope: this.previewScope, around: this.around, parentId: rootId, depth: 0, page: { content: views, tab: this.forceTab, dress: ui => ui }, route: this.route }]
+    /** A page's screen drawn on its own, or with one of its presentations up. */
+    const draw = (page: Page, id: string, forced?: SourceSpan) => {
+      const resolver = new Resolver(this.ctx, page.tab, `preview:${id}`, true, forced)
+      return { resolver, ui: page.dress(resolver.run(page.content), resolver, id) }
+    }
     let attempts = 0
     while (queue.length && out.length < limit && attempts < 64) {
       const current = queue.shift()!
       if (current.depth >= 3) continue
-      const add = (kind: NestedPage['kind'], source: SourceSpan, build: () => readonly ViewValue[], fallback: string) => {
-        const key = `${kind}:${encodeURIComponent(source.file)}:${source.start}:${source.end}`
+      /**
+       * Draws the page `compose` makes at `place`, under the current one, or lists it with
+       * why it isn't drawn. One it makes nothing for has nothing to show. `variant` tells
+       * apart the pages one modifier makes, one for each case a path can hold.
+       */
+      const add = (place: Place, compose: (id: string) => Composed | Refused | null, variant = '') => {
+        const key = `${place.kind}:${encodeURIComponent(place.source.file)}:${place.source.start}:${place.source.end}${variant}`
         if (seen.has(key) || out.length >= limit || attempts++ >= 64) return
+        // Route order remains stable when text or modifier values change. Byte
+        // offsets are only a within-pass dedup key, never a persistent page id.
+        const ordinal = out.filter(page => page.kind === place.kind && page.source.file === place.source.file).length
+        const id = `${rootId}/preview:${place.kind}:${encodeURIComponent(place.source.file)}:${ordinal}`
+        let made: Composed | Refused | null
         try {
-          const built = build()
-          if (!built.length) return
-          // Route order remains stable when text or modifier values change. Byte
-          // offsets are only a within-pass dedup key, never a persistent page id.
-          const ordinal = out.filter(page => page.kind === kind && page.source.file === source.file).length
-          const id = `${rootId}/preview:${kind}:${encodeURIComponent(source.file)}:${ordinal}`
-          const nestedResolver = new Resolver(this.ctx, undefined, `preview:${id}`, true)
-          const hasNavigation = findView(built, 'NavigationStack') ?? findView(built, 'NavigationView')
-          const content = kind === 'destination' && !hasNavigation ? [{
-            name: 'NavigationStack', args: [], children: built, modifiers: visualModifiers(built[0]!), action: null, span: source,
-          } satisfies ViewValue] : built
-          let ui = nestedResolver.run(content)
-          if (kind === 'destination') {
-            const title = ui.navigationBar?.title || fallback
-            const backTitle = current.ui.navigationBar?.title || 'Back'
-            const path = `preview:${id}/back`
-            const back: ViewValue = { name: BACK_BUTTON, args: [{ label: 'title', value: { kind: 'string', value: backTitle } }], children: [], modifiers: [], action: null, span: source, path }
-            const bar = ui.navigationBar
-            const tabBar = root.tabBar ? { items: root.tabBar.items.map((item, index) => nestedResolver.stamp(item, `preview:${id}/tab-${index}`)), view: nestedResolver.stamp(root.tabBar.view, `preview:${id}/tabs`) } : null
-            ui = { ...ui, tabBar, navigationBar: {
-              title, large: bar?.large ?? false, canGoBack: true, backTitle,
-              leading: [back], trailing: bar?.trailing ?? [],
-              view: bar ? { ...bar.view, children: [back, ...bar.trailing] } : { name: NAV_BAR, args: [{ label: 'title', value: { kind: 'string', value: title } }], children: [back], modifiers: [], action: null, span: source, path: `preview:${id}/bar` },
-            } }
-          }
-          const name = ui.navigationBar?.title || titleOf(built, fallback)
-          seen.add(key)
-          out.push({ id, parentId: current.parentId, rootId, kind, name, source, ui })
-          queue.push({ ui, scope: nestedResolver.previewScope, around: nestedResolver.around, parentId: id, depth: current.depth + 1 })
+          made = compose(id)
         } catch (error) {
-          // A destination lacking valid data does not blank other pages. One that
-          // spends the gallery's budget is for the gallery to report.
+          // A destination lacking valid data does not blank other pages, and is listed
+          // with why. One that spends the gallery's budget is for the gallery to report.
           if (exhausts(error)) throw error
+          made = { notDrawn: toFailure(error, place.source).message }
         }
+        if (!made) return
+        seen.add(key)
+        const { kind, source } = place
+        if ('notDrawn' in made) {
+          skipped.push({ id: `${current.parentId}/not-drawn:${kind}:${source.start}`, parentId: current.parentId, rootId, kind, name: place.name, source, notDrawn: made.notDrawn })
+          return
+        }
+        out.push({ id, parentId: current.parentId, rootId, kind, name: made.name, source, ui: made.ui })
+        // An alert is its screen with the alert up: what that screen opens is under the screen.
+        if (made.page) queue.push({ ui: made.ui, scope: made.resolver.previewScope, around: made.resolver.around, parentId: id, depth: current.depth + 1, page: made.page, route: made.resolver.route ?? (kind === 'destination' ? current.route : undefined) })
+      }
+      /**
+       * The page of a screen `build` builds, pushed or presented at `place`: named by its
+       * title, or `place.name`, with `heading` in its bar when it sets no title.
+       */
+      const screen = (place: Place, build: () => readonly ViewValue[], heading = place.name) => (id: string): Composed | null => {
+        const built = build()
+        if (!built.length) return null
+        const { kind, source } = place
+        const hasNavigation = findView(built, 'NavigationStack') ?? findView(built, 'NavigationView')
+        const content = kind === 'destination' && !hasNavigation ? [{
+          name: 'NavigationStack', args: [], children: built, modifiers: visualModifiers(built[0]!), action: null, span: source,
+        } satisfies ViewValue] : built
+        const backTitle = current.ui.navigationBar?.title || 'Back'
+        const page: Page = { content, dress: kind === 'destination' ? (ui, resolver, at) => {
+          const title = ui.navigationBar?.title || heading
+          const path = `preview:${at}/back`
+          const back: ViewValue = { name: BACK_BUTTON, args: [{ label: 'title', value: { kind: 'string', value: backTitle } }], children: [], modifiers: [], action: null, span: source, path }
+          const bar = ui.navigationBar
+          const tabBar = root.tabBar ? { items: root.tabBar.items.map((item, index) => resolver.stamp(item, `preview:${at}/tab-${index}`)), view: resolver.stamp(root.tabBar.view, `preview:${at}/tabs`) } : null
+          return { ...ui, tabBar, navigationBar: {
+            title, large: bar?.large ?? false, canGoBack: true, backTitle,
+            leading: [back], trailing: bar?.trailing ?? [],
+            view: bar ? { ...bar.view, children: [back, ...bar.trailing] } : { name: NAV_BAR, args: [{ label: 'title', value: { kind: 'string', value: title } }], children: [back], modifiers: [], action: null, span: source, path: `preview:${at}/bar` },
+          } }
+        } : ui => ui }
+        const { ui, resolver } = draw(page, id)
+        return { ui, resolver, page, name: ui.navigationBar?.title || titleOf(built, place.name) }
       }
       const visitLinks = (content: readonly ViewValue[]) => {
         for (const view of content) {
@@ -624,7 +711,8 @@ class Resolver {
             // A pushed screen is drawn under the navigation stack, so it takes the stack's
             // environment, not modifiers written on the link.
             const environment = current.ui.environment ?? visualModifiers(view)
-            add('destination', builder?.span ?? view.span, () => (this.destinationFor(view, current.scope) ?? []).map(content => inheritVisualStyle(content, environment)), labelTextOf(view) || 'Details')
+            const place: Place = { kind: 'destination', source: builder?.span ?? view.span, name: labelTextOf(view) || 'Details' }
+            add(place, screen(place, () => (this.destinationFor(view, current.scope) ?? []).map(content => inheritVisualStyle(content, environment))))
           }
           visitLinks(view.children)
         }
@@ -633,16 +721,59 @@ class Resolver {
       visitLinks([...current.ui.content, ...toolbar])
       for (const { view, modifier } of modifiersFor([...current.scope, ...toolbar], current.around)) {
         const kind = OVERLAY_KINDS[modifier.name]
-        if (!modifier.closure || (kind !== 'sheet' && kind !== 'cover' && kind !== 'popover')) continue
-        const item = labelled(modifier.args, 'item')
-        const itemValue = item ? (asProjection(item)?.get() ?? item) : undefined
-        // Item-driven presentations need an actual selected item; inventing one
-        // can produce an impossible screen or force-unwrap unavailable data.
-        if (item && (!itemValue || itemValue.kind === 'nil')) continue
-        add(kind, modifier.span, () => this.ctx.build(modifier.closure!, itemValue ? [itemValue] : [], modifier.environment, PRESENTATION_NAMES[kind]).map(content => inheritVisualStyle(content, visualModifiers(view))), kind === 'sheet' ? 'Sheet' : kind === 'cover' ? 'Full screen' : 'Popover')
+        if (kind === 'alert' || kind === 'dialog') {
+          // Drawn as iOS draws it, over the screen that shows it, and named by its title.
+          const place: Place = { kind, source: modifier.span, name: wordsIn(modifier.args.find(a => a.label === null)?.value) || PRESENTATION_NAMES[kind] }
+          const data = labelled(modifier.args, 'presenting')
+          add(place, id => {
+            if (labelled(modifier.args, 'error')) return { notDrawn: 'the preview doesn\'t draw an alert made from an error, whose title is its description' }
+            if (data?.kind === 'nil') return { notDrawn: 'it shows the data it presents, and that is nil now' }
+            const { ui, resolver } = draw(current.page, id, modifier.span)
+            const layer = ui.viewHierarchy?.find(item => item.type === 'Presentation')
+            // An `Alert(...)` is named by the title it is given.
+            const name = ui.overlay?.title || place.name
+            return ui.overlay ? { ui: { ...ui, viewHierarchy: layer ? [{ ...layer, type: 'Page', name }] : [] }, resolver, name }
+              : { notDrawn: 'the preview can\'t put it up over the screen from where it is written' }
+          })
+          continue
+        }
+        // A destination for a type no link here pushes, as a path's is, is drawn with values
+        // of that type: each case of an enum that holds no values, or else one the screen
+        // holds. One a link pushes is drawn already, with the link's.
+        const type = modifier.name === 'navigationDestination' ? labelled(modifier.args, 'for') : undefined
+        if (type?.kind === 'type' && modifier.closure && current.route) {
+          const place: Place = { kind: 'destination', source: modifier.span, name: shownView(modifier.closure.body.statements, isView)?.name ?? 'Details' }
+          const shows = (value: SwiftValue) => this.ctx.build(modifier.closure!, [value], modifier.environment, 'Destination').map(content => inheritVisualStyle(content, current.ui.environment ?? []))
+          const cases = this.ctx.cases?.(type.name) ?? []
+          for (const value of cases) {
+            const name = (value as EnumValue).caseName
+            add(place, id => {
+              const built = shows(value)
+              return screen({ ...place, name: componentOf(built) ?? name }, () => built, '')(id)
+            }, `:${name}`)
+          }
+          const value = cases.length ? undefined : firstHeld(type.name, modifier.closure)
+          if (value) add(place, screen(place, () => shows(value), ''))
+          else if (!cases.length) add(place, () => ({ notDrawn: isEmptyList(current.route) ? startsEmpty(type.name) : needs(type.name) }))
+        }
+        if (type) continue
+        // A destination a binding pushes is drawn as one a link pushes (`boundDestination`).
+        const bound = modifier.name === 'navigationDestination'
+        if (!modifier.closure || (kind !== 'sheet' && kind !== 'cover' && kind !== 'popover' && !bound)) continue
+        const shown = given(modifier.args, modifier.closure)
+        // Named after the view it shows where it is shown with a value; a plain sheet keeps its name.
+        const place: Place = {
+          kind: bound ? 'destination' : kind as 'sheet' | 'cover' | 'popover',
+          source: modifier.span,
+          name: (bound || labelled(modifier.args, 'item') ? shownView(modifier.closure.body.statements, isView)?.name : undefined) ?? (bound ? 'Details' : kind === 'sheet' ? 'Sheet' : kind === 'cover' ? 'Full screen' : 'Popover'),
+        }
+        // A pushed screen takes the stack's environment, a presented one the view's it is written on.
+        const environment = bound ? current.ui.environment ?? [] : visualModifiers(view)
+        const built = () => this.ctx.build(modifier.closure!, shown.value ? [shown.value] : [], modifier.environment, bound ? 'Destination' : PRESENTATION_NAMES[kind!]).map(content => inheritVisualStyle(content, environment))
+        add(place, shown.why ? () => ({ notDrawn: shown.why! }) : screen(place, built, bound ? '' : place.name))
       }
     }
-    return out
+    return [...out, ...skipped]
   }
 
   // ------------------------------------------------------------- identity
@@ -938,15 +1069,18 @@ class Resolver {
    * which stack encloses it - and the stack's identity is itself a stamped path. A
    * link outside any stack is left inert, which is also what SwiftUI does with it.
    */
-  private attachPushIntents(views: readonly ViewValue[], stackId: string): ViewValue[] {
+  private attachPushIntents(views: readonly ViewValue[], stackId: string, route?: { binding: SwiftValue; list: ArrayValue }): ViewValue[] {
     return views.map((view) => {
-      const children = this.attachPushIntents(view.children, stackId)
+      const children = this.attachPushIntents(view.children, stackId, route)
 
       if (view.name !== 'NavigationLink' || !view.path) {
         return children === view.children ? view : { ...view, children }
       }
 
-      const intent: ViewIntent = { kind: 'push', link: `${stackId}|${view.path}` }
+      // In a stack bound to a path, a link's value is appended to the path, as SwiftUI does.
+      const value = route && labelled(view.args, 'value')
+      const intent: ViewIntent = value ? { kind: 'write', binding: route.binding, value: withElements(route.list, [...route.list.elements, value]) }
+        : { kind: 'push', link: `${stackId}|${view.path}` }
       this.handlers.set(handlerIdFor(view.path), intent)
       return { ...view, children, intent }
     })
@@ -1410,14 +1544,11 @@ class Resolver {
     // what the one before it showed, so one pushed after a screen with no title, which
     // shows none, is titled inline, as iOS 27 does (D13).
     let large = rootMode !== 'inline' && titles[0]!.length > 0
+    /** What Back does on the screen on top: pops a link, or clears the binding that pushed it. */
+    let back: ViewIntent = { kind: 'pop' }
 
-    for (const linkPath of pushed) {
-      // A link in the toolbar pushes as one in the screen does, as `History` does in a
-      // bar's corner.
-      const link = findByPath(screen, linkPath) ?? findByPath(this.toolbarItems(screen, stackId), linkPath)
-      const destination = link ? this.destinationFor(link, screen) : null
-      if (!destination || destination.length === 0) break
-
+    /** Puts `destination` on top of the stack, titled `label` when it sets no title of its own. */
+    const push = (destination: readonly ViewValue[], label: string) => {
       // A reusable destination may declare its own navigation container (for
       // example a screen also used as a tab). The active stack already owns its
       // chrome and back history; keep the container's content, modifiers and
@@ -1434,19 +1565,55 @@ class Resolver {
       const requestedMode = tokenName(collectModifier(screen, 'navigationBarTitleDisplayMode')?.args[0]?.value)
       if (requestedMode && requestedMode !== 'automatic') large = requestedMode !== 'inline'
       large &&= titleOf(screen, '').length > 0
-      titles.push(titleOf(screen, labelTextOf(link!) || 'Back'))
+      titles.push(titleOf(screen, label))
       depth++
     }
 
+    // A stack bound to a path shows a screen for each value in it, from the
+    // `navigationDestination(for:)` for its type, written on the screens below it (Wave 3b).
+    const route = labelled(stack.args, 'path')
+    const values = asProjection(route)?.get()
+    if (!this.basePage && values?.kind === 'array' && values.elements.length) {
+      const kept: ViewValue[] = [...stack.children]
+      for (const [index, value] of values.elements.entries()) {
+        const builder = builderFor(value, kept, true)
+        // SwiftUI pushes nothing for a value no destination shows, and says so as it runs.
+        if (!builder?.closure) { this.warnings.push(unshown(value, stack.span)); break }
+        const destination = this.ctx.build(builder.closure, [value], builder.environment, 'Destination')
+        if (!destination.length) break
+        push(destination, '')
+        kept.push(...screen)
+        back = { kind: 'write', binding: route!, value: withElements(values, values.elements.slice(0, index)) }
+      }
+    }
+
+    const below = depth
+    for (const linkPath of pushed) {
+      // A link in the toolbar pushes as one in the screen does, as `History` does in a
+      // bar's corner.
+      const link = findByPath(screen, linkPath) ?? findByPath(this.toolbarItems(screen, stackId), linkPath)
+      const destination = link ? this.destinationFor(link, screen) : null
+      if (!destination || destination.length === 0) break
+      push(destination, labelTextOf(link!) || 'Back')
+      back = { kind: 'pop' }
+    }
+
     // Anything we could not resolve is dropped, so the back button stays truthful.
-    this.ctx.state.truncate(stackId, depth)
-    screen = this.attachPushIntents(screen, stackId)
+    this.ctx.state.truncate(stackId, depth - below)
+    // A destination a binding pushes is on top while the binding holds (Wave 3b).
+    for (let bound = this.basePage ? null : boundDestination(screen); bound && depth < 16; bound = boundDestination(screen)) {
+      const destination = this.ctx.build(bound.modifier.closure!, bound.args, bound.modifier.environment, 'Destination')
+      if (!destination.length) break
+      back = bound.back
+      push(destination, '')
+    }
+    screen = this.attachPushIntents(screen, stackId, values?.kind === 'array' ? { binding: route!, list: values } : undefined)
 
     const explicitTitle = collectModifier(screen, 'navigationTitle')
     const title =
       stringArg(explicitTitle?.args[0]?.value) ?? (depth === 0 ? titles[0]! : titles[depth]!)
 
-    const backId = depth > 0 ? this.register(`${stackId}/back`, { kind: 'pop' }) : null
+    const backId = depth > 0 ? this.register(`${stackId}/back`, back) : null
     const toolbar = this.resolveToolbar(screen, stackId)
 
     // An untitled screen still needs a back button that says something, and "Back" is
@@ -1460,7 +1627,7 @@ class Resolver {
           action: null,
           span: stack.span,
           path: `${stackId}/back`,
-          intent: { kind: 'pop' },
+          intent: back,
         }
       : null
 
@@ -1517,13 +1684,7 @@ class Resolver {
 
   private destinationBuilder(link: ViewValue, screen: readonly ViewValue[]): ModifierValue | null {
     const value = labelled(link.args, 'value')
-    if (!value) return null
-    const typeName = value.kind === 'struct' || value.kind === 'enum' ? value.typeName : ({ int: 'Int', double: 'Double', string: 'String', bool: 'Bool' } as Record<string, string>)[value.kind]
-    const builders = [...allModifiers(screen)].map(item => item.modifier).filter(modifier => modifier.name === 'navigationDestination' && modifier.closure && labelled(modifier.args, 'for'))
-    return builders.find(builder => {
-      const type = labelled(builder.args, 'for')
-      return type?.kind === 'type' && type.name === typeName
-    }) ?? (builders.length === 1 ? builders[0]! : null)
+    return value ? builderFor(value, screen) : null
   }
 
   private resolveToolbar(
@@ -1690,10 +1851,12 @@ class Resolver {
       const presentedValue = presented ? (asProjection(presented)?.get() ?? presented) : undefined
       const itemValue = item ? (asProjection(item)?.get() ?? item) : undefined
 
-      const active = presentedValue
-        ? truthy(presentedValue)
-        : itemValue !== undefined && itemValue.kind !== 'nil'
-      if (!active) continue
+      // An alert's `presenting:` data is what it shows, and one with none is not up.
+      const data = labelled(modifier.args, 'presenting')
+      const shown = [itemValue, data].find(value => value !== undefined && value.kind !== 'nil')
+      const forced = this.forced && sameSpan(modifier.span, this.forced)
+      if (this.forced && !forced) continue
+      if (!forced && !(presentedValue ? truthy(presentedValue) && (!data || shown) : shown)) continue
 
       const binding = asProjection(presented) ? presented! : item && asProjection(item) ? item : null
       const dismiss: ViewIntent | null = binding
@@ -1706,13 +1869,16 @@ class Resolver {
       const built = modifier.closure
         ? this.ctx.build(
             modifier.closure,
-            itemValue && itemValue.kind !== 'nil' ? [itemValue] : [],
+            shown ? [shown] : [],
             modifier.environment,
             PRESENTATION_NAMES[kind],
           )
         : []
 
-      const overlayViews = this.stampList(built, path, visualModifiers(view))
+      // `Alert(title:message:dismissButton:)`, as alerts were written before iOS 15: its words
+      // and buttons are what it is given.
+      const legacy = kind === 'alert' && built.length === 1 && built[0]!.name === 'Alert' ? built[0]! : null
+      const overlayViews = this.stampList(legacy ? alertButtons(legacy) : built, path, visualModifiers(view))
       // Native alerts supply an OK action when their builder supplies no buttons.
       // Without this, disabling backdrop dismissal would leave an empty alert stuck.
       if (kind === 'alert' && dismiss && !findView(overlayViews, 'Button')) {
@@ -1757,8 +1923,7 @@ class Resolver {
         backgroundInteraction: backgroundInteractionOf(overlayViews),
         ...(kind === 'dialog' && view.intent && view.path ? { anchorId: handlerIdFor(view.path) } : {}),
         screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content, searchAround) },
-        title: kind === 'dialog' && tokenName(labelled(modifier.args, 'titleVisibility')) !== 'visible' ? '' : stringArg(modifier.args.find((a) => a.label === null)?.value) ?? '',
-        message: this.messageOf(modifier),
+        ...(legacy ? this.alertWords(legacy, path) : this.wordsOf(kind, modifier, shown, path)),
         dismiss,
         dismissId,
       }
@@ -1773,18 +1938,53 @@ class Resolver {
    * trailing closure, so it arrives as a labelled closure argument rather than as a
    * string - and reading only the string form dropped it entirely.
    */
-  private messageOf(modifier: ModifierValue): string {
+  private messageOf(modifier: ModifierValue, shown: SwiftValue | undefined, path: string): Pick<Overlay, 'message' | 'messageViews'> {
     const direct = stringArg(labelled(modifier.args, 'message'))
-    if (direct !== null) return direct
+    if (direct !== null) return { message: direct }
 
     const closure = modifier.args.find((a) => a.label === 'message')?.value
-    if (closure?.kind !== 'closure') return ''
+    if (closure?.kind !== 'closure') return { message: '' }
 
-    return this.ctx
-      .build(closure, [], modifier.environment)
-      .flatMap((v) => textOf(v))
-      .join(' ')
+    const views = this.stampList(this.ctx.build(closure, shown ? [shown] : [], modifier.environment), `${path}/message`)
+    return { message: views.flatMap((v) => textOf(v)).join(' '), messageViews: views }
   }
+
+  /** An `Alert(...)`'s title and message, each a `Text`, and the layers they are drawn as. */
+  private alertWords(alert: ViewValue, path: string): Pick<Overlay, 'title' | 'titleLayer' | 'message' | 'messageViews'> {
+    const title = labelled(alert.args, 'title'), message = labelled(alert.args, 'message')
+    const titleView = title && asView(title) && this.stamp(asView(title)!, `${path}/title`)
+    const messageViews = message && asView(message) ? [this.stamp(asView(message)!, `${path}/message`)] : []
+    const words = { title: titleView ? textOf(titleView).join(' ') : '', message: messageViews.flatMap(textOf).join(' '), messageViews }
+    return titleView ? { ...words, titleLayer: viewLayers([titleView])[0] } : words
+  }
+
+  /**
+   * A presentation's title and message, and the layers they are drawn as. A dialog shows its
+   * title only when `titleVisibility` says so, and a title is words, or a `Text` of them.
+   */
+  private wordsOf(kind: OverlayKind, modifier: ModifierValue, shown: SwiftValue | undefined, path: string): Pick<Overlay, 'title' | 'titleLayer' | 'message' | 'messageViews'> {
+    const written = modifier.args.find((a) => a.label === null)?.value
+    const view = written && asView(written)
+    const title = kind === 'dialog' && tokenName(labelled(modifier.args, 'titleVisibility')) !== 'visible' ? '' : wordsIn(written)
+    const layer = !title ? undefined : view ? viewLayers([this.stamp(view, `${path}/title`)])[0]
+      : modifier.titleSpan && { id: `${path}/title`, name: title, type: 'Text', source: modifier.titleSpan, children: [] }
+    return { title, ...(layer ? { titleLayer: layer } : {}), ...this.messageOf(modifier, shown, path) }
+  }
+}
+
+/**
+ * The buttons an `Alert(...)` is given, `.default(Text("OK"))`, `.destructive(Text("Delete"),
+ * action:)` and `.cancel()`, as the Buttons an alert draws, with their roles.
+ */
+function alertButtons(alert: ViewValue): ViewValue[] {
+  return ['primaryButton', 'secondaryButton', 'dismissButton'].flatMap((label) => {
+    const button = payloadOf<{ name: string; args?: readonly SwiftValue[] }>(labelled(alert.args, label), 'Token')
+    if (!button) return []
+    const title = button.args?.find((arg) => asView(arg)), action = button.args?.find((arg) => arg.kind === 'closure')
+    const words = (title && wordsIn(title)) || (button.name === 'cancel' ? 'Cancel' : 'OK')
+    const role: ViewArg[] = button.name === 'default' ? [] : [{ label: 'role', value: opaque('Token', { name: button.name }) }]
+    return [{ name: 'Button', args: [{ label: null, value: str(words) }, ...role], children: [], modifiers: [], action: action?.kind === 'closure' ? action : null, span: alert.span }]
+  })
 }
 
 /** Every string a view draws, for the one-line summary an alert message needs. */
@@ -1978,6 +2178,55 @@ function findView(views: readonly ViewValue[], name: string): ViewValue | null {
   return null
 }
 
+/**
+ * The `navigationDestination(for:)` for a value's type among a screen's views. A link takes
+ * the one builder there is whatever its type; a path's value takes only its own type's.
+ */
+function builderFor(value: SwiftValue, screen: readonly ViewValue[], exact = false): ModifierValue | null {
+  const typeName = value.kind === 'struct' || value.kind === 'enum' ? value.typeName : ({ int: 'Int', double: 'Double', string: 'String', bool: 'Bool' } as Record<string, string>)[value.kind]
+  const builders = [...allModifiers(screen)].map(item => item.modifier).filter(modifier => modifier.name === 'navigationDestination' && modifier.closure && labelled(modifier.args, 'for'))
+  return builders.find(builder => {
+    const type = labelled(builder.args, 'for')
+    return type?.kind === 'type' && type.name === typeName
+  }) ?? (builders.length === 1 && !exact ? builders[0]! : null)
+}
+
+/**
+ * The destination a binding on this screen pushes now: `navigationDestination(isPresented:)`
+ * while it is true, or `(item:)` while it holds a value, given to its closure. Back sets it
+ * false, or nil, as SwiftUI does.
+ */
+function boundDestination(screen: readonly ViewValue[]): { modifier: ModifierValue; args: SwiftValue[]; back: ViewIntent } | null {
+  // A plain walk that stops at the first: every stack asks this on every pass.
+  for (const view of screen) {
+    for (const modifier of view.modifiers) {
+      if (modifier.name !== 'navigationDestination' || !modifier.closure) continue
+      const presented = labelled(modifier.args, 'isPresented'), binding = presented ?? labelled(modifier.args, 'item')
+      const value = asProjection(binding)?.get()
+      if (!binding || !value || (presented ? !truthy(value) : value.kind === 'nil')) continue
+      return { modifier, args: presented ? [] : [value], back: { kind: 'write', binding, value: presented ? { kind: 'bool', value: false } : { kind: 'nil' } } }
+    }
+    const below = view.children.length ? boundDestination(view.children) : null
+    if (below) return below
+  }
+  return null
+}
+
+/** A path's list holding `elements`, of the type it held: `.detail` appended to it later is still a case of it. */
+function withElements(list: ArrayValue, elements: SwiftValue[]): ArrayValue {
+  const next: ArrayValue = { kind: 'array', elements }
+  if (list.element) next.element = list.element
+  return next
+}
+
+/** Why a value on a stack's path shows nothing: no destination for its type is written in the stack. */
+function unshown(value: SwiftValue, span: SourceSpan): Diagnostic {
+  const type = typeNameOf(value)
+  return { span, severity: 'warning', code: 'type_mismatch', message: `This NavigationStack shows nothing for the ${type} on its path: no navigationDestination(for: ${type}.self) is written inside it.` }
+}
+
+const sameSpan = (a: SourceSpan, b: SourceSpan) => a.file === b.file && a.start === b.start && a.end === b.end
+
 function findByPath(views: readonly ViewValue[], path: string): ViewValue | null {
   for (const view of views) {
     if (view.path === path) return view
@@ -2107,6 +2356,81 @@ function labelTextOf(view: ViewValue): string {
     if (text) return text
   }
   return ''
+}
+
+/**
+ * What an item-driven presentation or destination is drawn with: its item, or while that is
+ * nil, a record of its type the screen holds (`firstHeld`). Inventing one could draw an
+ * impossible screen, or force-unwrap data that isn't there, so with neither it says why not.
+ */
+function given(args: readonly ViewArg[], closure: ClosureValue): { value?: SwiftValue; why?: string } {
+  const item = labelled(args, 'item')
+  const selected = item && (asProjection(item)?.get() ?? item)
+  const type = item && asProjection(item)?.declared?.name
+  const value = selected?.kind === 'nil' && type ? firstHeld(type, closure) : selected?.kind === 'nil' ? undefined : selected
+  return !item || value ? { value } : { why: type ? needs(type) : 'it needs an item to show, and none is selected now' }
+}
+
+/** Why a screen that shows a value of `type` isn't drawn when nothing holds one. */
+const needs = (type: string) => `it needs ${/^(?:[AEIO]|U(?!ni|s|RL|UID))/.test(type) ? 'an' : 'a'} ${type} to show, and the view holds no [${type}] to take one from`
+
+/** Why a path's destination for `type` isn't drawn while the path is empty and nothing else holds one. */
+const startsEmpty = (type: string) => `the path starts empty, and the view holds no other [${type}] to take one from`
+
+const isEmptyList = (value: SwiftValue | undefined) => value?.kind === 'array' && !value.elements.length
+
+/**
+ * A value of `type` to draw a screen that shows one with, while none is chosen: the first of
+ * a list of them that the view holds, or a model the view holds does, as a `value:` link's
+ * destination is drawn with the row it is in.
+ */
+function firstHeld(type: string, closure: ClosureValue): SwiftValue | undefined {
+  const view = closure.env instanceof Environment ? closure.env.resolveSelf() : null
+  if (view?.kind !== 'struct') return undefined
+  const read = (value: SwiftValue) => asProjection(value)?.get() ?? value
+  const models = [...view.fields.values()].map(read).filter(value => value.kind === 'struct' && value.reference)
+  for (const holder of [view, ...models] as StructValue[]) {
+    for (const value of holder.fields.values()) {
+      const list = read(value)
+      const first = list.kind === 'array' ? list.elements[0] : undefined
+      if (first && typeNameOf(first) === type) return first
+    }
+  }
+  return undefined
+}
+
+/** Modifiers that give a view what it reads from its environment, and change nothing it draws. */
+const ENVIRONMENT_MODIFIERS: ReadonlySet<string> = new Set(['environment', 'environmentObject', 'modelContainer'])
+
+/**
+ * The one view of the program a builder shows: `BookDetail` in `{ book in BookDetail(book: book) }`,
+ * and `Greeting` in `NavigationStack { Greeting(name: "A").padding() }`, past its modifiers and any
+ * container holding nothing else. `asIs` when it is that view as the app draws it: called with no
+ * arguments, and given only what it reads from its environment, `ContentView().environment(store)`.
+ * None where the builder shows more than one view, or none of the program's. A sheet's page and a
+ * `#Preview`'s are named by it.
+ */
+export function shownView(statements: readonly Stmt[], isView: (name: string) => boolean): { readonly name: string; readonly asIs: boolean } | undefined {
+  const [only, more] = statements.filter(statement => statement.kind !== 'declStmt')
+  let expr = more ? undefined : only?.kind === 'exprStmt' ? only.expression : only?.kind === 'returnStmt' ? only.value ?? undefined : undefined
+  let asIs = true
+  while (expr?.kind === 'call' && expr.callee.kind === 'memberAccess' && expr.callee.base) {
+    asIs &&= ENVIRONMENT_MODIFIERS.has(expr.callee.member)
+    expr = expr.callee.base
+  }
+  if (expr?.kind !== 'call' || expr.callee.kind !== 'identifier') return undefined
+  if (isView(expr.callee.name)) return { name: expr.callee.name, asIs: asIs && !expr.args.length && !expr.trailingClosure }
+  const inner = expr.trailingClosure && shownView(expr.trailingClosure.body.statements, isView)
+  return inner ? { name: inner.name, asIs: false } : undefined
+}
+
+/** The program's view a page's content is, `DetailView`, when it is one view, and one of the program's. */
+const componentOf = (views: readonly ViewValue[]) => views.length === 1 ? views[0]!.componentSources?.[0]?.name : undefined
+
+/** The words a title is written as: a string, or a `Text` of one. */
+function wordsIn(written: SwiftValue | undefined): string {
+  const view = written && asView(written)
+  return stringArg(written) ?? (view ? textOf(view).join(' ') : '')
 }
 
 export function animationOf(value: SwiftValue | undefined): AnimationPayload | null {

@@ -158,6 +158,8 @@ export interface ModifierValue {
    * instead of mutating them, so the frame captured here cannot be written through.
    */
   readonly environment?: EnvironmentFrame
+  /** Where an alert's or a confirmation dialog's title is written, for the layer its words are drawn as. */
+  readonly titleSpan?: SourceSpan
 }
 
 export const VIEW_TYPE = 'View'

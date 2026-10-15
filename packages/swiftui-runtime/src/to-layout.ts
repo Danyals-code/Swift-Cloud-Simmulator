@@ -1035,9 +1035,10 @@ class Converter {
     if (overlay.kind === 'alert' || overlay.kind === 'dialog') {
       // UIKit draws an alert's labels, which keep their leading: the iOS 27 simulator puts
       // the title's and message's glyphs where their full line boxes centre them.
-      const title = keptLeading(this.styledText('ov-title', overlay.title, overlay.kind === 'dialog' ? 'body' : 'headline', 'label', overlay.kind === 'dialog' ? 400 : 600))
+      // Named for the layers their words are, so a click on them selects where they are written.
+      const title = keptLeading(this.styledText(overlay.titleLayer?.id ?? 'ov-title', overlay.title, overlay.kind === 'dialog' ? 'body' : 'headline', 'label', overlay.kind === 'dialog' ? 400 : 600))
       const message = overlay.message
-        ? [keptLeading(this.styledText('ov-message', overlay.message, overlay.kind === 'alert' ? 'subheadline' : 'footnote', 'secondaryLabel'))]
+        ? [keptLeading(this.styledText(overlay.messageViews?.[0]?.path ?? 'ov-message', overlay.message, overlay.kind === 'alert' ? 'subheadline' : 'footnote', 'secondaryLabel'))]
         : []
 
       const head: LayoutElement = {

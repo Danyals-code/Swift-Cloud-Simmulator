@@ -506,7 +506,7 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
   'Material', 'StrokeStyle', 'GeometryProxy', 'ScrollViewProxy', 'Gradient', 'AnyShapeStyle', 'Glass',
   'RectangleCornerRadii',
-  'ToolbarItemPlacement', 'Binding', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet', 'Scanner', 'CharacterSet',
+  'ToolbarItemPlacement', 'Binding', 'NavigationPath', 'Alert', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet', 'Scanner', 'CharacterSet',
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
   'Task', 'MainActor', 'Duration', 'Sendable', 'Comparable', 'Equatable', 'Hashable',
   'ViewModifier', 'ButtonStyle', 'LabelStyle', 'ToggleStyle', 'Configuration',
@@ -572,7 +572,7 @@ export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean }> = ne
 /** Attributes that are meaningful rather than property wrappers. */
 export const KNOWN_ATTRIBUTES: ReadonlySet<string> = new Set([
   'main', 'ViewBuilder', 'escaping', 'autoclosure', 'available', 'discardableResult',
-  'inlinable', 'frozen', 'objc', 'MainActor', 'Observable', 'Sendable',
+  'inlinable', 'frozen', 'objc', 'MainActor', 'Observable', 'Sendable', 'Previewable',
 ])
 
 /**

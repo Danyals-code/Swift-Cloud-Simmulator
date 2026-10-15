@@ -1,5 +1,5 @@
 import { isDynamicTypeSize, type LogLevel, type Size, type SourceSpan, type UIEvent } from '@studio/shared'
-import type { Block, Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
+import type { Block, Decl, FuncDecl, MacroDecl, SourceFileNode, Stmt, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
   asProjection,
@@ -98,9 +98,20 @@ export class AppRuntime {
   private readonly ui = new UIState()
 
   private previewPrefix?: string
+  /** Which of the program's `#Preview`s this runtime runs as its root, for one drawn on its own page. */
+  private previewIndex?: number
   private entryTypeName: string | null = null
   /** `#Preview { … }`'s body, used as the root when nothing is marked `@main`. */
   private previewBody: Block | null = null
+  /** The program's `#Preview`s, in the order written. */
+  private previewMacros: readonly MacroDecl[] = []
+  /**
+   * The root preview's `@Previewable` variables, declared once a load: Xcode keeps them as
+   * `@State`, so one a tap changed is still changed on the next pass. Each pass runs inside it.
+   */
+  private previewables: Interpreter['globals'] | null = null
+  /** The root preview's body as it runs, split once a load: its `@Previewable` declarations, and what it shows. */
+  private previewParts: { readonly body: Block; readonly declared: Block; readonly shown: Block } | null = null
   private rootTypeName: string | null = null
   private identity = new IdentityPath()
 
@@ -228,12 +239,16 @@ export class AppRuntime {
       this.loadFailure = toFailure(error, this.interpreter.position)
     }
 
-    this.entryTypeName = screen ?? model.entryPoint?.name ?? null
+    this.previewMacros = findPreviews(files)
+    this.previewables = null
+    this.entryTypeName = this.previewIndex === undefined ? screen ?? model.entryPoint?.name ?? null : null
     // A file with a view and a `#Preview` and no `@main` is an ordinary thing to
     // paste in, and it is what Xcode itself renders. Falling back to the preview's
     // body is the difference between that file showing something and reporting that
     // the project has no entry point.
-    this.previewBody = this.entryTypeName ? null : findPreviewBody(files)
+    this.previewBody = this.entryTypeName ? null
+      : this.previewIndex === undefined ? this.previewMacros[0]?.body ?? findPreviewsProperty(files)
+      : this.previewMacros[this.previewIndex]?.body ?? null
     this.rootTypeName = null
     this.programKey = programKey
 
@@ -371,12 +386,14 @@ export class AppRuntime {
    * The evaluation comes back whether or not it stopped, so the gallery can say why a
    * screen isn't drawn; `stepBudget` is what the gallery has left to give it.
    */
-  previewRuntime(screen?: string, stepBudget?: number): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
+  previewRuntime(screen?: string, stepBudget?: number, macro?: number): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
     const loaded = this.loadedProgram
     if (!loaded) return null
     const preview = new AppRuntime()
     preview.stepBudget = stepBudget
     if (screen) preview.previewPrefix = 'design:' + screen
+    // A `#Preview` of its own: its body is the root, whatever the app's is.
+    if (macro !== undefined) { preview.previewIndex = macro; preview.previewPrefix = `preview${macro + 1}` }
     // Drawn as the app is now: holding the state while it holds, and not once it was touched.
     preview.load(loaded.files, loaded.model, loaded.key, screen ?? loaded.screen, this.interpreter.holding ?? undefined)
     const copied = new Map<object, unknown>()
@@ -394,6 +411,16 @@ export class AppRuntime {
     return { runtime: preview, evaluation: preview.evaluate() }
   }
 
+  /** The program's `#Preview`s in the order written, and whether the first is the root that runs, as it is with no `@main`. */
+  get previews(): { readonly macros: readonly MacroDecl[]; readonly running: boolean } {
+    return { macros: this.previewMacros, running: !!this.previewBody && this.previewBody === this.previewMacros[0]?.body }
+  }
+
+  /** Whether the program declares a view by this name, as a `#Preview` that shows it is named after it. */
+  declaresView(name: string): boolean {
+    return this.interpreter.conformsTo(name, 'View')
+  }
+
   /** The steps taken since the last pass began, resolving included. */
   get stepsUsed(): number {
     return this.interpreter.stepsUsed
@@ -409,6 +436,8 @@ export class AppRuntime {
       styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
       styleBody: (style, protocol, configuration) => this.styleBody(style, protocol, configuration),
       animation: null,
+      isView: (name) => this.declaresView(name),
+      cases: (type) => this.interpreter.plainCases(type),
     }, tab, rootId, limit)
   }
 
@@ -977,8 +1006,27 @@ export class AppRuntime {
    * level and sees exactly what a top-level function would.
    */
   private runPreviewBody(body: Block): ViewValue[] {
-    const env = this.interpreter.globals.child(null)
-    return this.viewsFrom(this.interpreter.runViewBuilderBlock(body, env))
+    if (this.previewParts?.body !== body) {
+      this.previewParts = { body, declared: { ...body, statements: body.statements.filter(previewable) }, shown: { ...body, statements: body.statements.filter(statement => !previewable(statement)) } }
+    }
+    const { declared, shown } = this.previewParts
+    if (!declared.statements.length) return this.viewsFrom(this.interpreter.runViewBuilderBlock(body, this.interpreter.globals.child(null)))
+    const fresh = !this.previewables
+    if (!this.previewables) {
+      this.previewables = this.interpreter.globals.child(null)
+      this.interpreter.runViewBuilderBlock(declared, this.previewables)
+    }
+    // Kept in the state store, as a view's `@State` is: through an edit while its declaration is
+    // unchanged, and afresh once it is. Each preview's are its own.
+    const identity = `#Preview${this.previewIndex ?? 0}`
+    for (const statement of declared.statements) {
+      const variable = statement.kind === 'declStmt' && statement.declaration.kind === 'varDecl' ? statement.declaration : null
+      const binding = variable && this.previewables.own(variable.name)
+      if (!variable || !binding) continue
+      if (fresh) binding.value = this.state.resolve(identity, variable.name, binding.value, fingerprint(variable.initializer))
+      else this.state.store(identity, variable.name, binding.value, fingerprint(variable.initializer))
+    }
+    return this.viewsFrom(this.interpreter.runViewBuilderBlock(shown, this.previewables.child(null)))
   }
 
   /**
@@ -1334,19 +1382,14 @@ export function actionId(path: string): string {
 export { describe }
 
 /**
- * The body of the first `#Preview` in the project, if there is one.
+ * Every `#Preview` in the project with a body, in the order written.
  *
- * First rather than all: Xcode shows several previews side by side, and a simulated
- * phone has one screen. Picking the first is the choice that needs no interface, and a
- * second preview is still parsed and still exported.
+ * The first is the root when nothing is `@main`: a simulated phone has one screen, and
+ * Xcode shows several previews side by side. The Design canvas draws the others, and
+ * with an app all of them, each on a page of its own.
  */
-function findPreviewBody(files: readonly SourceFileNode[]): Block | null {
-  for (const file of files) {
-    for (const decl of file.declarations) {
-      if (decl.kind === 'macroDecl' && decl.name === 'Preview' && decl.body) return decl.body
-    }
-  }
-  return findPreviewsProperty(files)
+function findPreviews(files: readonly SourceFileNode[]): MacroDecl[] {
+  return files.flatMap(file => file.declarations.filter((decl): decl is MacroDecl & { body: Block } => decl.kind === 'macroDecl' && decl.name === 'Preview' && !!decl.body))
 }
 
 /**
@@ -1374,6 +1417,9 @@ function findPreviewsProperty(files: readonly SourceFileNode[]): Block | null {
   }
   return null
 }
+
+/** `@Previewable @State var count = 0` in a `#Preview`'s body: a variable the preview keeps, as a view keeps its `@State`. */
+const previewable = (statement: Stmt) => statement.kind === 'declStmt' && statement.declaration.kind === 'varDecl' && statement.declaration.attributes.some(attribute => attribute.name === 'Previewable')
 
 /** Tag all painted descendants because navigation/tabs can unwrap a component root. */
 function componentViews(views: readonly ViewValue[], instance: StructValue): ViewValue[] {

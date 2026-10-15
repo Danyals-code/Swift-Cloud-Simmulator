@@ -4,11 +4,11 @@ import { borderOf, cornersOf } from './authoring-border'
 import { enrichAuthoring } from './authoring-features'
 import type { ComponentDescription, PreviewColorAsset } from '@studio/shared'
 import {
-  MODIFIER_SLOTS, VIEW_PARTS, authoringCapability,
+  MODIFIER_SLOTS, PRESENTATION_PARTS, VIEW_PARTS, authoringCapability,
   type AuthoringNode, type AuthoringProperty, type AuthoringSnapshot,
   type Diagnostic, type PropertyValueKind, type SourceFile, type SourceSpan,
 } from '@studio/shared'
-import { Lexer, Parser, forEachChild, isSyntaxError, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type Token, type VarDecl } from '@studio/swift-syntax'
+import { Lexer, Parser, forEachChild, isSyntaxError, type Block, type CallExpr, type ClosureExpr, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type Token, type VarDecl } from '@studio/swift-syntax'
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from './builtins'
 import { containerContent, helperCall, helperContent, helperReach, setByEveryInit, viewHelpers, writtenParameters, type MutableNode, type ViewHelper } from './authoring-helpers'
 import { joinedText } from './authoring-runs'
@@ -28,6 +28,14 @@ function callName(expr: Expr): string | null {
   if (expr.kind === 'identifier') return expr.name
   if (expr.kind === 'memberAccess' && (!expr.base || expr.base.kind === 'identifier' && expr.base.name === 'SwiftUI')) return expr.member
   return null
+}
+
+/** The closure of SwiftUI's older alert, `.alert(isPresented:) { Alert(…) }`: one that returns an `Alert` rather than the alert's actions. */
+function olderAlert(modifier: CallExpr): ClosureExpr | undefined {
+  const closure = modifier.trailingClosure ?? modifier.args.find(arg => arg.label === 'content')?.value
+  const [only, more] = closure?.kind === 'closure' ? closure.body.statements : []
+  const value = more ? undefined : only?.kind === 'exprStmt' ? only.expression : only?.kind === 'returnStmt' ? only.value : undefined
+  return value?.kind === 'call' && callName(value.callee) === 'Alert' && closure?.kind === 'closure' ? closure : undefined
 }
 
 function referencePath(expr: Expr): string[] | null {
@@ -257,8 +265,12 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     }
   }
 
-  /** `argument` says the view is written as another's argument, and `run` that it is a run of texts joined with `+`. */
-  function expression(expr: Expr, parent: MutableNode, scope: Scope, { argument = false, run = false } = {}): void {
+  /**
+   * `argument` says the view is written as another's argument, `run` that it is a run of texts
+   * joined with `+`, and `title` that it is an alert's or a dialog's title written as a value,
+   * which takes nothing but its words.
+   */
+  function expression(expr: Expr, parent: MutableNode, scope: Scope, { argument = false, run = false, title = false } = {}): void {
     // A helper's call points at its views, as a component's copy points at its Main. Read
     // as a property, it is where its modifiers start, as a call would be.
     const helper = helperAt(expr, parent.owner, scope)
@@ -335,13 +347,14 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     if (!diagnostics.some(d => d.span.file === node.source.file && (isSyntaxError(d) || d.severity === 'error' && d.span.start < node.source.end && d.span.end >= node.source.start))) {
       const template = inTemplate(parent)
       // A control that keeps its scope and description is kept as it is, rather than copied.
-      const controls = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', layers, input.deploymentTarget).map(({ control }) => template || control.id.startsWith('fill:') ? { ...control, scope: template ? 'All rows in this template' : control.scope, description: control.id.startsWith('fill:') ? `${control.description} Parent: ${parent.name}. Hug uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : control.description } : control)
+      const recipes = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', layers, input.deploymentTarget)
+      const controls = (title ? recipes.filter(({ control }) => control.id.startsWith('content')) : recipes).map(({ control }) => template || control.id.startsWith('fill:') ? { ...control, scope: template ? 'All rows in this template' : control.scope, description: control.id.startsWith('fill:') ? `${control.description} Parent: ${parent.name}. Hug uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : control.description } : control)
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }
-    Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', { deploymentTarget: input.deploymentTarget, allowEdits: !!node.controls }))
+    if (!title) Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', { deploymentTarget: input.deploymentTarget, allowEdits: !!node.controls }))
     // The same chain read as a layer: one value per Figma property (Wave 2).
-    if (node.controls) {
+    if (node.controls && !title) {
       const layer = readLayer(expr, layerContext(layers, node, parent, texts.get(node.source.file) ?? ''))
       if (layer) Object.assign(node, { layer })
     }
@@ -397,6 +410,12 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       const name = modifier.callee.kind === 'memberAccess' ? modifier.callee.member : ''
       const label = MODIFIER_SLOTS[name]
       if (!label || borderOf(modifier, corners, texts.get(node.source.file) ?? '')) continue
+      if (name === 'alert' || name === 'confirmationDialog') {
+        // From its name on: the modifier's own span starts with the view it is chained on.
+        const start = modifier.callee.kind === 'memberAccess' ? modifier.callee.memberSpan.start : modifier.span.start
+        presented(modifier, add('branch', label, { file: modifier.span.file, start, end: modifier.span.end }, parent.owner, node), scope)
+        continue
+      }
       const closure = modifier.trailingClosure ?? modifier.args.find(arg => arg.label === 'content' && arg.value.kind === 'closure')?.value
       if (closure?.kind === 'closure') {
         const slot = add('branch', label, closure.span, parent.owner, node)
@@ -415,6 +434,37 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
         }
       }
     }
+  }
+
+  /**
+   * An alert's or a confirmation dialog's parts where they are written (Wave 3b): its title,
+   * then its actions and message, each a slot. A title written as a value, words or data, is
+   * read as the `Text` SwiftUI makes of it, whose words are edited in place, or shown read
+   * only when they come from data, and which takes nothing added. SwiftUI's older alert,
+   * `.alert(isPresented:) { Alert(…) }`, returns an `Alert` rather than its actions, and is
+   * read as written, whole.
+   */
+  function presented(modifier: CallExpr, slot: MutableNode, scope: Scope): void {
+    const title = modifier.args.find(arg => arg.label === null)?.value
+    if (title) {
+      const value = !(title.kind === 'call' && callName(viewCallChain(title)!.base.callee) === 'Text')
+      if (value) markViewBase(title, title.span, { kind: 'call', callee: { kind: 'identifier', name: 'Text', span: title.span }, args: [{ label: null, labelSpan: null, value: title, span: title.span }], trailingClosure: null, span: title.span })
+      expression(title, slot, scope, { argument: true, title: value })
+    }
+    const older = olderAlert(modifier)
+    if (older) { block(older.body, slot, closureScope(older, scope)); return }
+    const written = [...modifier.args.map(arg => ({ part: PRESENTATION_PARTS[arg.label ?? ''], value: arg.value })), { part: PRESENTATION_PARTS.trailing, value: modifier.trailingClosure }]
+    for (const { part, value } of written.sort((a, b) => (a.value?.span.start ?? 0) - (b.value?.span.start ?? 0))) {
+      if (!part || value?.kind !== 'closure') continue
+      block(value.body, add('branch', part, value.span, slot.owner, slot), closureScope(value, scope))
+    }
+  }
+
+  /** `scope` with a closure's parameters in it, as values worked out in Swift. */
+  function closureScope(closure: ClosureExpr, scope: Scope): Scope {
+    const locals = new Map(scope)
+    for (const param of closure.params) locals.set(param.name.replace(/^\$/, ''), { kind: 'computed', source: param.span })
+    return locals
   }
 
   function block(body: Block, parent: MutableNode, inherited: Scope): void {

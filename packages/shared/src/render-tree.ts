@@ -526,8 +526,9 @@ export interface RenderTree {
   /**
    * Set on a tree that only carries a message, because the code has errors or stopped
    * running. The phone keeps showing the last tree that ran, dimmed, with this over it.
+   * `span` is where the error it names is written, when an error in the code stops it.
    */
-  readonly notice?: { readonly title: string; readonly detail: string }
+  readonly notice?: { readonly title: string; readonly detail: string; readonly span?: SourceSpan }
 }
 
 export const EMPTY_RENDER_TREE: RenderTree = {

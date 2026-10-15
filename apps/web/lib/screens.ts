@@ -17,7 +17,7 @@ export function screenDefinition(snapshot: AuthoringSnapshot | undefined, page: 
   return view ? snapshot?.nodes.find(n => n.kind === 'definition' && n.name === view) : undefined
 }
 /** Names the preview falls back to when a screen has no title of its own. */
-const GENERIC_PAGE = /^(Main page|Page \d+|Details|Sheet|Full screen|Popover|Menu|Alert|Confirmation)$/
+const GENERIC_PAGE = /^(Main page|Page \d+|Details|Sheet|Full screen|Popover|Menu|Alert|Confirmation|Confirmation dialog)$/
 /** A screen's name from its view: `HomeScreen` is "Home". */
 export const screenLabel = (view: string) => view.replace(/(Screen|View)$/, '') || view
 

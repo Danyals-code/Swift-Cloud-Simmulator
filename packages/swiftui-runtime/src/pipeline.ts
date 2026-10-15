@@ -20,13 +20,15 @@ import {
   type Rect,
   type RenderNode,
   type RenderTree,
+  type SourceFile,
   type SourceSpan,
   type UIEvent,
   type ViewGeometry,
   type ViewInstance,
+  type ViewLayer,
 } from '@studio/shared'
 import { DEFAULT_STEP_BUDGET } from '@studio/swift-runtime'
-import { Parser, type SourceFileNode, type Token } from '@studio/swift-syntax'
+import { Parser, type MacroDecl, type SourceFileNode, type Token } from '@studio/swift-syntax'
 import { buildAuthoringModel, layerDraftSites, scenarioFiles, Checker, lintStrictness, type LayerDraftSites, type SemanticModel } from '@studio/swift-sema'
 import {
   applyLayoutDraft,
@@ -46,7 +48,7 @@ import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } from './style'
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
-import { stoppedFailures, type NestedPage, type NotDrawn, type OverlayKind } from './presentation'
+import { shownView, stoppedFailures, type NestedPage, type NotDrawn, type OverlayKind } from './presentation'
 import { runnableProgram, setAsideRan, type Runnable } from './set-aside'
 import { exhausts, toFailure } from './failures'
 import type { GeometryPayload, RuntimeFailure, ViewValue } from './view-value'
@@ -99,6 +101,20 @@ interface Drawn {
 let drawing: Drawn[] = []
 /** The last full result, and its trees. */
 let drawn: { readonly result: CompileResult; readonly trees: readonly Drawn[] } | null = null
+/**
+ * The last result Design's canvas drew, with the files it was drawn from: what Design keeps,
+ * dimmed, while the code has errors that stop it running (FR-6.3), for the same project and
+ * state. Only a drawing of every page counts, so one of the phone alone, drawn while Code is
+ * open, never takes the place of the pages Design showed.
+ */
+let lastGood: { readonly key: string; readonly files: readonly SourceFile[]; readonly result: CompileResult } | null = null
+/**
+ * What a kept drawing belongs to: the project, scenario and screen, as the studio keys its worker.
+ * The pipeline is driven directly too, by tests and export, where nothing else keeps one project's
+ * drawing from another's. One drawn in another colour scheme, device or text size is still the
+ * drawing kept, which the canvas shows as the last drawing, never as the code as it is.
+ */
+const drawingKey = (request: CompileRequest) => JSON.stringify([request.projectId ?? '', request.scenario ?? null, request.previewScreen ?? null])
 
 /** z ranges, so bars always paint over content and presentations over everything. */
 const BAR_Z = 100_000
@@ -116,7 +132,7 @@ export function relayout(revision: number): CompileResult {
   const { analysis, request } = lastAnalysis
   const next = { ...request, revision }
   lastAnalysis = { analysis, request: next }
-  if (!analysis.runnable) return toResult(next, analysis, null, errorsNotice(next, analysis), performance.now(), 0, 0)
+  if (!analysis.runnable) return withLastDrawing(next, analysis, performance.now())
   return finish(next, analysis, lastEvaluation, performance.now(), 0)
 }
 
@@ -193,6 +209,8 @@ export function endLayerDraft(revision: number): CompileResult {
 export function resetPipelineState(): void {
   runtime.reset()
   lastEvaluation = null
+  lastGood = null
+  keptAsFound = null
 }
 
 /** Returns true when the event changed something and a re-render is warranted. */
@@ -621,7 +639,7 @@ function overlayRect(
 }
 
 /** A tree carrying only a message, for states where there is nothing to draw. */
-function noticeTree(request: CompileRequest, title: string, detail: string): RenderTree {
+function noticeTree(request: CompileRequest, title: string, detail: string, span?: SourceSpan): RenderTree {
   const pad = 20
   const width = request.canvas.width - pad * 2
   const nodes: RenderNode[] = [
@@ -648,7 +666,7 @@ function noticeTree(request: CompileRequest, title: string, detail: string): Ren
       placeholder: { kind: 'notice', feature: title, reason: detail },
     },
   ]
-  return { canvas: request.canvas, nodes, revision: ++revision, notice: { title, detail } }
+  return { canvas: request.canvas, nodes, revision: ++revision, notice: span ? { title, detail, span } : { title, detail } }
 }
 
 /**
@@ -660,7 +678,53 @@ function noticeTree(request: CompileRequest, title: string, detail: string): Ren
  */
 function errorsNotice(request: CompileRequest, analysis: Analysis, first?: Diagnostic): RenderTree {
   const errors = analysis.diagnostics.filter((d) => d.severity === 'error')
-  return noticeTree(request, `${errors.length} error${errors.length === 1 ? '' : 's'}`, (first ?? errors[0])?.message ?? 'Fix the errors to run.')
+  const named = first ?? errors[0]
+  return noticeTree(request, `${errors.length} error${errors.length === 1 ? '' : 's'}`, named?.message ?? 'Fix the errors to run.', named?.span)
+}
+
+/**
+ * The result for code its errors stop from running: the error over the phone, which keeps its
+ * last screen, and the last drawing of this project and state for Design to keep (FR-6.3).
+ */
+function withLastDrawing(request: CompileRequest, analysis: Analysis, startedAt: number, evaluateMs = 0, first?: Diagnostic): CompileResult {
+  const notice = errorsNotice(request, analysis, first)
+  const kept = lastGood?.key === drawingKey(request) ? lastGood : null
+  if (!kept) return toResult(request, analysis, null, notice, startedAt, evaluateMs, 0)
+  const found = foundIn(kept, request.files)
+  const result = toResult(request, analysis, null, notice, startedAt, evaluateMs, 0, found.pages, [], [], found.hierarchy)
+  return kept.result.pagesNotDrawn ? { ...result, pagesNotDrawn: kept.result.pagesNotDrawn } : result
+}
+
+/** The kept drawing's pages and layers as `foundIn` last found them, for the files then unchanged. */
+let keptAsFound: { readonly drawing: object; readonly unchanged: string; readonly pages?: readonly PagePreview[]; readonly hierarchy?: readonly ViewLayer[] } | null = null
+
+/**
+ * The kept drawing's pages and layers as they are found in the code now. A view in it is found
+ * only where its file is as it was drawn: one in a file changed since is never matched to
+ * whatever is written at its place now. A page whose own views are in such a file keeps its
+ * drawing and no layers, so Layers lists its code as it would with no drawing. Worked out again
+ * only when the files unchanged since the drawing are others, not at each keystroke in the
+ * file with the error.
+ */
+function foundIn(kept: NonNullable<typeof lastGood>, files: readonly SourceFile[]): NonNullable<typeof keptAsFound> {
+  const same = new Set(files.filter(file => kept.files.some(old => old.id === file.id && old.text === file.text)).map(file => file.id))
+  const unchanged = [...same].join('\n')
+  if (keptAsFound?.drawing === kept && keptAsFound.unchanged === unchanged) return keptAsFound
+  const found = (layer: ViewLayer): ViewLayer => {
+    const next: { -readonly [K in keyof ViewLayer]: ViewLayer[K] } = { id: layer.id, name: layer.name, type: layer.type, children: layer.children.map(found) }
+    if (layer.source && same.has(layer.source.file)) next.source = layer.source
+    const calls = layer.componentSources?.filter(call => same.has(call.source.file))
+    if (calls?.length) next.componentSources = calls
+    if (layer.page) next.page = layer.page
+    return next
+  }
+  /** The layers of a page, while the views at its top are still found. */
+  const layers = (hierarchy: readonly ViewLayer[] | undefined) => {
+    const next = hierarchy?.map(found)
+    return next?.some(page => page.children.some(view => view.source)) ? next : undefined
+  }
+  keptAsFound = { drawing: kept, unchanged, pages: kept.result.pages?.map(page => ({ ...page, viewHierarchy: layers(page.viewHierarchy) })), hierarchy: layers(kept.result.viewHierarchy) }
+  return keptAsFound
 }
 
 /**
@@ -762,6 +826,7 @@ function toResult(
   pages?: readonly PagePreview[],
   notDrawnPages: readonly Diagnostic[] = [],
   galleryWarnings: readonly Diagnostic[] = [],
+  hierarchy: readonly ViewLayer[] = evaluation?.failure ? [] : evaluation?.ui?.viewHierarchy ?? [],
 ): CompileResult {
   const total = performance.now() - startedAt
 
@@ -789,7 +854,7 @@ function toResult(
   }
 
   const authoring = bindAuthoringRuntime(analysis.authoring, evaluation?.failure ? [] : [
-    ...(evaluation?.ui?.viewHierarchy ?? []),
+    ...hierarchy,
     ...(pages ?? []).flatMap(page => page.viewHierarchy ?? []),
   ], request.revision)
   return {
@@ -797,7 +862,7 @@ function toResult(
     authoring: { ...authoring, nodes: authoring.nodes.map(node => ({ ...node, runtimeIds: [...new Set(node.runtimeIds)] })) },
     diagnostics,
     renderTree,
-    viewHierarchy: evaluation?.failure ? [] : evaluation?.ui?.viewHierarchy ?? [],
+    viewHierarchy: hierarchy,
     ...(pages ? { pages } : {}),
     ...(notDrawn.length ? { pagesNotDrawn: notDrawn.map((warning) => warning.message) } : {}),
     logs,
@@ -829,7 +894,7 @@ export function compile(request: CompileRequest): CompileResult {
   // produce failures that describe the broken parse rather than the user's code; an
   // error that only some lines depend on is set aside in them instead.
   const program = analysis.runnable
-  if (!program) return toResult(request, analysis, null, errorsNotice(request, analysis), startedAt, 0, 0)
+  if (!program) return withLastDrawing(request, analysis, startedAt)
 
   const evaluateStart = performance.now()
   let scenario: ReturnType<typeof scenarioFiles> = { files: program.files, held: new Map() }
@@ -873,7 +938,7 @@ export function rerender(revision: number): CompileResult {
   lastAnalysis = { request: next, analysis }
 
   const startedAt = performance.now()
-  if (!analysis.runnable) return toResult(next, analysis, null, errorsNotice(next, analysis), startedAt, 0, 0)
+  if (!analysis.runnable) return withLastDrawing(next, analysis, startedAt)
 
   const evaluateStart = performance.now()
   let evaluation = runtime.evaluate()
@@ -903,6 +968,7 @@ function finish(
   if (draft) draft.engine = null
   const trees = [...new Set([result.renderTree, ...(result.pages ?? []).map(page => page.tree)].flatMap(tree => tree && byTree.get(tree) ? [byTree.get(tree)!] : []))]
   drawn = result.renderTree && trees.length ? { result, trees } : null
+  if (request.allPages && result.renderTree && !result.renderTree.notice) lastGood = { key: drawingKey(request), files: request.files, result }
   const geometry = geometryOf(result, tree => byTree.get(tree)?.instances)
   return geometry ? { ...result, geometry } : result
 }
@@ -920,7 +986,7 @@ function draw(
   const stoppedAt = analysis.runnable && setAsideRan(analysis.runnable, evaluation, appeared)
   if (stoppedAt) {
     lastEvaluation = null
-    return toResult(request, analysis, null, errorsNotice(request, analysis, stoppedAt), startedAt, evaluateMs, 0)
+    return withLastDrawing(request, analysis, startedAt, evaluateMs, stoppedAt)
   }
 
   if (evaluation.failure) {
@@ -965,8 +1031,12 @@ function draw(
   // After the geometry retry, so a reader in a page the device is not showing
   // cannot report a size back into the live one.
   const gallery = request.allPages ? renderPages(request, evaluation, renderTree) : undefined
+  // With no app the first `#Preview` is the screen, drawn without the traits it asks for too,
+  // which Design, where the previews are, says.
+  const { macros, running } = runtime.previews
+  const traits = running && gallery ? previewTraits(macros[0]!, request) : []
 
-  return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, performance.now() - layoutStart, gallery?.pages, gallery?.notDrawn, gallery?.warnings)
+  return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, performance.now() - layoutStart, gallery?.pages, gallery?.notDrawn, [...traits, ...gallery?.warnings ?? []])
 }
 
 /**
@@ -1020,7 +1090,7 @@ function renderPages(
   const skip = (missing: string, source: SourceSpan | undefined, cause: unknown): void => {
     if (exhausts(cause)) spent = true
     const span = source ?? { file: request.files[0]?.id ?? '', start: 0, end: 0 }
-    const reason = spent ? BUDGET_SPENT : cause instanceof InvalidLayout ? cause.message : isFailure(cause) ? cause.message : toFailure(cause, span).message
+    const reason = spent ? BUDGET_SPENT : typeof cause === 'string' ? cause : cause instanceof InvalidLayout || isFailure(cause) ? cause.message : toFailure(cause, span).message
     notDrawn.push({ span, severity: 'warning', code: spent ? 'execution_budget_exceeded' : 'runtime_trap', message: `${missing} on the Design canvas: ${reason}.` })
   }
   const screen = (name: string) => `"${name}" isn't drawn`
@@ -1038,16 +1108,18 @@ function renderPages(
       warnings.push(...ui.warnings ?? [])
       const isLiveRoot = isActive && !evaluation.ui?.navigationBar?.canGoBack && !evaluation.ui?.overlay
       const tree = isLiveRoot ? active : drawable(render(request, { ...evaluation, ui }, true, preview?.runtime))
+      const layers = ui.viewHierarchy?.filter(layer => layer.id === page.id)
       out.push({
         id: page.id,
         rootId: page.id,
         kind: 'root',
-        name: page.name,
+        // Named as it is drawn, by its first screen, whatever the running app has pushed over it.
+        name: layers?.[0]?.name ?? page.name,
         active: isActive,
         ...(page.source ? { source: page.source } : {}),
         ...(page.page?.handlerId ? { handlerId: page.page.handlerId } : {}),
         ...(page.page?.icon ? { icon: page.page.icon } : {}),
-        viewHierarchy: ui.viewHierarchy?.filter(layer => layer.id === page.id) ?? [page],
+        viewHierarchy: layers ?? [page],
         tree,
       })
     } catch (error) {
@@ -1064,7 +1136,7 @@ function renderPages(
     }
     for (const child of nested) {
       if (!out.some(parent => parent.id === child.parentId)) continue
-      if (spent) { skip(screen(child.name), child.source, null); continue }
+      if (spent || 'notDrawn' in child) { skip(screen(child.name), child.source, 'notDrawn' in child ? child.notDrawn : null); continue }
       try {
         const childTree = drawable(render(request, { ...preview.evaluation, ui: child.ui }, true, preview.runtime))
         warnings.push(...child.ui.warnings ?? [])
@@ -1081,8 +1153,35 @@ function renderPages(
     remainingChildren -= nested.length
   }
   // Design screens nothing links to yet run in a program of their own, on what the
-  // pages above left of the budget.
+  // pages above left of the budget, and so does each `#Preview` the app doesn't run.
   let budget = DEFAULT_STEP_BUDGET - (preview?.runtime.stepsUsed ?? 0)
+  /** Draws a page in a program of its own, and says whether it did. */
+  const drawStandalone = (name: string, source: SourceSpan, id: string, kind: Extract<PagePreview['kind'], 'root' | 'preview'>, run: (budget: number) => ReturnType<AppRuntime['previewRuntime']>): boolean => {
+    if (spent || budget <= 0) { spent = true; skip(screen(name), source, null); return false }
+    const detached = run(budget)
+    if (!detached) return false
+    try {
+      const failure = detached.evaluation.failure
+      if (failure) {
+        if (detached.runtime.stepsUsed >= budget) spent = true
+        skip(screen(name), source, failure)
+        return false
+      }
+      if (!detached.evaluation.ui) return false
+      const tree = drawable(render(request, detached.evaluation, true, detached.runtime))
+      warnings.push(...detached.evaluation.ui.warnings ?? [])
+      out.push({ id, rootId: id, kind, standalone: true, name, active: false, source,
+        viewHierarchy: detached.evaluation.ui.viewHierarchy?.map(layer => ({ ...layer, id })), tree })
+      return true
+    } catch (error) {
+      // A failed standalone screen does not invalidate the running app.
+      if (detached.runtime.stepsUsed >= budget) spent = true
+      skip(screen(name), source, error)
+      return false
+    } finally {
+      budget -= detached.runtime.stepsUsed
+    }
+  }
   const renamedIds = new Map<string, string>()
   const views = pageViews(out)
   for (const design of (request.designScreens ?? []).slice(0, limit)) {
@@ -1099,29 +1198,22 @@ function renderPages(
     }
     // A view holding tabs or sheets written in place is on the canvas already, around them.
     if (out.some(page => viewsDrawing(page).some(view => view.name === design.view))) continue
-    if (spent || budget <= 0) { spent = true; skip(screen(design.name), definition.source, null); continue }
-    const detached = runtime.previewRuntime(design.view, budget)
-    if (!detached) continue
-    const id = 'screen:' + design.view
-    try {
-      const failure = detached.evaluation.failure
-      if (failure) {
-        if (detached.runtime.stepsUsed >= budget) spent = true
-        skip(screen(design.name), definition.source, failure)
-        continue
-      }
-      if (!detached.evaluation.ui) continue
-      const tree = drawable(render(request, detached.evaluation, true, detached.runtime))
-      warnings.push(...detached.evaluation.ui.warnings ?? [])
-      out.push({ id, rootId: id, kind: 'root', standalone: true, name: design.name, active: false, source: definition.source,
-        viewHierarchy: detached.evaluation.ui.viewHierarchy?.map(layer => ({ ...layer, id })), tree })
-    } catch (error) {
-      // A failed standalone screen does not invalidate the running app.
-      if (detached.runtime.stepsUsed >= budget) spent = true
-      skip(screen(design.name), definition.source, error)
-    } finally {
-      budget -= detached.runtime.stepsUsed
-    }
+    drawStandalone(design.name, definition.source, 'screen:' + design.view, 'root', left => runtime.previewRuntime(design.view, left))
+  }
+  // Each `#Preview` the app doesn't run, named by its title, or after the one view it shows
+  // where no other is named the same, or by its place.
+  const { macros, running } = runtime.previews
+  const previews = macros.slice(0, limit).flatMap((macro, index) => {
+    const title = previewTitle(macro)
+    const shown = shownView(macro.body?.statements ?? [], name => runtime.declaresView(name))
+    // `#Preview { HomeScreen() }`, or one that gives it only its environment, beside an app that
+    // draws HomeScreen, is that screen, already drawn. A titled one is a picture of its own.
+    const drawn = !title && shown?.asIs && out.some(page => page.id === 'screen:' + shown.name || viewsDrawing(page).some(view => view.name === shown.name))
+    return running && !index || drawn ? [] : [{ macro, index, title, name: title ?? shown?.name }]
+  })
+  for (const { macro, index, title, name } of previews) {
+    const named = title ?? (name && previews.filter(other => other.name === name).length === 1 ? name : `Preview ${index + 1}`)
+    if (drawStandalone(named, macro.span, `preview:${index + 1}`, 'preview', left => runtime.previewRuntime(undefined, left, index))) warnings.push(...previewTraits(macro, request))
   }
   return {
     pages: out.map(page => {
@@ -1132,6 +1224,21 @@ function renderPages(
     notDrawn,
     warnings,
   }
+}
+
+/** A `#Preview`'s title, "Dark mode" in `#Preview("Dark mode")`, when it is written as plain text. */
+function previewTitle(macro: MacroDecl): string | undefined {
+  const title = macro.args[0]?.label ? undefined : macro.args[0]?.value
+  return title?.kind === 'stringLiteral' && title.segments.every(segment => segment.kind === 'text') ? title.segments.map(segment => segment.value).join('') : undefined
+}
+
+/** A warning at each argument of a `#Preview` besides its title, `traits: .landscapeLeft`, which the preview draws it without. */
+function previewTraits(macro: MacroDecl, request: CompileRequest): Diagnostic[] {
+  const text = request.files.find(file => file.id === macro.span.file)?.text ?? ''
+  return macro.args.filter(arg => arg.label).map(({ span }) => {
+    const written = text.slice(span.start, span.end)
+    return { span, severity: 'warning', code: 'unsupported_language_feature', feature: written, message: `The preview doesn't apply ${written} to this #Preview. Xcode's canvas does.` }
+  })
 }
 
 /** A page whose layout has a size the canvas can't draw. */

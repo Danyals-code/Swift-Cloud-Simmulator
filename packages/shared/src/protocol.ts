@@ -123,7 +123,7 @@ export interface CompileTimings {
  * is what makes a page the live one.
  */
 export interface PagePreview {
-  /** A design-only root that is not reachable from the app entry point yet. */
+  /** A design-only root the app entry point doesn't reach: a screen not linked yet, or a `#Preview` of its own. */
   readonly standalone?: boolean
   readonly id: string
   readonly name: string
@@ -133,7 +133,11 @@ export interface PagePreview {
   /** Related screens are placed below their owning page, rather than beside tabs. */
   readonly parentId?: string
   readonly rootId?: string
-  readonly kind?: 'root' | 'destination' | 'sheet' | 'cover' | 'popover'
+  /**
+   * How the page is reached: a root or a `#Preview` of its own, pushed, or presented
+   * over its parent as a sheet, cover, popover, alert or confirmation dialog.
+   */
+  readonly kind?: 'root' | 'preview' | 'destination' | 'sheet' | 'cover' | 'popover' | 'alert' | 'dialog'
   /** A tab's SF Symbol, for its lane header. */
   readonly icon?: string
   readonly source?: SourceSpan
@@ -164,6 +168,8 @@ export interface CompileResult {
    *
    * Root tabs are capped separately from related screens. Child pages include
    * their own hierarchy because their views are absent from the live screen.
+   * While errors stop the code, these are the last pages drawn for this project
+   * and state, with only the layers still found in the code.
    */
   readonly pages?: readonly PagePreview[]
   /**

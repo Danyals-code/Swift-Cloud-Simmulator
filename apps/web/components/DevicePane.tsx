@@ -15,7 +15,8 @@ import { PANE_LIMITS } from '../lib/layout'
 import { AppearancePicker, DevicePicker, TextSizePicker, ZoomPicker } from './PreviewEnvironment'
 import type { CanvasTool } from './Toolbar'
 import type { AuthoringNode, NavigationDestination, DropPosition } from '@studio/shared'
-import { CANVAS, canvasLayout, type CanvasArrow, type CanvasLayout } from '../lib/pageLayout'
+import { CANVAS, canvasLayout, type CanvasLayout } from '../lib/pageLayout'
+import { PAGE_KINDS, reachedAs } from '../lib/pageKinds'
 import { deviceChrome, type DeviceChrome } from '../lib/deviceChrome'
 import { galleryChangeView, viewCentredOn } from '../lib/canvasView'
 import { useCompiler, type CompilerOptions } from '../lib/useCompiler'
@@ -54,6 +55,10 @@ export interface DevicePaneProps {
   tree: RenderTree | null
   /** Why the phone is dimmed: the code has errors or stopped, and `tree` is the last screen that ran. */
   notice?: NonNullable<RenderTree['notice']>
+  /** The last drawing is shown, dimmed, while an error stops the code; unlike a stale one, it can still be selected in. */
+  dimmed?: boolean
+  /** The one line Design says that error in, which shows it in Code. */
+  stoppedBy?: { readonly text: string; readonly title: string; readonly onOpen: () => void }
   /** Set while the preview has stopped: a tap anywhere on the phone starts it again, and presses nothing in it. */
   onRestart?: () => void
   /** Why each screen the gallery couldn't draw isn't drawn, as its warning says. */
@@ -198,9 +203,6 @@ const PANE_PADDING = 28
 /** How many state phones may be drawn at once, each being its own compile. */
 const STATE_BUDGET = 8
 
-/** How each arrow is drawn and labeled: the wording designers read on the canvas. */
-const ARROWS: Readonly<Record<CanvasArrow['kind'], string>> = { root: 'Start', push: 'Push', sheet: 'Sheet', cover: 'Full screen', popover: 'Popover' }
-
 /**
  * The device's own chrome sits above everything the app can draw.
  *
@@ -240,6 +242,8 @@ export function DevicePane({
   device,
   tree: committedTree,
   notice,
+  dimmed = false,
+  stoppedBy,
   onRestart,
   pagesNotDrawn,
   revision,
@@ -887,6 +891,7 @@ export function DevicePane({
     return (
     <div style={{ colorScheme: preview.colorScheme, position: 'absolute', top: 0, left: 0, transform: `scale(${at})`, transformOrigin: 'top left' }}>
       <DeviceFrame device={device} chrome={chrome}>
+        <div className={dimmed && !shownStale && !state ? styles.dimmed : undefined}>
         <RenderTreeView
           key={scrollMemory.identity}
           scrollPositions={scrollMemory.positions}
@@ -912,6 +917,7 @@ export function DevicePane({
               }
             : {})}
         />
+        </div>
         {live && notice ? <p className={styles.stateProblem} role="status">{notice.title}: {notice.detail}</p> : null}
         {live && onRestart ? <button type="button" className={styles.restartPhone} aria-label="Start the preview again" onClick={onRestart} /> : null}
         <StatusBar device={device} colorScheme={preview.colorScheme} />
@@ -942,6 +948,8 @@ export function DevicePane({
               ? 'Pick a highlighted screen · Escape to cancel'
               : dragTarget
               ? `Drop ${dragTarget.position} ${dragTarget.name}`
+              : stoppedBy
+              ? <button type="button" className={styles.stoppedBy} data-testid="stopped-by" title={stoppedBy.title} onClick={stoppedBy.onOpen}>{stoppedBy.text}</button>
               : gallery
               ? pagesNotDrawn?.length
                 // The reasons are here, a hover away, and in the warnings list beside the status (D11).
@@ -1050,7 +1058,7 @@ export function DevicePane({
                 <defs><marker id={`${arrowId}-head`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" stroke="none" /></marker></defs>
                 {arrows.map(arrow => <g key={arrow.id}>
                   <path d={arrow.d} data-kind={arrow.kind} markerEnd={`url(#${arrowId}-head)`} />
-                  <text x={arrow.label.x} y={arrow.label.y} textAnchor="middle">{ARROWS[arrow.kind]}</text>
+                  <text x={arrow.label.x} y={arrow.label.y} textAnchor="middle">{PAGE_KINDS[arrow.kind].label}</text>
                 </g>)}
               </svg>
               {/* The screen frame: everything inside it is a state of that screen. */}
@@ -1109,7 +1117,7 @@ export function DevicePane({
                     // This phone is the screen with the app's own data, so choosing it
                     // also steps out of whichever state was being shown.
                     if (canvas?.activeState && statesOf?.(page).some(state => scenarioKey(state) === canvas.activeState)) canvas.onSelectState?.(page, null)
-                  }} aria-label={`Edit ${page.name}`} title={page.parentId ? `Reached from ${pages!.find(parent => parent.id === page.parentId)?.name ?? 'another screen'}` : 'Screen'}>{page.name}</button>{page.id === selectedPageId ? <span className={styles.liveTag}>Editing</span> : null}</figcaption>
+                  }} aria-label={`Edit ${page.name}`} title={page.parentId ? `Reached from ${pages!.find(parent => parent.id === page.parentId)?.name ?? 'another screen'}` : PAGE_KINDS[reachedAs(page, false)].reached('')}>{page.name}</button>{page.id === selectedPageId ? <span className={styles.liveTag}>Editing</span> : null}</figcaption>
                 </figure>
               })}
             </div>
@@ -1190,11 +1198,13 @@ function StatePhone({ page, scenario, options, device, preview, active, onSelect
     allPages: true,
   })
   const tree = result?.pages?.find(item => item.id === page.id)?.tree ?? null
+  // While errors stop the code, the state's last drawing is kept, dimmed under why.
+  const kept = !!result?.renderTree?.notice
   const chrome = useMemo(() => deviceChrome(device), [device])
-  const problem = stateProblem({ page: page.name, compiled: !!result, diagnostics: result?.diagnostics ?? [], drawn: !!tree, stale, workerError })
+  const problem = stateProblem({ page: page.name, compiled: !!result, diagnostics: result?.diagnostics ?? [], drawn: !!tree && !kept, stale, workerError })
   return (
     <figure className={styles.pageCard} data-testid="canvas-state" data-state={scenario.name} data-active={active || undefined}>
-      <div style={{ position: 'relative', width: chrome.width, height: chrome.height }} data-busy={!tree || stale || undefined}>
+      <div className={!tree || stale || kept ? styles.dimmed : undefined} style={{ position: 'relative', width: chrome.width, height: chrome.height }} data-busy={!tree || stale || kept || undefined}>
         {draw(tree)}
         {problem ? <p className={styles.stateProblem} role="status">{problem}</p> : null}
       </div>

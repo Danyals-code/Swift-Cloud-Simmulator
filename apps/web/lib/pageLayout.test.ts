@@ -18,7 +18,7 @@ it('places a sheet opened from several screens once, beside the first opener, wi
   const same = (p: PagePreview) => p.id.split('·')[0]!
   expect(shape(pageSlots(pages, undefined, same))).toEqual([['Home', 0, 0, 0], ['Profile', 0, 1, 0], ['Edit·1', 0, 1, 1]])
   const layout = canvasLayout(pages, { frame: { width: 100, height: 200 }, statesOf: () => [], expanded: new Set(), showAllStates: false, collapsedLanes: new Set(), laneNames: ['Home'], sameScreen: same })
-  expect(layout.arrows).toEqual([{ from: 'Home', to: 'Profile', kind: 'push' }, { from: 'Home', to: 'Edit·1', kind: 'sheet' }, { from: 'Profile', to: 'Edit·1', kind: 'sheet' }])
+  expect(layout.arrows).toEqual([{ from: 'Home', to: 'Profile', kind: 'destination' }, { from: 'Home', to: 'Edit·1', kind: 'sheet' }, { from: 'Profile', to: 'Edit·1', kind: 'sheet' }])
 })
 
 it('shows one tab with its screens when the others are hidden, and keeps orphans and unlinked screens visible', () => {

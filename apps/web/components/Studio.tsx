@@ -25,6 +25,7 @@ import { useCompiler } from '../lib/useCompiler'
 import type { DragCommit } from '../lib/canvasDrag'
 import { clampNumber } from '../lib/numberScrub'
 import { phoneView } from '../lib/phoneView'
+import { errorLine, stoppedEditProblem, stoppingError } from '../lib/stoppingError'
 /**
  * Problems, output, timings and coverage, fetched when the panel is opened.
  *
@@ -47,7 +48,7 @@ import { AppSettings } from './settings/AppSettings'
 import { AppNavigationSettings } from './settings/AppNavigationSettings'
 import { ScreenSettings } from './settings/ScreenSettings'
 import { AppearancePicker, DevicePicker, TextSizePicker } from './PreviewEnvironment'
-import { designScreens, designTree, liveDesignScreen, screenRemovalRefusal, type DesignTree } from '../lib/designTree'
+import { canvasLanes, designScreens, designTree, focusedDesignScreen, liveDesignScreen, screenRemovalRefusal, type DesignTree } from '../lib/designTree'
 import { sourceLayerAround, sourceLayerDrawn, sourceLayerLabel, sourceLayerNames, sourceLayerType } from '../lib/sourceLayers'
 const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane), { ssr: false })
 import { ShortcutsDialog } from './ShortcutsDialog'
@@ -84,7 +85,7 @@ const NO_IDS: readonly string[] = []
 const NO_DIAGNOSTICS: never[] = []
 const NO_GROUPS: readonly (readonly string[])[] = []
 const NO_MULTI_SELECTION = { page: '', files: [], ids: [] }
-const EMPTY_TREE: DesignTree = { navigation: 'none', lanes: [], sheets: [], detached: [], components: [] }
+const EMPTY_TREE: DesignTree = { navigation: 'none', lanes: [], sheets: [], detached: [], previews: [], components: [] }
 
 /** Changes the studio's own records for `project`: one Undo step, named `op` in the event log. */
 function commitStudioRecords(project: Project, after: StudioMetadata, op: StudioChange): string | null {
@@ -382,6 +383,10 @@ export function Studio() {
   const latestTree = result?.renderTree ?? null
   if (latestTree && !latestTree.notice && (lastRan?.tree !== latestTree || lastRan.key !== phoneKey)) setLastRan({ key: phoneKey, tree: latestTree })
   const phone = phoneView(latestTree, lastRan?.key === phoneKey ? lastRan.tree : null, workerError)
+  /** The error that stops the code, while the phone and the canvas keep the last drawing: where to fix it, and why an edit waits. */
+  const stoppedBy = useMemo(() => stoppingError(result, files), [result, files])
+  /** In Design the last drawing, dimmed under the error, can still be selected in, as it was drawn. */
+  const keptDrawing = phone.dimmed && !phone.stopped && !!stoppedBy && mode === 'design' && inspecting
 
   const activeFile = useMemo(
     () => (project && activeFileId ? findFile(project, activeFileId) : undefined),
@@ -711,10 +716,12 @@ export function Studio() {
     const label = designEvent(operation, landsOn)
     // Said where the designer is looking and logged, as the planner's refusals are (C7).
     const blocked = busyEditProblem({ current: !!project && state.project === project, stale, applying: editingRef.current })
-    if (blocked || !project) {
-      setEditNote(blocked)
+    // While an error elsewhere stops the code, the canvas is the last drawing, which no edit changes.
+    const waits = blocked ? null : stoppedEditProblem(stoppedBy, target.file)
+    if (blocked || waits || !project) {
+      setEditNote(waits && stoppedBy ? { text: waits, location: { file: stoppedBy.file, offset: stoppedBy.offset } } : blocked)
       if (project) eventLog.record(project.id, { ...label, refused: true })
-      return blocked
+      return blocked ?? waits
     }
     editingRef.current = true
     setPreparingEdit(true)
@@ -771,7 +778,7 @@ export function Studio() {
       setEditNote(changed ? operation.kind === 'insert' || operation.kind === 'paste' ? 'View added. You can edit its properties or undo this change.' : operation.kind === 'delete' ? 'View deleted. Undo is available.' : operation.kind === 'behavior' ? 'Interaction updated. Switch to Preview to try it.' : 'Design updated.' : null)
       return null
     } finally { editingRef.current = false; setPreparingEdit(false) }
-  }, [project, stale, planDesignEdit, result, authoringNode, hidden.views, followMeasureTarget])
+  }, [project, stale, stoppedBy, planDesignEdit, result, authoringNode, hidden.views, followMeasureTarget])
 
   /**
    * Giving a screen its first state.
@@ -840,7 +847,7 @@ export function Studio() {
   const tree = liveTree ?? (lastTree && lastTree.projectId === project?.id ? lastTree.tree : EMPTY_TREE)
   const treeScreens = useMemo(() => designScreens(tree), [tree])
   // In Preview it is the screen the running app shows: a pushed one, not the tab it was pushed from.
-  const focusedScreen = treeScreens.find(screen => screen.id === designPage?.id) ?? (designPage ? undefined : liveDesignScreen(tree, result?.viewHierarchy, result?.authoring)) ?? treeScreens.find(screen => screen.id === focusedPage?.id) ?? treeScreens[0]
+  const focusedScreen = focusedDesignScreen(treeScreens, { selected: designPage?.id, focused: focusedPage?.id, live: () => liveDesignScreen(tree, result?.viewHierarchy, result?.authoring) })
   // Keep the view inspector mounted while its source is recompiling. Switching
   // briefly to screen settings used to reset every modifier and scroll position.
   const updatingSelectedView = stale && layerSelection?.projectId === project?.id && !!layerSelection?.anchor
@@ -855,9 +862,10 @@ export function Studio() {
    */
   const scenarios = project?.studio?.scenarios ?? NO_FILES
   const activeState = scenario ? scenarioKey(scenario) : undefined
+  const lanes = useMemo(() => canvasLanes(tree), [tree])
   const canvas = useMemo(() => !designPages || !project ? undefined : {
-    laneNames: [...tree.lanes.map(lane => lane.name), ...(tree.detached.length ? ['Not linked yet'] : [])],
-    laneIcons: [...tree.lanes.map(lane => lane.root.page.icon), ...(tree.detached.length ? [undefined] : [])],
+    laneNames: lanes.names,
+    laneIcons: lanes.icons,
     sameScreen: (page: PagePreview) => screenDefinition(snapshot, page)?.name ?? page.id,
     ...(visibleRootId ? { visibleRootId } : {}),
     statesOf: (page: PagePreview) => {
@@ -879,7 +887,7 @@ export function Studio() {
       deploymentTarget: project.manifest.deploymentTarget,
       previewTarget: project.manifest.previewTarget,
     },
-  }, [designPages, project, tree, snapshot, visibleRootId, scenarios, activeState, openPage, files, images])
+  }, [designPages, project, lanes, snapshot, visibleRootId, scenarios, activeState, openPage, files, images])
 
   /** The App's own navigation is written against the project rather than a view. */
   const navigationCommand = useCallback((operation: NavigationOperation) => {
@@ -1831,11 +1839,17 @@ export function Studio() {
                 device={device}
                 tree={phone.tree}
                 notice={phone.notice}
+                dimmed={keptDrawing}
+                stoppedBy={mode === 'design' && stoppedBy ? {
+                  text: `${keptDrawing ? 'Showing the last drawing · ' : ''}${errorLine(stoppedBy)}`,
+                  title: `${stoppedBy.message} Click to show it in Code.`,
+                  onOpen: () => revealSpanIn(stoppedBy.file, stoppedBy.offset),
+                } : undefined}
                 onRestart={phone.stopped ? run : undefined}
                 revision={result?.revision}
                 selectedRenderGroups={selectionOutlines}
                 hoveredRenderGroups={hoveredRenderGroups}
-                stale={stale || preparingEdit || phone.dimmed}
+                stale={stale || preparingEdit || phone.dimmed && !keptDrawing}
                 onEvent={dispatch}
                 inspecting={inspecting}
                 onInspectSelect={inspectSelect}

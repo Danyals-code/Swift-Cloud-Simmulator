@@ -962,7 +962,6 @@ export class Checker {
     let reason: string | undefined
     if (callee.kind === 'identifier' && !scope.has(callee.name) && !this.types.has(callee.name)) {
       feature = callee.name
-      if (callee.name === 'NavigationStack' && labels.has('path')) reason = 'bound navigation paths are not synchronized; use NavigationLink destinations in the preview'
       if (callee.name === 'TextField' && (labels.has('value') || labels.has('format') || labels.has('formatter'))) reason = 'value/format/formatter bindings are not implemented; use text: with a String binding'
       if (callee.name === 'TextField' && labels.has('axis')) reason = 'axis-based multiline fields are not implemented; use TextEditor for multiline editing'
       if (callee.name === 'Link' || callee.name === 'ShareLink') reason = 'it is drawn, but tapping it opens nothing; opening URLs and the system share sheet are not implemented'
@@ -978,7 +977,6 @@ export class Checker {
       if ((callee.name === 'LazyVStack' || callee.name === 'LazyHStack') && labels.has('pinnedViews')) reason = 'its section headers and footers scroll with the content, as pinnedViews is not applied by the preview'
     } else if (callee.kind === 'memberAccess' && rootsInAView(callee.base)) {
       feature = `.${callee.member}`
-      if (callee.member === 'navigationDestination' && (labels.has('isPresented') || labels.has('item'))) reason = 'binding-driven destinations are not implemented; use NavigationLink with destination: or value: and navigationDestination(for:)'
       if (callee.member === 'presentationBackground' && (expr.trailingClosure || labels.has('content'))) reason = 'custom view backgrounds are not implemented; use a Color or Material'
       if (callee.member === 'contextMenu' && labels.has('forSelectionType')) reason = 'selection-based context menus are not implemented; use contextMenu with action buttons'
       if (callee.member === 'contextMenu' && labels.has('preview')) reason = 'custom menu previews are not implemented; menu actions are available'

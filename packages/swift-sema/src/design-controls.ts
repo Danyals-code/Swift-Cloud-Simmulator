@@ -41,9 +41,10 @@ type Marked = Expr & { [VIEW_BASE]?: CallExpr }
 /**
  * Marks `expr` as a view its modifiers are chained on, standing where a call would, with no
  * arguments, written across `span`: the parentheses around a sum, or the expression itself.
+ * `call` is the call it stands for when that is another, as an alert's title is its `Text`.
  */
-export function markViewBase(expr: Expr, span: SourceSpan = expr.span): void {
-  (expr as Marked)[VIEW_BASE] ??= { kind: 'call', callee: expr, args: [], trailingClosure: null, span }
+export function markViewBase(expr: Expr, span: SourceSpan = expr.span, call: CallExpr = { kind: 'call', callee: expr, args: [], trailingClosure: null, span }): void {
+  (expr as Marked)[VIEW_BASE] ??= call
 }
 
 /** Whether `expr` is marked as a view with no call of its own (`markViewBase`). */

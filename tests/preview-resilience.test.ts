@@ -182,13 +182,13 @@ describe('the preview with an error in code no drawn screen runs', () => {
 
   it('draws nothing new when the screen runs the code with the error, and says why', () => {
     const result = run([home('        Text("Total \\(Service().load())")'), services])
-    expect(result.renderTree?.notice).toEqual({ title: '1 error', detail: "Cannot find 'missingThing' in scope." })
+    expect(result.renderTree?.notice).toEqual({ title: '1 error', detail: "Cannot find 'missingThing' in scope.", span: expect.objectContaining({ file: 'Sources/Services.swift' }) })
   })
 
   it('draws nothing new when the screen runs it as it appears, and names the error it ran', () => {
     const typo: SourceFile = { id: 'Sources/Typo.swift', text: 'func unused() -> Int { anotherTypo }\n' }
     const result = run([home('        Text("Total \\(total)")\n            .onAppear { total = Service().load() }'), typo, services])
-    expect(result.renderTree?.notice).toEqual({ title: '2 errors', detail: "Cannot find 'missingThing' in scope." })
+    expect(result.renderTree?.notice).toEqual({ title: '2 errors', detail: "Cannot find 'missingThing' in scope.", span: expect.objectContaining({ file: 'Sources/Services.swift' }) })
   })
 
   it('stops a tap that runs the code with the error, naming the error', () => {

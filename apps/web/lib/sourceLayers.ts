@@ -1,4 +1,5 @@
 import { CONTENT_SLOT_NAMES, LAYOUT_WORDS, helperPlaces, isHelperCall, isHelperDefinition, nameInWords, reconcileAuthoringSelection, type AuthoringNode, type AuthoringSelection, type AuthoringSnapshot, type HiddenViewInfo, type SourceFile, type SourceSpan, type ViewLayer } from '@studio/shared'
+import { PAGE_SLOTS } from './pageKinds'
 
 export interface SourceLayerNavigation {
   readonly snapshot: AuthoringSnapshot
@@ -203,19 +204,17 @@ export interface SourceLayerRow {
   readonly label?: string
 }
 
-const SEPARATE_PAGES = new Set(['Sheet', 'Full screen cover', 'Destination'])
-
 /** Hidden comments belong to the current phone's source scope, including empty containers. */
 export function sourceLayerHiddenInScope(snapshot: AuthoringSnapshot, hidden: HiddenViewInfo, scope: readonly AuthoringNode[]): boolean {
   if (!scope.length) return true
   const nodes = new Map(snapshot.nodes.map(node => [node.id, node]))
   const contains = (node: AuthoringNode) => node.source.file === hidden.file && node.source.start <= hidden.offset && node.source.end >= hidden.offset
   const paths = scope.map(node => [node, ...sourceLayerAncestors(nodes, node.id).map(id => nodes.get(id)!)])
-  const bounds = paths.map(path => path.find(node => node.kind === 'branch' && SEPARATE_PAGES.has(node.name)) ?? path.find(node => node.kind === 'definition') ?? path[0]!)
+  const bounds = paths.map(path => path.find(node => node.kind === 'branch' && PAGE_SLOTS.has(node.name)) ?? path.find(node => node.kind === 'definition') ?? path[0]!)
   if (!bounds.some(contains)) return false
   // A main screen declaration can also contain inline destinations and sheets.
   // Their hidden views remain with that separate screen, not its parent phone.
-  return snapshot.nodes.filter(node => node.kind === 'branch' && SEPARATE_PAGES.has(node.name) && contains(node))
+  return snapshot.nodes.filter(node => node.kind === 'branch' && PAGE_SLOTS.has(node.name) && contains(node))
     .every(slot => paths.some(path => path.some(node => node.id === slot.id)))
 }
 
@@ -291,7 +290,7 @@ export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceL
   const pageContexts = runtime?.runtimeLayers ? new Set(snapshot.nodes.filter(node => node.runtimeIds.some(id => runtimeIds?.has(id))).flatMap(node => [node.id, ...sourceLayerAncestors(nodes, node.id)])) : undefined
   const ancestors = sourceLayerAncestors(nodes, selected)
   const selectionNode = selected ? nodes.get(selected) : undefined
-  const selectedContext = selectionNode && (['definition', 'template'].includes(selectionNode.kind) || selectionNode.kind === 'branch' && SEPARATE_PAGES.has(selectionNode.name)) && (!pageContexts || pageContexts.has(selectionNode.id)) && navigation.dismissedEntry !== selected ? selectionNode : undefined
+  const selectedContext = selectionNode && (['definition', 'template'].includes(selectionNode.kind) || selectionNode.kind === 'branch' && PAGE_SLOTS.has(selectionNode.name)) && (!pageContexts || pageContexts.has(selectionNode.id)) && navigation.dismissedEntry !== selected ? selectionNode : undefined
   const entry = selectedContext ?? (navigation.entered && (!pageContexts || pageContexts.has(navigation.entered)) && (!selected || selected === navigation.entered || ancestors.includes(navigation.entered)) ? nodes.get(navigation.entered) : undefined)
   const appRoots = snapshot.roots.filter(id => nodes.get(id)?.children.some(child => nodes.get(child)?.name === 'WindowGroup'))
   const screens = new Set<string>()
@@ -304,7 +303,7 @@ export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceL
   const shared = new Set<string>()
   const flatten = (ids: readonly string[], seen = new Set<string>()): string[] => ids.flatMap(id => {
     const node = nodes.get(id)
-    if (!node || seen.has(id) || node.kind === 'branch' && SEPARATE_PAGES.has(node.name)) return []
+    if (!node || seen.has(id) || node.kind === 'branch' && PAGE_SLOTS.has(node.name)) return []
     if (node.kind === 'branch' && sourceLayerNotShown(snapshot, node, runtimeIds)) return node.name === 'Condition' ? flatten(node.children.filter(child => nodes.get(child)?.name === 'Otherwise'), new Set([...seen, id])) : []
     if (sourceLayerIsVisual(node)) return [id]
     const children = flatten(node.children, new Set([...seen, id]))

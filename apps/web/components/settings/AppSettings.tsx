@@ -33,8 +33,9 @@ export function AppSettings({ project, tree, snapshot, screenViews, busy, onRena
   const [saved, setSaved] = useState(project.manifest.name)
   const [nameError, setNameError] = useState(false)
   if (saved !== project.manifest.name) { setSaved(project.manifest.name); setName(project.manifest.name) }
-  // Every screen Layers lists, a pushed one too: tab roots alone read "1 screen" for Home and its detail (D13).
-  const screens = designScreens(tree).length
+  // Every screen of the app Layers lists, a pushed one too: tab roots alone read "1 screen" for Home and its detail (D13).
+  // A `#Preview` is drawn on its own, and is none of the app's.
+  const screens = designScreens(tree).filter(screen => screen.presentation !== 'preview').length
   return <div className={styles.panel} data-testid="app-settings">
     <div className={styles.lede}><strong>{project.manifest.name}</strong><small>{screens} {screens === 1 ? 'screen' : 'screens'} · {tree.components.length} {tree.components.length === 1 ? 'component' : 'components'} · iOS {project.manifest.deploymentTarget}</small></div>
     <section className={styles.section} aria-label="App">

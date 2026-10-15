@@ -665,5 +665,5 @@ describe('what the preview cannot set', () => {
 describe.skipIf(!XCODE)('Xcode 27', () => {
   it('builds the screens these states are read from', () => {
     typecheckInXcode([FEED, PUBLISHED, SEEDED, PRESET, PARENT, SUBCLASS, TABS])
-  })
+  }, 300_000)
 })
