@@ -1884,11 +1884,13 @@ export function Studio() {
           target={addTarget}
           assets={project.assets ?? []}
           onImage={(name, asset) => placeImage(name, addTargetLayer ?? selectedLayer, asset ? [asset] : [])}
+          deploymentTarget={project.manifest.deploymentTarget}
           onClose={() => setAdding(false)}
           onChoose={(snippet) => {
             setAdding(false)
-            // A swipe action or a context menu goes on the selected view; a view into a selected slot (Wave 4a).
-            const { operation, on, problem } = paletteEdit(snippet, authoringNode)
+            // A swipe action or a context menu goes on the selected view; a view into a selected slot (Wave 4a);
+            // a search field or a toolbar button on the screen in focus (Wave 4c).
+            const { operation, on, problem } = paletteEdit(snippet, authoringNode, focusedScreen && screenDefinition(snapshot, focusedScreen.page), project.manifest.deploymentTarget)
             if (problem) refuseEdit(operation, problem, authoringNode)
             else if (on) void performDesignEdit(on.source, on.fingerprint, on.owner, operation)
             else void applyEdit(operation, addTargetLayer)

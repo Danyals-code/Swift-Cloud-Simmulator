@@ -1,6 +1,7 @@
-import type { AuthoringNode } from '@studio/shared'
+import { needsNewerIOS, type AuthoringNode } from '@studio/shared'
 import { forEachChild, type CallExpr, type Expr, type Node, type Stmt, type StructDecl } from '@studio/swift-syntax'
-import { SYSTEM_COLORS, viewCallChain, type ControlKind } from './design-controls'
+import { SYSTEM_COLORS, viewCallChain, type ControlKind, type ControlRecipe } from './design-controls'
+import { modifierName } from './authoring-border'
 import { MATERIALS, materialThickness, type AddControl } from './design-advanced-controls'
 import { modifierSegment } from './authoring-modifiers'
 
@@ -28,7 +29,8 @@ const GRABBERS = ['Automatic', 'Visible', 'Hidden']
 /** The modifiers that open a page of their own, whose views set that page's settings, not this one's. */
 const OTHER_PAGES: ReadonlySet<string> = new Set(['sheet', 'popover', 'fullScreenCover', 'navigationDestination', 'alert', 'confirmationDialog'])
 
-const memberOf = (call: CallExpr) => call.callee.kind === 'memberAccess' ? call.callee.member : ''
+/** Why a setting can't be added to a view whose last modifier is the project's own, which may not return a view that takes it. */
+export const OWN_MODIFIER = 'This view has a modifier of the project’s own. Add this in Code.'
 
 /** A sheet setting's modifier written further in than the shown view's call, and whether the canvas certainly draws what it sets. */
 interface Inside { readonly call: CallExpr; readonly own: boolean; readonly certain: boolean }
@@ -46,7 +48,7 @@ const SHEET_MODIFIERS: ReadonlySet<string> = new Set(['presentationDetents', 'pr
 function writtenInside(context: SheetContext): ReadonlyMap<string, readonly Inside[]> {
   const found = new Map<string, Inside[]>(), seen = new Set<string>()
   const record = (call: CallExpr, own: boolean, certain: boolean) => {
-    const name = memberOf(call)
+    const name = modifierName(call)
     if (!SHEET_MODIFIERS.has(name)) return
     const calls = found.get(name)
     if (calls) calls.push({ call, own, certain })
@@ -79,7 +81,7 @@ function writtenInside(context: SheetContext): ReadonlyMap<string, readonly Insi
   }
   /** What a modifier holds: its own views, as a background's, which the canvas doesn't read a sheet's settings from. */
   const held = (call: CallExpr, own: boolean) => {
-    if (OTHER_PAGES.has(memberOf(call))) return
+    if (OTHER_PAGES.has(modifierName(call))) return
     for (const arg of call.args) loose(arg.value, own)
     if (call.trailingClosure) loose(call.trailingClosure, own)
   }
@@ -93,7 +95,7 @@ function writtenInside(context: SheetContext): ReadonlyMap<string, readonly Insi
   const loose = (node: Node, own: boolean): void => {
     if (node.kind === 'call') {
       record(node, own, false)
-      if (OTHER_PAGES.has(memberOf(node))) { if (node.callee.kind === 'memberAccess' && node.callee.base) loose(node.callee.base, own); return }
+      if (OTHER_PAGES.has(modifierName(node))) { if (node.callee.kind === 'memberAccess' && node.callee.base) loose(node.callee.base, own); return }
       const struct = node.callee.kind === 'identifier' ? context.structNamed(node.callee.name) : undefined
       if (struct) declared(struct, own, false)
     }
@@ -107,6 +109,38 @@ function writtenInside(context: SheetContext): ReadonlyMap<string, readonly Insi
   const closure = context.base.trailingClosure
   if (closure) statements(closure.body.statements, false, !closure.params.length)
   return found
+}
+
+type Patch = ReturnType<ControlRecipe['patch']>
+
+/**
+ * Writes a modifier straight after `call`, a view's call or one of its modifiers: on a line of
+ * its own, lined up with it, where that modifier is on one.
+ */
+export function writeAfter(text: string, call: CallExpr): (modifier: string) => Patch {
+  return modifier => {
+    const end = call.span.end, dot = call.callee.kind === 'memberAccess' && call.callee.base ? text.lastIndexOf('.', call.callee.memberSpan.start) : -1
+    const lined = dot >= 0 && text.slice(call.callee.kind === 'memberAccess' ? call.callee.base!.span.end : end, dot).includes('\n')
+    return { start: end, end, text: lined ? `\n${/^[ \t]*/.exec(text.slice(text.lastIndexOf('\n', dot) + 1, dot))![0]}${modifier}` : modifier }
+  }
+}
+
+/** Why a setting can't be taken away: a note or an #if among the view's modifiers holds its modifier where it is. */
+export const HELD = 'A note or an #if in this view’s modifiers keeps this setting where it is. Change it in Code.'
+
+/**
+ * How a setting written as one modifier, `name`, is changed (Wave 4c), for a sheet's settings,
+ * Safe area and Dots background alike: given its parentheses, `call`'s are rewritten in place,
+ * or a new one is written after `after`; given null, `call` is taken away with its line, which
+ * a note or an #if beside it refuses (`problem`), and with no call nothing is written (`none`).
+ */
+export function modifierSetting(expr: Expr, text: string, name: string, call: CallExpr | undefined, after: CallExpr, none: () => Patch): { write: (args: string | null) => Patch; problem: (args: string | null) => string | null } {
+  const removal = call && modifierSegment(expr, text, call), append = writeAfter(text, after)
+  return {
+    write: args => args === null ? removal ? { start: removal.start, end: removal.end, text: '' } : none()
+      : call?.callee.kind === 'memberAccess' ? { start: call.callee.memberSpan.end, end: call.span.end, text: args } : append(`.${name}${args}`),
+    problem: args => args === null && call && !removal ? HELD : null,
+  }
 }
 
 /**
@@ -123,10 +157,7 @@ function writtenInside(context: SheetContext): ReadonlyMap<string, readonly Insi
 export function sheetControls(context: SheetContext, add: AddControl): void {
   const { node, expr, base, modifiers, text, target, colors, appendable } = context
   const written = (value: Expr) => (value.span.file === node.source.file ? text : context.textOf(value.span.file)).slice(value.span.start, value.span.end)
-  const last = modifiers.at(-1), end = last?.span.end ?? base.span.end
-  // On a line of its own where the view's last modifier is on one.
-  const lined = last?.callee.kind === 'memberAccess' && text.slice(last.callee.base?.span.end ?? end, text.lastIndexOf('.', last.callee.memberSpan.start)).includes('\n')
-  const append = (modifier: string) => ({ start: end, end, text: lined ? `\n${/^[ \t]*/.exec(text.slice(text.lastIndexOf('\n', last!.callee.kind === 'memberAccess' ? last!.callee.memberSpan.start : end) + 1))![0]}${modifier}` : modifier })
+  const end = modifiers.at(-1)?.span.end ?? base.span.end
   const none = () => ({ start: end, end, text: '' })
   const insideAll = writtenInside(context)
   /** The value a call writes, by `read` from its one unlabelled argument; undefined for anything else. */
@@ -139,7 +170,7 @@ export function sheetControls(context: SheetContext, add: AddControl): void {
    * the call the canvas draws its value from, when it can be read exactly.
    */
   const setting = (id: string, label: string, modifier: string, minimum: number, what: string, kind: ControlKind, absent: string, read: (arg: Expr | undefined) => string | undefined, write: (value: string) => string | null, options?: readonly string[], description?: string): { call: CallExpr; reason?: string } | undefined => {
-    const calls = modifiers.filter(m => memberOf(m) === modifier), call = calls[0]
+    const calls = modifiers.filter(m => modifierName(m) === modifier), call = calls[0]
     const inside = insideAll.get(modifier)
     if (inside) {
       const one = !call && inside.length === 1 && inside[0]!.certain ? inside[0]! : undefined
@@ -150,16 +181,12 @@ export function sheetControls(context: SheetContext, add: AddControl): void {
       return { call: one.call, reason }
     }
     const shown = !call ? absent : calls.length === 1 ? valueOf(call, read) : undefined
-    const gate = target < minimum ? `Needs iOS ${minimum} or newer. Change the deployment target to set it.` : undefined
     if (shown === undefined) return void add(id, label, 'text', asWritten(call!) || written(call!), none, undefined, undefined, undefined, 'Shown as the code writes it.', call!.span, `This sheet’s ${what} is set in code. Change it in Code.`)
-    const removal = call && modifierSegment(expr, text, call)
-    add(id, label, kind, shown, v => {
-      const swift = write(v)
-      // One that can't be taken away cleanly is refused by `problem` below, so this writes nothing.
-      if (swift === null) return removal ? { ...removal, text: '' } : none()
-      return call ? { start: call.callee.kind === 'memberAccess' ? call.callee.memberSpan.end : call.span.start, end: call.span.end, text: swift.slice(modifier.length + 1) } : append(swift)
-    }, options, kind === 'pt' ? 0 : undefined, undefined, description, call?.span, gate ?? (!call && !appendable ? 'This view has a modifier of the project’s own. Add this in Code.' : undefined),
-    v => write(v) === null && call && !removal ? 'A note or an #if in this view’s modifiers keeps this setting where it is. Change it in Code.' : null)
+    // Its parentheses, or null to take it away; one that can't be taken away cleanly is refused by `problem`, so this writes nothing.
+    const args = (v: string) => { const swift = write(v); return swift === null ? null : swift.slice(modifier.length + 1) }
+    const setting = modifierSetting(expr, text, modifier, call, modifiers.at(-1) ?? base, none)
+    add(id, label, kind, shown, v => setting.write(args(v)), options, kind === 'pt' ? 0 : undefined, undefined, description, call?.span, target < minimum ? needsNewerIOS(minimum, 'set') : !call && !appendable ? OWN_MODIFIER : undefined,
+      v => setting.problem(args(v)))
     return call && { call }
   }
   if (node.presented === 'sheet') {

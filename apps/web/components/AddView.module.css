@@ -28,6 +28,10 @@
 .name { flex-shrink: 0; color: var(--color-xc-text); font-size: var(--text-body); font-weight: 600; }
 .hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-xc-text-2); font-size: var(--text-body); }
 .group { flex-shrink: 0; color: var(--color-xc-text-3); font-size: var(--text-caption); }
+/* A view newer than the app's iOS: listed, off, with the iOS it needs on a line of its own (Wave 4c). */
+.row[aria-disabled='true'] { flex-wrap: wrap; row-gap: 0; height: auto; min-height: 32px; padding-block: 6px; }
+.row[aria-disabled='true'] .name, .row[aria-disabled='true'] .hint { color: var(--color-xc-text-3); }
+.gate { flex-basis: 100%; color: var(--color-xc-text-3); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
 .empty { margin: 0; padding: 12px 16px; color: var(--color-xc-text-3); font-size: var(--text-footnote); }
 .footer { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; padding: 0 16px; border-top: 1px solid var(--color-xc-line-soft); background: var(--color-xc-bar-raised); color: var(--color-xc-text-3); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
 

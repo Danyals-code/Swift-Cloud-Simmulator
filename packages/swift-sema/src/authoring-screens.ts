@@ -1,5 +1,5 @@
-import { deploymentVersion, SCREEN_REMOVAL_REFUSALS } from '@studio/shared'
-import type { AuthoringNode, AuthoringOperation, DesignValue, SourceFile, SourceSpan } from '@studio/shared'
+import { deploymentVersion, isContainerLayout, titledContainer, SCREEN_REMOVAL_REFUSALS } from '@studio/shared'
+import type { AuthoringNode, AuthoringOperation, ContainerLayout, DesignValue, SourceFile, SourceSpan } from '@studio/shared'
 import { afterOffMarkers, forEachChild, Lexer, Parser, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { Checker } from './checker'
@@ -14,6 +14,18 @@ type ScreenOperation = Extract<AuthoringOperation, { kind: 'screen-create' | 'sc
 
 /** Where a screen's own file goes in a project that follows the shape. */
 export const screenFile = (ctx: FeatureContext, name: string) => `${sourceRoot(ctx)}Features/${name.replace(/Screen$/, '') || name}/${name}.swift`
+
+/**
+ * What a new screen's body starts as, by its layout and the app's iOS (Wave 4c). A stack is
+ * padded and framed to fill the screen, which is undefined here; a List, a Form or a Scroll is
+ * the screen, edge to edge, with no padding, size or background to set it in a frame of white.
+ */
+const SCREEN_ROOTS: Readonly<Record<ContainerLayout, ((version: number) => string) | undefined>> = {
+  VStack: undefined, HStack: undefined, ZStack: undefined,
+  List: () => 'List {\n            Text("Row")\n        }',
+  Form: version => `Form {\n            ${titledContainer('Section', '"Section"', version)} {\n                Text("Row")\n            }\n        }`,
+  ScrollView: () => 'ScrollView {\n            VStack(spacing: 16) {\n                Text("Item")\n            }\n        }',
+}
 
 export function screenPatches(ctx: FeatureContext, node: AuthoringNode, operation: ScreenOperation): SourcePatch[] {
   return screenEdit(ctx, node, operation).patches
@@ -31,9 +43,10 @@ export function screenEdit(ctx: FeatureContext, node: AuthoringNode, operation: 
   const file = ctx.files.find(f => f.id === node.source.file)!
   if (operation.kind !== 'screen-remove' && (!identifier(operation.name) || allDeclarations(ctx).some(d => 'name' in d && d.name === operation.name))) throw new Error('Choose a unique screen name.')
   if (operation.kind === 'screen-create') {
-    if (!['VStack', 'HStack', 'ZStack'].includes(operation.layout) || !operation.title.trim() || operation.title.length > 100) throw new Error('Enter a screen name of 1–100 characters and choose its layout.')
-    const container = operation.layout === 'ZStack' ? 'ZStack(alignment: .center)' : `${operation.layout}(spacing: 16)`
-    const text = `\n\nstruct ${operation.name}: View {\n    var body: some View {\n        ${container} {\n            Text(${swiftValue(operation.title)})\n                .font(.title)\n        }\n        .padding(24)\n        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)\n        .background(Color(.systemBackground))\n        .navigationTitle(${swiftValue(operation.title)})\n    }\n}\n`
+    if (!isContainerLayout(operation.layout) || !operation.title.trim() || operation.title.length > 100) throw new Error('Enter a screen name of 1–100 characters and choose its layout.')
+    const title = swiftValue(operation.title), root = SCREEN_ROOTS[operation.layout]?.(deploymentVersion(ctx.deploymentTarget))
+    const view = root ?? `${operation.layout === 'ZStack' ? 'ZStack(alignment: .center)' : `${operation.layout}(spacing: 16)`} {\n            Text(${title})\n                .font(.title)\n        }\n        .padding(24)\n        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)\n        .background(Color(.systemBackground))`
+    const text = `\n\nstruct ${operation.name}: View {\n    var body: some View {\n        ${view}\n        .navigationTitle(${title})\n    }\n}\n`
     if (shapedProject(ctx)) {
       const id = screenFile(ctx, operation.name)
       if (ctx.files.some(existing => existing.id === id)) throw new Error('A screen file with that name already exists.')

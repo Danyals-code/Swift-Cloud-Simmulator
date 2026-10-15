@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ASSET_LIMITS, imageDataURL, type ImageAsset } from '@studio/project-model'
 import { decodeImportedImage, importedImageName } from '../lib/images'
-import { searchCatalog, type ViewSnippet } from '../lib/viewCatalog'
+import { paletteGate, searchCatalog, type ViewSnippet } from '../lib/viewCatalog'
 import { Spotlight } from './Spotlight'
 import { Icon } from './ui/Icon'
 import styles from './AddView.module.css'
@@ -15,6 +15,8 @@ interface Props {
   onClose: () => void
   assets: readonly ImageAsset[]
   onImage: (name: string, asset?: ImageAsset) => Promise<string | null>
+  /** The iOS the app runs on: a view newer than it is listed, off, with why (Wave 4c). */
+  deploymentTarget?: string
 }
 
 /**
@@ -28,8 +30,11 @@ interface Props {
  * Keyboard first: the field takes focus, the arrows move the highlight, Return adds
  * the highlighted view and Escape leaves. That is the whole interaction for someone
  * who knows what they want, and the list is there for everyone else.
+ *
+ * A view newer than the app's iOS stays listed, so it can be found, but can't be chosen,
+ * and says below its name which iOS it needs, as the modifier picker does.
  */
-export function AddView({ target, onChoose, onClose, assets, onImage }: Props) {
+export function AddView({ target, onChoose, onClose, assets, onImage, deploymentTarget }: Props) {
   const [images, setImages] = useState(false)
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -43,6 +48,7 @@ export function AddView({ target, onChoose, onClose, assets, onImage }: Props) {
 
   if (images) return <ImagePicker target={target} assets={assets} onImage={onImage} onBack={() => setImages(false)} onClose={onClose} />
   const choose = (snippet: ViewSnippet, close: (after?: () => void) => void) => {
+    if (paletteGate(snippet, deploymentTarget)) return
     if (snippet.action === 'image') setImages(true)
     else close(() => onChoose(snippet))
   }
@@ -68,12 +74,14 @@ export function AddView({ target, onChoose, onClose, assets, onImage }: Props) {
         </header>
 
         <div className={styles.list} ref={listRef} role="listbox" aria-label="Views">
-          {results.map((snippet, index) => (
-            <button
+          {results.map((snippet, index) => {
+            const gate = paletteGate(snippet, deploymentTarget)
+            return <button
               key={snippet.id}
               type="button"
               role="option"
               aria-selected={index === active}
+              aria-disabled={!!gate || undefined}
               data-active={index === active}
               data-testid={`add-view-${snippet.id}`}
               className={styles.row}
@@ -83,8 +91,9 @@ export function AddView({ target, onChoose, onClose, assets, onImage }: Props) {
               <span className={styles.name}>{snippet.name}</span>
               <span className={styles.hint}>{snippet.hint}</span>
               <span className={styles.group}>{snippet.group}</span>
+              {gate && <span className={styles.gate}>{gate}</span>}
             </button>
-          ))}
+          })}
           {!results.length ? <p className={styles.empty}>Nothing matches “{query}”.</p> : null}
         </div>
 

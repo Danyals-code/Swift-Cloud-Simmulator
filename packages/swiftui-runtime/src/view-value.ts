@@ -71,6 +71,21 @@ export interface ViewValue {
    * row is what gets swiped while that modifier is written on its parent.
    */
   readonly swipe?: SwipeActions
+  /**
+   * A page-style TabView drawn in place, as a carousel (Wave 4c): its one child is the page
+   * shown, and these are its dots.
+   */
+  readonly pager?: PageDots
+}
+
+/**
+ * A pager's dots: each page's, by the path a tap on it is handled at, none when they are
+ * hidden, and whether `.indexViewStyle(.page(backgroundDisplayMode: .always))` puts them on
+ * a background.
+ */
+export interface PageDots {
+  readonly dots: readonly { readonly path: string; readonly selected: boolean }[]
+  readonly background: boolean
 }
 
 /** A list row's swipe actions, and how far it is swiped. */

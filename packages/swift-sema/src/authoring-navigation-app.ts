@@ -1,6 +1,7 @@
 import type { AppNavigationModel, AppTab, NavigationOperation, SourceFile, SourceSpan } from '@studio/shared'
-import { forEachChild, type CallExpr, type Expr, type Node, type Stmt, type StructDecl } from '@studio/swift-syntax'
+import { chainBase, forEachChild, type CallExpr, type Expr, type Node, type Stmt, type StructDecl } from '@studio/swift-syntax'
 import { viewCallChain, swiftString } from './design-controls'
+import { isPageStyle } from './page-style'
 import { allDeclarations, identifier, namedStruct, patch, raw, sourceRoot, type FeatureContext, type SourcePatch } from './authoring-context'
 
 /**
@@ -122,19 +123,46 @@ function labelParts(inside: Node): { name?: LabelPart; icon?: LabelPart } {
 }
 
 /**
+ * The TabView at the root of the app's first screen (Wave 4c): what its WindowGroup shows,
+ * looking through a Group and up to three of the project's own views written there, each
+ * one's body in turn, as the preview draws them. In any style it is the app's tabs; a
+ * page-style TabView anywhere else is a carousel, drawn in place.
+ */
+function rootTabView(ctx: FeatureContext, expr: Expr, seen = new Set<string>()): CallExpr | undefined {
+  const base = chainBase(expr)
+  if (base.kind !== 'call' || base.callee.kind !== 'identifier') return undefined
+  if (base.callee.name === 'TabView') return base
+  if (base.callee.name === 'Group') {
+    for (const statement of base.trailingClosure?.body.statements ?? []) {
+      const found = statement.kind === 'exprStmt' ? rootTabView(ctx, statement.expression, seen) : undefined
+      if (found) return found
+    }
+    return undefined
+  }
+  const view = namedStruct(ctx, base.callee.name)
+  if (!view || seen.has(view.name) || seen.size >= 3) return undefined
+  seen.add(view.name)
+  const body = bodyExpression(view)
+  return body && rootTabView(ctx, body, seen)
+}
+
+/**
  * The `TabView { … }` the app shows, however deeply it is wrapped.
  *
  * Follows the views the app builds as well as the expression itself: an app whose
  * root shows `MainTabs()` has a tab bar, and reading it as a single stack would
- * offer to wrap the whole app in a second one.
+ * offer to wrap the whole app in a second one. One whose pages are swiped through is
+ * the app's only at its root (`root`), and a carousel anywhere else (Wave 4c).
  */
-function findTabView(ctx: FeatureContext, expr: Expr, seen = new Set<string>()): CallExpr | undefined {
+function findTabView(ctx: FeatureContext, expr: Expr, root: CallExpr | undefined, seen = new Set<string>()): CallExpr | undefined {
   let found: CallExpr | undefined
   const nested: StructDecl[] = []
+  const pages = new Set<Node>()
   const visit = (node: Node) => {
     if (found) return
+    if (node.kind === 'call' && node.callee.kind === 'memberAccess' && node.callee.member === 'tabViewStyle' && isPageStyle(node.args)) pages.add(chainBase(node))
     if (node.kind === 'call' && node.callee.kind === 'identifier') {
-      if (node.callee.name === 'TabView' && node.trailingClosure) { found = node; return }
+      if (node.callee.name === 'TabView' && node.trailingClosure && (node === root || !pages.has(node))) { found = node; return }
       const view = namedStruct(ctx, node.callee.name)
       if (view && !seen.has(view.name)) nested.push(view)
     }
@@ -145,7 +173,7 @@ function findTabView(ctx: FeatureContext, expr: Expr, seen = new Set<string>()):
   for (const view of nested) {
     seen.add(view.name)
     const body = bodyExpression(view)
-    const inside = body ? findTabView(ctx, body, seen) : undefined
+    const inside = body ? findTabView(ctx, body, root, seen) : undefined
     if (inside) return inside
   }
   return undefined
@@ -153,14 +181,17 @@ function findTabView(ctx: FeatureContext, expr: Expr, seen = new Set<string>()):
 
 /** The `TabView { … }` the app shows, read back as a list of tabs. */
 function tabContainer(ctx: FeatureContext): TabContainer | undefined {
-  const root = entry(ctx)
-  if (!root) return undefined
-  const candidates = [bodyExpression(calledView(ctx, root.content)), root.content as Expr | undefined]
+  const window = windowContent(ctx)
+  if (!window) return undefined
+  const content = window.content ? viewCallChain(window.content)?.base : undefined
+  const candidates = [bodyExpression(calledView(ctx, content)), content as Expr | undefined]
+  // In the page style, only the one at the root is the app's (Wave 4c).
+  const pager = window.content && rootTabView(ctx, window.content)
   for (const candidate of candidates) {
     // Anywhere in the view, not only at its root: an app whose tab bar sits inside a
     // NavigationStack still has tabs, and reading it as a single stack would offer
     // to build a second tab bar around the first.
-    const call = candidate ? findTabView(ctx, candidate) : undefined
+    const call = candidate ? findTabView(ctx, candidate, pager) : undefined
     if (!call?.trailingClosure) continue
     const sites: TabSite[] = []
     for (const statement of call.trailingClosure.body.statements) {

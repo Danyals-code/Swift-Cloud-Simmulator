@@ -2,9 +2,10 @@ import type { ColorValue, FillValue, LayerChange, LayerFill, UnitPoint } from '@
 import type { Argument, CallExpr, Expr } from '@studio/swift-syntax'
 import { SLOT } from '../authoring-modifiers'
 import { MATERIALS, materialThickness } from '../design-advanced-controls'
-import { insertCalls, insertionIndex, replaceRun, runHasComment, type Patch } from './chain-edit'
+import { insertCalls, insertionIndex, replaceRun, runHasComment, type LabelPatch, type Patch } from './chain-edit'
 import { HIERARCHICAL, colorSource, keptColor, readColor, sameColor, type ColorSlot } from './color'
 import { SHAPE_CALLS } from '../builtins'
+import { isColorView } from '../authoring-view'
 import { isShapeView, runAt, type ChainSlots } from './slots'
 import { cardRefusal, commented, type LayerContext } from './context'
 import { amount, casesOf, keepCondition, numberOf, sourceOf } from './values'
@@ -229,7 +230,20 @@ function unavailableKinds(slots: ChainSlots, ctx: LayerContext): LayerFill['unav
   }
 }
 
+/** What a Color view, which is one colour, can't be filled with (Wave 4c). */
+const ONE_COLOR = 'A Color is one color. Fill a Rectangle to use a gradient, a material or glass.'
+const ONE_COLOR_KINDS: LayerFill['unavailable'] = { gradient: ONE_COLOR, material: ONE_COLOR, glass: ONE_COLOR }
+
+/** The colour a Color view is (Wave 4c): its call, `Color(.systemBackground)`, or the `Color.blue` that stands as one. */
+function ownColor(slots: ChainSlots, ctx: LayerContext): Expr | undefined {
+  if (!isColorView(ctx.node)) return undefined
+  return slots.base.callee.kind === 'identifier' ? slots.base : slots.base.callee
+}
+
 export function readFill(slots: ChainSlots, ctx: LayerContext): LayerFill {
+  // A Color's fill is the colour it is, read from its own call: no modifier holds it.
+  const own = ownColor(slots, ctx), color = own && readColor(own, ctx)
+  if (color) return color.state === 'code' ? { value: null, state: 'code', disabledReason: color.disabledReason, unavailable: ONE_COLOR_KINDS } : { value: { kind: 'color', color: color.value }, state: color.state, unavailable: ONE_COLOR_KINDS }
   const unavailable = unavailableKinds(slots, ctx)
   const extra = unavailable && Object.keys(unavailable).length ? { unavailable } : {}
   const site = siteOf(slots)
@@ -350,6 +364,11 @@ export function writeFill(slots: ChainSlots, change: Extract<LayerChange, { sect
   keepCondition(was, next && (asked ?? next), 'fill')
   const unavailable = next && current.unavailable?.[next.kind]
   if (unavailable) throw new Error(unavailable)
+  const own = ownColor(slots, ctx)
+  if (own && current.value?.kind === 'color') {
+    if (next?.kind !== 'color' || next.when) throw new Error(next ? 'A Color is one color. Choose it in Code to make it depend on a value.' : 'A Color is its color, so it can’t have none. Delete it instead.')
+    return [{ start: own.span.start, end: own.span.end, text: keptColor(next.color, current.value.color, sourceOf(ctx, own), 'Color', ctx), label: true } as LabelPatch]
+  }
   const site = siteOf(slots) as Site | null
   if (!site) return next ? [insertFill(slots, next, ctx)] : []
   const run = runAt(slots, site.index), call = site.call

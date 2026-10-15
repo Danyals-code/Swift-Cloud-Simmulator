@@ -16,7 +16,7 @@ import { Lexer, Parser, afterOffMarkers, hiddenViewsIn, viewSiteAt, walk, type C
  *   to show, unless it already was.
  */
 
-export type StructuralKind = 'delete' | 'hide' | 'show' | 'insert' | 'move' | 'moveTo' | 'duplicate' | 'wrap' | 'reparent' | 'spacing' | 'restructure'
+export type StructuralKind = 'delete' | 'hide' | 'show' | 'insert' | 'move' | 'moveTo' | 'duplicate' | 'wrap' | 'unwrap' | 'reparent' | 'spacing' | 'restructure'
 
 export interface StructuralEdit {
   readonly file: FileId
@@ -28,7 +28,7 @@ export interface StructuralEdit {
   readonly view: { readonly start: number; readonly end: number }
   /** Swift the change brings besides the view: an inserted snippet, or the stack a wrap puts around it. */
   readonly adds?: string
-  /** Swift a change to the view's own arrangement may take out of it: Auto spacing's Spacers. */
+  /** Swift a change to the view's own arrangement may take out of it: Auto spacing's Spacers, or the container an unwrap takes away, once. */
   readonly removes?: string
   /** Where the view was sent, in `before`: a drop target or a destination. The view itself when omitted. */
   readonly toward?: number
@@ -98,6 +98,8 @@ function contentProblem(edit: StructuralEdit): string | null {
   const allowed: { removed: Bag | 'comments'; added: Bag | 'comments' } =
     kind === 'hide' ? { removed: count(view), added: 'comments' }
       : kind === 'show' ? { removed: 'comments', added: count(atoms(hiddenViewsIn(edit.before, file).find(hidden => hidden.start === edit.view.start)?.source ?? '', file)) }
+      // An unwrap takes the container away, once, and adds nothing (Wave 4c).
+      : kind === 'unwrap' ? { removed: count(atoms(edit.removes ?? '', file)), added: new Map() }
       : { removed: repeatable(count(atoms(edit.removes ?? '', file))), added: repeatable(count(atoms(edit.adds ?? '', file))) }
   if (!within(removed, allowed.removed)) return LOST
   return within(added, allowed.added) ? null : EXTRA

@@ -52,6 +52,7 @@ import {
   type LayoutElement,
   type LayoutModifier,
   type SafeAreaEdges,
+  type ScrollElement,
   type TextRunSpec,
   type VerticalAlignment,
 } from '@studio/swiftui-layout'
@@ -68,6 +69,7 @@ import {
   TAB_BAR,
   BOTTOM_BAR,
   TAB_ITEM,
+  dotsBackground,
   type Overlay,
   type ResolvedUI,
   type SearchField,
@@ -109,6 +111,7 @@ import {
   type ColorPayload,
   type EdgeInsetsPayload,
   type ModifierValue,
+  type PageDots,
   type StrokeStylePayload,
   type TokenPayload,
   type TransitionPayload,
@@ -312,7 +315,10 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   // Under a large title or a search field in the bar's drawer, iOS 27 starts a list's first
   // section right below them.
   const root = ui.navigationBar?.large || drawerSearch ? mapPrimaryScroll(joinRoot(body, 'vertical'), startListAtTop) : joinRoot(body, 'vertical')
-  const content = ui.search && drawerSearch ? prependSearch(root, converter.searchField(ui.search, 'drawer')) : root
+  // A root TabView in the page style has no bar: its page fills the screen, its dots over it (Wave 4c).
+  const paged = ui.tabBar?.items.some(item => boolArg(labelled(item.args, 'paged'))) ?? false
+  const searched = ui.search && drawerSearch ? prependSearch(root, converter.searchField(ui.search, 'drawer')) : root
+  const content = paged ? converter.rootPager(searched, ui.tabBar!) : searched
 
   const navigationBar = ui.navigationBar
     ? {
@@ -322,7 +328,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
       }
     : null
 
-  const tabBar = ui.tabBar ? converter.tabBar(ui.tabBar) : null
+  const tabBar = ui.tabBar && !paged ? converter.tabBar(ui.tabBar) : null
   const bottomBar = ui.bottomBar ? converter.bottomBar(ui.bottomBar) : null
   const attached = !!ui.overlay && attachedSheet(ui.overlay, options.viewportWidth ?? 393)
 
@@ -835,59 +841,90 @@ class Converter {
    * one worth getting right.
    */
   /**
-   * The page indicator a `.page` tab view draws instead of a tab bar.
+   * A page-style TabView's dots, drawn instead of a tab bar at the root, and over the bottom
+   * of a pager inside a screen (Wave 4c). `id` names them for the pager they belong to.
    *
-   * iOS pages by swiping and the dots are only an indicator. A preview has no swipe,
-   * so each dot is also the control that gets to that page - an addition rather than
-   * an approximation, and the only way through the pages here.
+   * As measured in the iOS 27 simulator (docs/parity/native/iphone18pro-system-ui): white
+   * whatever is under them, the others white at 0.44, so no one sees them on a white page;
+   * on the light capsule `.indexViewStyle` gives them, the others are black at 0.24. iOS pages
+   * by swiping and the dots only say where it is. A preview has no swipe, so each dot is
+   * also the control that gets to its page, its slot the target.
    */
-  private pageDots(bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
-    const dots = bar.items.map((item, index) => {
-      const selected = boolArg(labelled(item.args, 'selected'))
-      const dot: LayoutElement = {
+  private pageDots(dots: PageDots['dots'], background: boolean, id: string): LayoutElement {
+    const { size, slot, height, padding, selected: shown, other, onCapsule, capsule } = SURFACES.pageDots
+    const row: LayoutElement = {
+      kind: 'stack',
+      id: `${id}pagedots-row`,
+      axis: 'horizontal',
+      spacing: 0,
+      alignment: CENTER,
+      children: dots.map(({ path, selected }, index) => this.withHitTarget({
         kind: 'modified',
-        id: `dot-${index}-frame`,
-        modifier: { kind: 'frame', width: 7, height: 7, alignment: CENTER },
+        id: `${id}dot-${index}-slot`,
+        modifier: { kind: 'frame', width: slot, height, alignment: CENTER },
         child: {
           kind: 'modified',
-          id: `dot-${index}-tint`,
-          modifier: {
-            kind: 'foregroundStyle',
-            color: selected ? this.color('label') : this.color('tertiaryLabel'),
+          id: `${id}dot-${index}-frame`,
+          modifier: { kind: 'frame', width: size, height: size, alignment: CENTER },
+          child: {
+            kind: 'modified',
+            id: `${id}dot-${index}-tint`,
+            modifier: { kind: 'foregroundStyle', color: selected ? shown : background ? onCapsule : other },
+            child: { kind: 'shape', id: `${id}dot-${index}`, shape: 'circle' },
           },
-          child: { kind: 'shape', id: `dot-${index}`, shape: 'circle' },
         },
-      }
+      }, path, 'button', `Page ${index + 1}`)),
+      debugName: TAB_BAR,
+    }
+    if (!background) return row
+    const padded: LayoutElement = { kind: 'modified', id: `${id}pagedots-pad`, modifier: { kind: 'padding', insets: insets(0, padding, 0, padding) }, child: row }
+    return this.background(padded, `${id}pagedots-bg`, capsule, 999, 'circular')
+  }
 
-      // The target is bigger than the dot, because a 7pt circle is not a tap target.
-      const target: LayoutElement = {
-        kind: 'modified',
-        id: `dot-${index}-hit`,
-        modifier: { kind: 'padding', insets: uniformInsets(6) },
-        child: dot,
-      }
+  /**
+   * A root TabView in the page style, its page `content`, which fills the screen's safe area
+   * with the dots over its bottom, as a pager inside a screen fills its frame (Wave 4c).
+   */
+  rootPager(content: LayoutElement, bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
+    const page: LayoutElement = { kind: 'modified', id: 'pager-page', modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, maxHeight: Number.POSITIVE_INFINITY, alignment: CENTER }, child: content }
+    if (boolArg(labelled(bar.view.args, 'hidden'))) return page
+    const dots = bar.items.map(item => ({ path: item.path!, selected: boolArg(labelled(item.args, 'selected')) }))
+    return this.overDots(page, { dots, background: dotsBackground(bar.view) }, 'pager', '')
+  }
 
-      return item.path ? this.withHitTarget(target, item.path, 'button', `Page ${index + 1}`) : target
-    })
-
+  /** `page` with its dots centred `SURFACES.pageDots.bottom` above its bottom edge, named `id`; `prefix` names the dots. */
+  private overDots(page: LayoutElement, { dots, background }: PageDots, id: string, prefix: string): LayoutElement {
+    const { height, bottom } = SURFACES.pageDots
     return {
       kind: 'modified',
-      id: 'pagedots-height',
-      modifier: { kind: 'frame', height: TAB_BAR_HEIGHT, alignment: CENTER },
+      id,
+      modifier: { kind: 'overlay', alignment: { horizontal: 'center', vertical: 'bottom' }, content: {
+        kind: 'modified', id: `${id}dots`, modifier: { kind: 'padding', insets: insets(0, 0, bottom - height / 2, 0) }, child: this.pageDots(dots, background, prefix),
+      } },
+      child: page,
+    }
+  }
+
+  /**
+   * A page-style TabView inside a screen, as a carousel (Wave 4c): the page shown fills it,
+   * its content centred and clipped to it, as iOS's paging scroll view draws a page, with the
+   * dots centred `SURFACES.pageDots.bottom` above its bottom edge. It takes all it is offered,
+   * as a TabView does, so `.frame(height:)` is its height.
+   */
+  private pager(view: ViewValue, path: string, origin: object): LayoutElement {
+    const dots = view.pager!
+    const page: LayoutElement = {
+      kind: 'modified',
+      id: dots.dots.length ? `${path}clip` : path,
+      modifier: { kind: 'clip', shape: 'rectangle', cornerRadius: 0 },
       child: {
-        kind: 'stack',
-        id: 'pagedots-row',
-        axis: 'horizontal',
-        spacing: 2,
-        alignment: CENTER,
-        children: [
-          { kind: 'spacer', id: 'pagedots-lead', axis: 'horizontal', minLength: 0 },
-          ...dots,
-          { kind: 'spacer', id: 'pagedots-trail', axis: 'horizontal', minLength: 0 },
-        ],
-        debugName: TAB_BAR,
+        kind: 'modified',
+        id: `${path}page`,
+        modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, maxHeight: Number.POSITIVE_INFINITY, alignment: CENTER },
+        child: { kind: 'zstack', id: `${path}pages`, alignment: CENTER, children: this.convertList(view.children, path, 'vertical') },
       },
     }
+    return { ...dots.dots.length ? this.overDots(page, dots, path, path) : page, ...origin }
   }
 
   private tabLabel(view: ViewValue, path: string): LayoutElement {
@@ -939,11 +976,6 @@ class Converter {
   }
 
   private tabBarContent(bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
-    // `.tabViewStyle(.page)` is a row of dots, not a bar of labels.
-    if (bar.items.some((item) => boolArg(labelled(item.args, 'paged')))) {
-      return this.pageDots(bar)
-    }
-
     const items = bar.items.map((item, index) => {
       const selected = boolArg(labelled(item.args, 'selected'))
       const tint = selected ? this.color('accentColor') : this.color('label')
@@ -1516,6 +1548,10 @@ class Converter {
 
       case 'ScrollView':
         return this.scrollView(view, path, origin)
+
+      case 'TabView':
+        if (view.pager) return this.pager(view, path, origin)
+        break
 
       case 'List':
         return this.list(view, path, origin)
@@ -2157,7 +2193,10 @@ class Converter {
             children,
           }
 
-    return { kind: 'scroll', id: path, axis, showsIndicators: indicators, content, ...origin }
+    const scroll: { -readonly [K in keyof ScrollElement]: ScrollElement[K] } = { kind: 'scroll', id: path, axis, showsIndicators: indicators, content, ...origin }
+    // `.scrollTargetBehavior(.paging)` (iOS 17) snaps by the scroll view's size (Wave 4c).
+    if (tokenName(modifierArg(view, 'scrollTargetBehavior', 0)) === 'paging') scroll.paging = true
+    return scroll
   }
 
   /**
@@ -4378,6 +4417,7 @@ function actionParts(button: ViewValue): { readonly shown: ViewValue; readonly t
  */
 function isTransparent(view: ViewValue): boolean {
   if (view.name === 'ForEach') return true
+  if (view.pager) return false
   return TRANSPARENT_VIEWS.has(view.name) && view.modifiers.length === 0
 }
 

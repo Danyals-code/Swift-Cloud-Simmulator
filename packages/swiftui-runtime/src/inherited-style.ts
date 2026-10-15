@@ -6,6 +6,8 @@ const INHERITED = new Set([
   'listStyle', 'tint', 'accentColor', 'buttonStyle', 'textFieldStyle', 'toggleStyle', 'pickerStyle',
   'onSubmit', 'keyboardType', 'submitLabel', 'textInputAutocapitalization', 'autocorrectionDisabled', 'labelStyle', 'progressViewStyle', 'gaugeStyle', 'controlSize', 'buttonBorderShape',
   'disabled', 'allowsHitTesting', 'foregroundStyle', 'foregroundColor', 'imageScale', 'environment', 'dynamicTypeSize',
+  // A pager's dots take the style written on it or above it (Wave 4c).
+  'indexViewStyle',
 ])
 
 function keyOf(modifier: ModifierValue): string {

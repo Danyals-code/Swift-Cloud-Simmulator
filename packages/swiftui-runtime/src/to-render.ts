@@ -2,6 +2,7 @@ import {
   rgba,
   type RenderNode,
   type RenderTree,
+  type ScrollPayload,
   type Size,
   type TextLine,
 } from '@studio/shared'
@@ -190,18 +191,17 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
       }
     }
 
-    case 'scroll':
-      return {
-        ...base,
-        kind: 'layer',
-        clip: true,
-        scroll: {
-          axis: node.paint.axis,
-          content: node.paint.content,
-          contentInsets: node.paint.contentInsets,
-          showsIndicators: node.paint.showsIndicators,
-        },
+    case 'scroll': {
+      const scroll: { -readonly [K in keyof ScrollPayload]: ScrollPayload[K] } = {
+        axis: node.paint.axis,
+        content: node.paint.content,
+        contentInsets: node.paint.contentInsets,
+        showsIndicators: node.paint.showsIndicators,
       }
+      // Only a ScrollView that pages carries `paging` (Wave 4c).
+      if (node.paint.paging) scroll.paging = true
+      return { ...base, kind: 'layer', clip: true, scroll }
+    }
 
     case 'fill':
       return { ...base, kind: 'layer', background: node.paint.fill }

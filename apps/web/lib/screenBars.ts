@@ -1,5 +1,8 @@
 import { presentedRoot, TOOLBAR_PLACEMENT_WORDS as WORDS, type AuthoringNode, type AuthoringSnapshot, type DesignControl, type ScreenBars, type SourceSpan, type ToolbarPlacement } from '@studio/shared'
 
+/** What a new search field asks for until the designer writes their own. */
+export const SEARCH_PROMPT = 'Search'
+
 /** The places the Bars section adds a toolbar item at, in the order it offers them, each named as the Placement field names it. */
 export const TOOLBAR_PLACES: readonly { readonly placement: ToolbarPlacement; readonly label: string; readonly hint: string }[] = [
   { placement: 'leading', label: WORDS.leading, hint: 'Add a button at the left of the navigation bar' },

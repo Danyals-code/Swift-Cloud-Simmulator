@@ -3,6 +3,8 @@
   "fixtureSha256": "af836d8fc67f0e7374c584011e054ca7bddf38dc811da6c5e7b86582a0cce404",
   "source4b": "Built from tests/fixtures/ios27-system-ui-4b.swift with swiftc for arm64-apple-ios27.0-simulator (Xcode 27.0, 27A266a, SDK 27.0, warnings as errors) and run on the same iPhone 18 Pro simulator (ECD19CCB-2BD2-4361-804C-7496085499F9, iOS 27.0), light appearance, status bar overridden to 9:41; one launch per screen with -screen <name>, every sheet up at launch, on 2026-10-15. Every capture was taken with tooling/capture-ios27.mjs and the fixture as it is now; bottom-bar-search-pulled after a simulated drag of 120 pt down the list.",
   "fixture4bSha256": "0171a5909f01565d8ff3db11f843c79546f978df491b9ab1552518a6cc6b0b17",
+  "source4c": "Built from tests/fixtures/ios27-system-ui-4c.swift with swiftc for arm64-apple-ios27.0-simulator (Xcode 27.0, 27A266a, SDK 27.0, warnings as errors) and run on the same iPhone 18 Pro simulator (ECD19CCB-2BD2-4361-804C-7496085499F9, iOS 27.0), light appearance, status bar overridden to 9:41; one launch per screen with -screen <name>, on 2026-10-15. Every capture was taken with tooling/capture-ios27.mjs and the fixture as it is now; the two marked swiped after a simulated swipe of 230 pt to the left in 0.25 s across the scroll view. pager-always was captured too and is byte for byte pager-automatic, white dots on a white page, so it is not kept.",
+  "fixture4cSha256": "cf0d01b5141a67214b940186bbe520042cd0dbd63356e2076e17c984be86ed45",
   "captures": [
     { "file": "list-rows.png", "screen": "list-rows", "tool": true, "sha256": "772a5fd6687e0f88c4bb2f1b2662f4e27a706de5ee2f295050a039f08fd93091" },
     { "file": "swipe-trailing-labels.png", "screen": "swipe-trailing", "row": "Labels, swiped left", "tool": true, "sha256": "6502f92f2e542f22e29c921a5f888d315a4bbfb3592491b7c0702b19aa922f51" },
@@ -37,7 +39,20 @@
     { "file": "sheet-medium.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "sheet-medium", "tool": true, "sha256": "f56d15fe20739d6446ffa1ea155d2a0042855370ba2c022d24cbbff6add4c0c7" },
     { "file": "sheet-medium-large.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "sheet-medium-large", "tool": true, "sha256": "108de6d3f05ab30082b2900b72a31918ee671276b3a33f91b20e4b63c5be1673" },
     { "file": "sheet-height.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "sheet-height", "tool": true, "sha256": "ce6d153dc3717bab4c79ca6fdce85d5c2d750f205baf8e740cf60db37f8abda0" },
-    { "file": "sheet-styled.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "sheet-styled", "tool": true, "sha256": "304a1af650926300c10d411385c9be615a231c86b6ca67464bcc53f998a99612" }
+    { "file": "sheet-styled.png", "fixture": "tests/fixtures/ios27-system-ui-4b.swift", "screen": "sheet-styled", "tool": true, "sha256": "304a1af650926300c10d411385c9be615a231c86b6ca67464bcc53f998a99612" },
+    { "file": "pager-automatic.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "pager-automatic", "tool": true, "sha256": "4a7beba470bb5dea915e05239023ff2402abb2472bb83f0f8f21adb817414d96" },
+    { "file": "pager-background.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "pager-background", "tool": true, "sha256": "0a22942e6a81d9d8eedfda4018d0632f67370ef3ce7f171c0be25cd6bbe609b9" },
+    { "file": "pager-colored.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "pager-colored", "tool": true, "sha256": "3e0052cc072b72ace43eb01a870de3a82560bbf82939e3ff3dfbf46d2e7c638d" },
+    { "file": "pager-colored-background.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "pager-colored-background", "tool": true, "sha256": "d109494ad9fd7a7313e43efc82336300fd1d737a4c0a5ad358bdaf0967daa413" },
+    { "file": "pager-never.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "pager-never", "tool": true, "sha256": "5b0954f1792e0f968769675222ba8caf903097f21739889a26566f327e560df5" },
+    { "file": "pager-one-page.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "pager-one-page", "tool": true, "sha256": "fe2dfefeec2cf5b94e4a2c47c1c9c028ea568dca5ff5e368676d297a78e9573d" },
+    { "file": "pager-one-page-always.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "pager-one-page-always", "tool": true, "sha256": "64afeda2724b822667e7ccd6ccf289f0b75fb679c319bdb33830fd63ee1d2411" },
+    { "file": "pager-root.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "pager-root", "tool": true, "sha256": "538d0d68b6afa5e1f4a7617d1206a76a67a397ece4d056452c4efa6f3eb3aee4" },
+    { "file": "pager-selected.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "pager-selected", "tool": true, "sha256": "e9c876550afdafd12a69f2b32e376126273bb16f676570000ccfd871cfc8f728" },
+    { "file": "scroll-paging.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "scroll-paging", "tool": true, "sha256": "cb06363e15f4c14704f6b6651d81dce9979f744b418ba32c4a0480c335e1954c" },
+    { "file": "scroll-paging-swiped.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "scroll-paging", "tool": true, "state": "swiped one page", "sha256": "cd6ee4caee27ba82d4442a3c840669f246fa4f37cb790ab913ac57ecc70b4029" },
+    { "file": "scroll-paging-margins.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "scroll-paging-margins", "tool": true, "sha256": "31e3c315f76f8cf4afcf87355d106cdaec0ea13de38e93e5e89c48c9e73f24db" },
+    { "file": "scroll-paging-margins-swiped.png", "fixture": "tests/fixtures/ios27-system-ui-4c.swift", "screen": "scroll-paging-margins", "tool": true, "state": "swiped one page", "sha256": "20d1aa43e94f508d118aa52ffa3ef23d214bd3f95e9dc5cec54fecb0600955df" }
   ],
   "measured": {
     "units": "Points. x from the screen's leading edge, y from its top. Every list is the default inset grouped style: its card runs from x 16 to 386, and its first row from y 97 to 149, each row 52 tall. Edges are read along a line through a shape's middle; a capsule's height down its middle.",
@@ -182,6 +197,53 @@
         "x": [8, 394],
         "top": 415,
         "note": "presentationBackground(.yellow) fills the sheet with no material; presentationCornerRadius(12) rounds its top corners at 12."
+      }
+    },
+    "pager": {
+      "frame": {
+        "y": [341.33, 581.33],
+        "height": 240,
+        "note": "A page-style TabView with .frame(height: 240) between a large title and a button in a VStack(spacing: 16) is drawn in place at that height, the full width of the screen, its siblings kept. Its page fills it."
+      },
+      "dots": {
+        "diameter": 7.6,
+        "pitch": 17.67,
+        "centreAboveBottom": 25,
+        "threePages": { "x": [179.67, 223], "centreY": 556.17 },
+        "fourPages": { "x": [170.67, 231.67], "selected": 1, "selectedX": [188, 196] },
+        "note": "Each dot is a circle about 7.6 across (7 solid pixels and two antialiased thirds), centred 17.67 apart and 25 above the pager's bottom edge, the row centred across it. The same 25 holds for one page shown always, and for a root pager, above the safe area's bottom (840)."
+      },
+      "colors": {
+        "selected": [255, 255, 255],
+        "unselected": { "overRed": [255, 143, 146], "overGreen": [141, 224, 162], "fit": "white at 0.44" },
+        "note": "The dots are white whatever is under them: on a white page they cannot be seen, with the automatic mode or the always mode alike."
+      },
+      "background": {
+        "capsule": { "x": [164.67, 237.67], "y": [543.33, 568.67], "width": 73, "height": 25.33 },
+        "fill": { "overWhite": [245, 245, 245], "overRed": [255, 167, 168], "fit": "rgb(238, 238, 240) at 0.61, close to a light material" },
+        "dots": { "selected": [255, 255, 255], "unselected": { "overWhite": [185, 185, 186], "overRed": [193, 125, 127], "fit": "black at 0.24" } },
+        "note": ".indexViewStyle(.page(backgroundDisplayMode: .always)) puts the dots on a capsule 10 wider than the dots' slots each side (3 slots of 17.67) and 25.33 tall, centred on them, and draws the other dots darker."
+      },
+      "modes": {
+        "automatic": "dots for two or more pages, none for one",
+        "always": "dots even for one page: one white dot centred 25 above the bottom",
+        "never": "no dots, on red pages"
+      },
+      "root": {
+        "page": { "y": [62, 840] },
+        "dotCentreY": 815.17,
+        "note": "A root pager's page fills the safe area, 62 to 840, and its dots are 25 above its bottom; there is no tab bar."
+      }
+    },
+    "scrollPaging": {
+      "plain": {
+        "page": { "x": [0, 402], "y": [379.33, 579.33] },
+        "swiped": { "x": [0, 402], "note": "The second page, exactly where the first was: a swipe pages by the scroll view's width, 402." }
+      },
+      "margins": {
+        "page": { "x": [16, 386], "y": [395.33, 563.33] },
+        "next": { "x": [386, 402] },
+        "swiped": { "previous": [0, 8], "page": [8, 378], "next": [378, 402], "note": "With .contentMargins(16, for: .scrollContent) the page is 370 by 168, 16 in from each edge, and a swipe moves the content by 378, not by a page, leaving the second page 8 from the leading edge." }
       }
     }
   }

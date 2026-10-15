@@ -43,6 +43,12 @@ export const MODIFIER_SLOTS: Readonly<Record<string, string>> = {
   swipeActions: 'Swipe actions', contextMenu: 'Context menu',
 }
 
+/**
+ * A carousel's Dots background, as the Carousel entry and the Dots background field write it
+ * (Wave 4c): iOS 27 draws white dots, which this backing shows over a white page.
+ */
+export const DOTS_BACKGROUND = '.indexViewStyle(.page(backgroundDisplayMode: .always))'
+
 /** A toolbar's items that hold views and take a `placement:` (Wave 4b). */
 export const TOOLBAR_ITEMS: ReadonlySet<string> = new Set(['ToolbarItem', 'ToolbarItemGroup'])
 /** What a toolbar holds besides views (Wave 4b): its items, and iOS's own spacers, items and title menu. */

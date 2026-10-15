@@ -39,7 +39,9 @@ import {
   type EnvironmentFrame,
   type ModifierValue,
   type RuntimeFailure,
+  type PageDots,
   type SwipeActions,
+  type TokenPayload,
   type ViewArg,
   type ViewIntent,
   type ViewValue,
@@ -241,18 +243,23 @@ export interface ResolvedUI {
   readonly reveal?: { readonly modifiers: readonly Revealable[]; readonly drawn: boolean }
 }
 
-/** A `.swipeActions` or `.contextMenu` the Design canvas can draw open (Wave 4a): where it is written, and its closure. */
-export type Revealable = Pick<ModifierValue, 'span' | 'closure'>
+/**
+ * A `.swipeActions` or `.contextMenu` the Design canvas can draw open (Wave 4a): where it is
+ * written, and its closure. A pager's page, which it can draw shown, has no closure (Wave 4c).
+ */
+export type Revealable = Pick<ModifierValue, 'span'> & Partial<Pick<ModifierValue, 'closure'>>
 
 /**
  * Whether the Design canvas's selection is in a `.swipeActions` or a `.contextMenu` (Wave 4a):
  * its closure, a view in it, or its slot, from the modifier's name on. The call's span starts
  * with the view it is written on, so that view, or a view inside it, ends before the closure
- * starts and reveals nothing.
+ * starts and reveals nothing. A pager's page is revealed by itself or a view in it (Wave 4c).
  */
 export function reveals(target: SourceSpan | null | undefined, modifier: Revealable): boolean {
   const span = modifier.span, closure = modifier.closure?.span
-  return !!target && !!closure && target.file === span.file && target.start > span.start && target.end <= span.end && target.end > closure.start
+  if (!target || target.file !== span.file) return false
+  if (!modifier.closure) return target.start >= span.start && target.end <= span.end
+  return !!closure && target.start > span.start && target.end <= span.end && target.end > closure.start
 }
 
 /**
@@ -632,6 +639,10 @@ class Resolver {
   private route: SwiftValue | undefined
   /** The bars `.toolbar(.hidden, for:)` hides on the screen drawn, as `HIDES` bits (Wave 4b). */
   private hidden = 0
+  /** Where the screen's root TabView is written, which is its app's tabs in any style; any other in the page style is a pager (Wave 4c). */
+  private rootTabs: SourceSpan | undefined
+  /** Whether a pager is drawn on another page than its own for the selection (Wave 4c). */
+  private revealedPage = false
 
   constructor(
     private readonly ctx: ResolveContext,
@@ -651,9 +662,10 @@ class Resolver {
   }
 
   run(views: readonly ViewValue[]): ResolvedUI {
+    this.rootTabs = rootTabView(views)?.span
     const stamped = this.stampList(views, this.prefix)
 
-    const tabs = findView(stamped, 'TabView')
+    const tabs = findTabs(stamped)
     const withTabs = tabs ? this.resolveTabs(tabs) : { content: stamped, tabBar: null, pages: [], selected: 0 }
     this.previewScope = withTabs.content
 
@@ -731,7 +743,7 @@ class Resolver {
       lifecycle: this.lifecycle,
       ...(this.notDrawn.length ? { notDrawn: this.notDrawn } : {}),
       ...(this.warnings.length ? { warnings: this.warnings } : {}),
-      ...(this.ctx.reveal !== undefined ? { reveal: { modifiers: [...this.revealable.values()], drawn: this.revealedRow || !!this.revealedMenu && overlay?.kind === 'menu' } } : {}),
+      ...(this.ctx.reveal !== undefined ? { reveal: { modifiers: [...this.revealable.values()], drawn: this.revealedRow || this.revealedPage || !!this.revealedMenu && overlay?.kind === 'menu' } } : {}),
     }
   }
 
@@ -962,8 +974,10 @@ class Resolver {
     try {
       const restyled = view.name === 'Button' ? this.applyButtonStyle(view, path) : view
 
-      const children = restyled.childKeys
-        ? this.stampRows(restyled, path, onDelete)
+      // A page-style TabView inside a screen is drawn in place, with only its page shown (Wave 4c).
+      const pager = restyled.name === 'TabView' && restyled.span !== this.rootTabs && pageStyled(restyled) ? this.pager(restyled, path) : undefined
+      const children = pager ? pager.children
+        : restyled.childKeys ? this.stampRows(restyled, path, onDelete)
         : this.stampList(restyled.children, path)
       const swipe = row || restyled.modifiers.some(m => m.name === 'swipeActions') ? this.swipeActions(restyled, path, row) : undefined
 
@@ -985,6 +999,7 @@ class Resolver {
       })
       const stamped: { -readonly [K in keyof ViewValue]: ViewValue[K] } = { ...restyled, path, args, children, modifiers, contextMenuPath: this.contextMenuPath, ...(intent ? { intent } : {}) }
       if (swipe) stamped.swipe = swipe
+      if (pager) stamped.pager = pager.dots
 
       if (intent) this.handlers.set(handlerIdFor(path), intent)
       this.collectLifecycle(restyled, path)
@@ -1270,6 +1285,12 @@ class Resolver {
     const id = handlerIdFor(path)
     this.handlers.set(id, intent)
     return id
+  }
+
+  /** `path`, once what a tap there does is registered. */
+  private registered(path: string, intent: ViewIntent): string {
+    this.register(path, intent)
+    return path
   }
 
   /**
@@ -1920,26 +1941,64 @@ class Resolver {
 
   // ----------------------------------------------------------------- tabs
 
-  private resolveTabs(tabs: ViewValue): { content: readonly ViewValue[]; tabBar: TabBar | null; pages: readonly ViewValue[]; selected: number } {
-    const tabId = tabs.path ?? 'tabs'
+  /**
+   * A TabView's pages, the one shown, and what choosing each does: write its tag to the
+   * `selection:` binding, or else note it in the framework's own state for `tabId`. `force`
+   * shows another, for a page of the gallery, without touching either.
+   */
+  private tabPages(tabs: ViewValue, tabId: string, force?: number): { pages: readonly ViewValue[]; selected: number; intents: readonly ViewIntent[] } {
     const selection = labelled(tabs.args, 'selection')
     const binding = asProjection(selection)
 
     // On a phone a `TabSection`'s tabs are tabs like any other; its title heads them only in a sidebar.
     const flatten = (views: readonly ViewValue[]): readonly ViewValue[] => views.flatMap(v => ['Group', 'ForEach', 'TabSection'].includes(v.name) ? flatten(v.children) : [v])
     const pages = flatten(tabs.children)
-    if (pages.length === 0) return { content: [], tabBar: null, pages, selected: 0 }
-
     const valueOf = (page: ViewValue) => page.name === 'Tab' ? labelled(page.args, 'value') : rowTag(page, binding)
     const tagged = pages.map((page) => tokenOrValue(valueOf(page)))
     const current = binding ? identityKey(binding.get(), true) : null
-    const index = this.forceTab ?? (current !== null ? Math.max(0, tagged.indexOf(current)) : this.ctx.state.selectedTab(tabId))
-    const selected = Math.max(0, Math.min(index, pages.length - 1))
+    const index = force ?? (current !== null ? Math.max(0, tagged.indexOf(current)) : this.ctx.state.selectedTab(tabId))
+    const intents = pages.map((page, i): ViewIntent => binding && tagged[i] !== null
+      ? { kind: 'write', binding: selection!, value: valueOf(page)! }
+      : { kind: 'selectTab', tab: tabId, index: i })
+    return { pages, selected: Math.max(0, Math.min(index, pages.length - 1)), intents }
+  }
+
+  /**
+   * A page-style TabView inside a screen, drawn in place as a carousel (Wave 4c): only the
+   * page shown is built and stamped, as iOS draws no other, at the path it has among the
+   * TabView's children, and each dot shows its page. On the Design canvas a selection in
+   * another page shows that one instead, as a selection in a swipe action opens its row.
+   */
+  private pager(view: ViewValue, path: string): { children: ViewValue[]; dots: PageDots } {
+    const { pages, selected: current, intents } = this.tabPages(view, path)
+    let selected = current
+    if (this.ctx.reveal !== undefined) {
+      for (const page of pages) this.revealable.set(page.span, { span: page.span })
+      const revealed = pages.findIndex(page => reveals(this.ctx.reveal, page))
+      if (revealed >= 0 && revealed !== current && !this.revealedPage) {
+        selected = revealed
+        this.revealedPage = true
+      }
+    }
+    const shown = pages[selected]
+    return {
+      children: shown ? [this.stamp(shown, `${path}-${selected}`)] : [],
+      dots: {
+        dots: showsDots(view, pages.length) ? pages.map((_, i) => ({ path: this.registered(`${path}/tab-${i}`, intents[i]!), selected: i === selected })) : [],
+        background: dotsBackground(view),
+      },
+    }
+  }
+
+  private resolveTabs(tabs: ViewValue): { content: readonly ViewValue[]; tabBar: TabBar | null; pages: readonly ViewValue[]; selected: number } {
+    const tabId = tabs.path ?? 'tabs'
+    const { pages, selected, intents } = this.tabPages(tabs, tabId, this.forceTab)
+    if (pages.length === 0) return { content: [], tabBar: null, pages, selected: 0 }
 
     // `.tabViewStyle(.page)` replaces the tab bar with page dots: a row of indicators
     // rather than labelled buttons, and one that is still pressable - iOS pages by
     // swiping, which a preview has no analogue for, so the dots are the way through.
-    const paged = (tokenName(modifierOn(tabs, 'tabViewStyle')?.args[0]?.value) ?? '').startsWith('page')
+    const paged = pageStyled(tabs)
 
     const items = pages.map((page, i) => {
       const item = collectModifier([page], 'tabItem')
@@ -1949,10 +2008,7 @@ class Resolver {
         ? modernLabel.length ? modernLabel : [{ name: 'Label', args: page.args.filter(a => a.label === null || a.label === 'systemImage'), children: [], modifiers: [], action: null, span: page.span }]
         : item?.closure ? this.ctx.build(item.closure, [], item.environment, 'Tab item') : []
       const path = `${tabId}/tab-${i}`
-      const intent: ViewIntent =
-        binding && tagged[i] !== null
-          ? { kind: 'write', binding: selection!, value: valueOf(page)! }
-          : { kind: 'selectTab', tab: tabId, index: i }
+      const intent = intents[i]!
 
       this.register(path, intent)
 
@@ -1980,7 +2036,8 @@ class Resolver {
         items,
         view: {
           name: TAB_BAR,
-          args: [],
+          // A root pager's dots, hidden as `.page(indexDisplayMode:)` says (Wave 4c).
+          args: paged && !showsDots(tabs, pages.length) ? [{ label: 'hidden', value: { kind: 'bool', value: true } }] : [],
           children: items,
           modifiers: visualModifiers(tabs),
           action: null,
@@ -2095,7 +2152,7 @@ class Resolver {
       const disableModifier = collectModifier(overlayViews, 'interactiveDismissDisabled')
       const disabled = disableModifier ? disableModifier.args[0] ? truthy(disableModifier.args[0].value) : true : false
       const dismissId = dismiss && kind !== 'alert' && !disabled ? this.register(`${path}/dismiss`, dismiss) : null
-      const tabs = findView(overlayViews, 'TabView')
+      const tabs = findTabs(overlayViews)
       const tabbed = tabs ? this.resolveTabs(tabs) : { content: overlayViews, tabBar: null }
       const nav = findView(tabbed.content, 'NavigationStack') ?? findView(tabbed.content, 'NavigationView')
       const resolved = nav ? this.resolveNavigation(nav) : { content: tabbed.content, navigationBar: null, bottomBar: null, hidden: 0 }
@@ -2378,6 +2435,63 @@ const DELETE_ACTION: readonly ViewArg[] = [
 /** A `ForEach`'s rows are siblings of whatever surrounds it, never a nested container. */
 function flattenForEach(views: readonly ViewValue[]): ViewValue[] {
   return views.flatMap((v) => (v.name === 'ForEach' ? flattenForEach(v.children) : [v]))
+}
+
+/** The app's tabs: the first TabView that isn't drawn in place as a pager (Wave 4c). */
+function findTabs(views: readonly ViewValue[]): ViewValue | null {
+  for (const view of views) {
+    if (view.name === 'TabView' && !view.pager) return view
+    const nested = findTabs(view.children)
+    if (nested) return nested
+  }
+  return null
+}
+
+/**
+ * The TabView a screen is, its app's tabs in any style (Wave 4c), as the authoring model's
+ * `rootTabView` reads it: at the top of what the window shows, or in a Group there, written
+ * there or as the body of up to three of the project's own views called there. One a helper
+ * draws, or one deeper, is drawn in place, as a carousel.
+ */
+function rootTabView(views: readonly ViewValue[]): ViewValue | undefined {
+  for (const view of views) {
+    if (view.name === 'TabView' && rootOwners(view)) return view
+    const inner = view.name === 'Group' ? rootTabView(view.children) : undefined
+    if (inner) return inner
+  }
+  return undefined
+}
+
+/** Whether what draws a view at a screen's root is only the project's views, `ROOT_VIEWS` at most, and no helper. */
+function rootOwners(view: ViewValue): boolean {
+  const owners = view.componentSources ?? []
+  return owners.length <= ROOT_VIEWS && !owners.some(owner => owner.helper)
+}
+
+/** How many of the project's views called one in another the authoring model follows to a screen's root TabView. */
+const ROOT_VIEWS = 3
+
+/**
+ * Whether a TabView is written in the page style, `.tabViewStyle(.page)`, `.page(indexDisplayMode:)`
+ * or the older `PageTabViewStyle(…)`, from the style's token, as swift-sema's `isPageStyle` reads
+ * it from the argument as written (Wave 4c).
+ */
+function pageStyled(view: ViewValue): boolean {
+  return tokenName(modifierOn(view, 'tabViewStyle')?.args[0]?.value) === 'page'
+}
+
+/**
+ * Whether a page-style TabView shows its dots: always, never, or, as `.automatic` does, for
+ * more than one page, as measured in the iOS 27 simulator (Wave 4c).
+ */
+function showsDots(view: ViewValue, count: number): boolean {
+  const mode = tokenName(payloadOf<TokenPayload>(modifierOn(view, 'tabViewStyle')?.args[0]?.value, TOKEN_TYPE)?.args?.[0])
+  return mode === 'always' || mode !== 'never' && count > 1
+}
+
+/** Whether `.indexViewStyle(.page(backgroundDisplayMode: .always))`, on a pager or above it, puts its dots on a background. */
+export function dotsBackground(view: ViewValue): boolean {
+  return tokenName(payloadOf<TokenPayload>(modifierOn(view, 'indexViewStyle')?.args[0]?.value, TOKEN_TYPE)?.args?.[0]) === 'always'
 }
 
 /** Depth-first search for the first view with a given name. */

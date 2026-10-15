@@ -1,3 +1,5 @@
+import { rgba } from '@studio/shared'
+
 /** Points calibrated against the supplied light/default-text phone captures.
  * Other sizes and appearances remain provisional; see docs/parity/ios27.json.
  * A row's and a header's padding are measured from their text's glyphs, which is where
@@ -32,6 +34,13 @@ export const SURFACES = {
   // of what it draws, or `iconOnlyWidth` wide for an icon alone, with corners of `radius`, or
   // `titleRadius` for a title alone, and its icon `iconToTitle` from its title.
   swipeAction: { inset: 4, gap: 10, padding: 13, iconOnlyWidth: 60, radius: 22, titleRadius: 15, iconToTitle: 6 },
+  // A page-style TabView's dots, measured there too (Wave 4c): `size` across, each in a slot
+  // `slot` wide and `height` tall, centred `bottom` above the pager's bottom edge, on a capsule
+  // `padding` wider than their slots each side when `.indexViewStyle` gives them a background.
+  // The page shown is `selected`, white whatever is under it, the others `other`, or `onCapsule`
+  // on the capsule, which is `capsule`.
+  pageDots: { size: 7.6, slot: 53 / 3, height: 76 / 3, bottom: 25, padding: 10,
+    selected: rgba(255, 255, 255), other: rgba(255, 255, 255, 0.44), onCapsule: rgba(0, 0, 0, 0.24), capsule: rgba(238, 238, 240, 0.61) },
 } as const
 
 export type ListAppearance = 'plain' | 'inset' | 'grouped' | 'insetGrouped' | 'sidebar'

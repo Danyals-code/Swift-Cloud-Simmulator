@@ -18,6 +18,13 @@ export function deploymentVersion(target: string | undefined): number {
   return Number.isFinite(version) ? version : Number.parseFloat(DEFAULT_DEPLOYMENT_TARGET)
 }
 
+/**
+ * Why something can't be added (`use`) or changed (`set`) at the app's deployment target,
+ * naming the iOS it needs (Wave 4c): the one wording the modifier picker, the Add palette and
+ * a field all give.
+ */
+export const needsNewerIOS = (minimum: number, to: 'use' | 'set'): string => `Needs iOS ${minimum} or newer. Change the deployment target to ${to} it.`
+
 export function isPreviewTarget(value: unknown): value is PreviewTarget {
   if (!value || typeof value !== 'object') return false
   const target = value as Record<string, unknown>

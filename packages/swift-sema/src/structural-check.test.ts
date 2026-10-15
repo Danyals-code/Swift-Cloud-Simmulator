@@ -53,6 +53,12 @@ describe('changes that do what they say', () => {
     expect(structuralEditProblem({ file: FILE, before, after, kind: 'moveTo', view: span(before, 'HStack'), toward: at(before, 'Text("B")'), landed: at(after, '            HStack') + 12 })).toBeNull()
   })
 
+  it('accepts an unwrap that takes away the container, once, and keeps its views and their note', () => {
+    const before = screen('            HStack(spacing: 8) {\n                Text("A")\n                // A note\n                Text("B")\n            }')
+    const after = screen('            Text("A")\n            // A note\n            Text("B")')
+    expect(structuralEditProblem({ file: FILE, before, after, kind: 'unwrap', view: span(before, 'HStack'), removes: 'HStack(spacing: 8) { }', landed: at(after, 'Text("A")') })).toBeNull()
+  })
+
   it('accepts a delete that takes only the view, with its switched-off modifier', () => {
     const before = screen('            Text("A")\n                /*studio-off:1 ".padding()"*/\n            Text("B")')
     const after = screen('            Text("B")')
@@ -71,6 +77,14 @@ describe('changes that do something else', () => {
     const before = screen('            Text("Card")\n                .overlay(RoundedRectangle(cornerRadius: 12))\n            Text("Other")')
     const after = screen('            Text("Other")')
     expect(structuralEditProblem({ file: FILE, before, after, kind: 'delete', view: span(before, 'RoundedRectangle(cornerRadius: 12)') })).toBe(LOST)
+  })
+
+  it('refuses an unwrap that takes a view or a second container with it, or adds anything', () => {
+    const before = screen('            HStack {\n                Text("A")\n                Text("B")\n            }\n            Text("C")')
+    const unwrap = (after: string) => structuralEditProblem({ file: FILE, before, after, kind: 'unwrap', view: span(before, 'HStack'), removes: 'HStack { }', landed: at(after, 'Text("A")') })
+    expect(unwrap(screen('            Text("A")\n            Text("C")'))).toBe(LOST)
+    expect(unwrap(screen('            Text("A")\n            Text("B")\n            Text("C")').replace('        VStack {\n', '        '))).toBe(LOST)
+    expect(unwrap(screen('            Text("A")\n            Text("B")\n            Text("C")\n            Divider()'))).toBe('This change would add more than it was meant to. Nothing was changed.')
   })
 
   it('refuses a move that lands the view somewhere other than where it was sent', () => {

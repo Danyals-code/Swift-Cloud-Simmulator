@@ -3,6 +3,7 @@ import type { ModifierOperation } from './authoring-modifiers'
 import type { ResourceOperation } from './design-resources'
 import type { SourceSpan } from './source'
 import type { DesignControl } from './design-edit'
+import type { ContainerLayout } from './layer-moves'
 
 export type DesignValue = string | number | boolean | null
 export interface RecordField { readonly name: string; readonly type: 'String' | 'Int' | 'Double' | 'Bool'; readonly optional: boolean; readonly defaultValue?: DesignValue; readonly mutable?: boolean }
@@ -280,12 +281,14 @@ export type AuthoringOperation = ResourceOperation | ModifierOperation | Navigat
   | { readonly kind: 'component-expose'; readonly control: string; readonly name: string }
   | { readonly kind: 'component-insert'; readonly component: string }
   | { readonly kind: 'component-variant'; readonly variant: ComponentVariant }
-  | { readonly kind: 'screen-create'; readonly name: string; readonly title: string; readonly layout: 'VStack' | 'HStack' | 'ZStack' }
+  | { readonly kind: 'screen-create'; readonly name: string; readonly title: string; readonly layout: ContainerLayout }
   | { readonly kind: 'screen-duplicate'; readonly name: string }
   | { readonly kind: 'screen-remove' }
   | { readonly kind: 'card-customize'; readonly color?: string }
   | { readonly kind: 'layer-duplicate' }
-  | { readonly kind: 'layer-wrap'; readonly ids: readonly string[]; readonly layout: 'VStack' | 'HStack' | 'ZStack' }
+  | { readonly kind: 'layer-wrap'; readonly ids: readonly string[]; readonly layout: ContainerLayout }
+  /** Puts a container's views in its place, when its parent can take them all and none of its modifiers would be lost (Wave 4c). */
+  | { readonly kind: 'layer-unwrap' }
   | { readonly kind: 'layer-reparent'; readonly ids: readonly string[]; readonly destination: string }
   /** A Button whose label is the view, doing nothing until When tapped says what (D16). */
   | { readonly kind: 'make-tappable' }

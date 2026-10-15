@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
-import type { Diagnostic, PagePreview } from '@studio/shared'
+import { CONTAINER_LAYOUTS, type ContainerLayout, type Diagnostic, type PagePreview } from '@studio/shared'
 import { canRename, designScreenPath, DETACHED_GROUP, emptyScreensNote, PREVIEWS_GROUP, COVERS_GROUP, type DesignComponent, type DesignScreenNode, type DesignTree } from '../lib/designTree'
 import type { ScreenCommand } from '../lib/screens'
 import type { NavigatorLayout } from '../lib/layout'
@@ -48,6 +48,12 @@ export type HierarchyView = 'layers' | 'files'
 const INDENT = 16
 const BASE = 4
 
+/** What a new screen can start as, in the Starts with menu, each as it lays its views out (Wave 4c). */
+const STARTS_WITH: Readonly<Record<ContainerLayout, string>> = {
+  VStack: 'A column (top to bottom)', HStack: 'A row (left to right)', ZStack: 'An overlap (front to back)',
+  List: 'A list (rows that scroll)', Form: 'A form (settings in groups)', ScrollView: 'A scroll (content that scrolls)',
+}
+
 /**
  * Design's left panel: App > Screens > Views.
  *
@@ -62,7 +68,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
   const [focus, setFocus] = useState(false)
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(['app', 'group:screens']))
   const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set())
-  const [editing, setEditing] = useState<{ view: string | null; name: string; layout: 'VStack' | 'HStack' | 'ZStack' } | null>(null)
+  const [editing, setEditing] = useState<{ view: string | null; name: string; layout: ContainerLayout } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const needle = query.trim().toLowerCase()
@@ -136,7 +142,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
   const addScreen = <button type="button" className={styles.add} aria-label="Add screen" title="Add screen" disabled={busy || pending} onClick={() => { setEditing({ view: null, name: 'New screen', layout: 'VStack' }); setError(null) }} data-testid="add-screen"><Icon name="plus" size={14} /></button>
   const form = editing && <form className={styles.form} onSubmit={event => { event.preventDefault(); void command(editing.view ? { kind: 'rename', view: editing.view, name: editing.name } : { kind: 'create', name: editing.name, layout: editing.layout }) }}>
     <label>{editing.view ? 'Screen name' : 'New screen name'}<input autoFocus aria-label="Screen name" maxLength={100} value={editing.name} onChange={event => setEditing({ ...editing, name: event.target.value })} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setEditing(null) } }} /></label>
-    {!editing.view && <label>Starts with<select aria-label="Screen layout" value={editing.layout} onChange={event => setEditing({ ...editing, layout: event.target.value as typeof editing.layout })}><option value="VStack">A column (top to bottom)</option><option value="HStack">A row (left to right)</option><option value="ZStack">An overlap (front to back)</option></select></label>}
+    {!editing.view && <label>Starts with<select aria-label="Screen layout" value={editing.layout} onChange={event => setEditing({ ...editing, layout: event.target.value as typeof editing.layout })}>{CONTAINER_LAYOUTS.map(layout => <option key={layout} value={layout}>{STARTS_WITH[layout]}</option>)}</select></label>}
     <div><button type="submit" disabled={busy || pending || !editing.name.trim()}>{editing.view ? 'Rename' : 'Add screen'}</button><button type="button" onClick={() => setEditing(null)}>Cancel</button></div>
   </form>
 

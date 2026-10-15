@@ -84,7 +84,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'navigationTitle', 'navigationBarTitleDisplayMode', 'navigationDestination', 'toolbar', 'toolbarBackground',
   'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'presentationDetents',
   'presentationCornerRadius', 'presentationDragIndicator', 'presentationBackground', 'interactiveDismissDisabled',
-  'popover', 'tabItem', 'tag', 'tabViewStyle',
+  'popover', 'tabItem', 'tag', 'tabViewStyle', 'indexViewStyle',
   // lists
   'listStyle', 'listRowBackground', 'listRowSpacing', 'listSectionSpacing', 'scrollContentBackground',
   // interaction
@@ -95,7 +95,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // lists and forms
   'searchable', 'onDelete', 'contextMenu', 'badge', 'presentationBackgroundInteraction', 'inspector',
   'keyboardType', 'submitLabel', 'onSubmit', 'textInputAutocapitalization', 'autocorrectionDisabled',
-  'listRowSeparator', 'listRowSeparatorTint', 'listRowInsets', 'scrollIndicators', 'swipeActions',
+  'listRowSeparator', 'listRowSeparatorTint', 'listRowInsets', 'scrollIndicators', 'swipeActions', 'scrollTargetBehavior',
   // control styles, each of which changes what is drawn
   'toggleStyle', 'pickerStyle', 'labelStyle', 'progressViewStyle', 'gaugeStyle',
   'controlSize', 'buttonBorderShape', 'monospaced',
@@ -228,7 +228,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   // motion
   'matchedGeometryEffect', 'phaseAnimator', 'keyframeAnimator',
   // scrolling and lists
-  'refreshable', 'scrollDismissesKeyboard', 'scrollTargetBehavior', 'scrollPosition', 'scrollTransition',
+  'refreshable', 'scrollDismissesKeyboard', 'scrollPosition', 'scrollTransition',
   'scrollDisabled', 'listSectionSeparator',
   // presentation and chrome
   'navigationBarBackButtonHidden', 'statusBarHidden',
@@ -310,7 +310,7 @@ export const OTHER_APPLE_MODIFIERS: ReadonlySet<string> = new Set([
   'scrollEdgeEffectHidden', 'navigationViewStyle', 'navigationSubtitle', 'toolbarColorScheme', 'toolbarBackgroundVisibility',
   'toolbarVisibility', 'toolbarTitleDisplayMode', 'toolbarRole', 'persistentSystemOverlays', 'statusBar', 'tabViewBottomAccessory',
   'tabBarMinimizeBehavior', 'presentationCompactAdaptation', 'presentationContentInteraction', 'presentationSizing', 'tableStyle',
-  'formStyle', 'groupBoxStyle', 'disclosureGroupStyle', 'controlGroupStyle', 'navigationSplitViewStyle', 'indexViewStyle',
+  'formStyle', 'groupBoxStyle', 'disclosureGroupStyle', 'controlGroupStyle', 'navigationSplitViewStyle',
   'labeledContentStyle', 'textEditorStyle', 'menuIndicator', 'menuOrder', 'tipBackground', 'tipViewStyle', 'widgetAccentable',
   'backgroundPreferenceValue', 'overlayPreferenceValue',
 ])
@@ -419,6 +419,9 @@ export const BLEND_MODES: ReadonlyMap<string, string> = new Map([
 export const STYLE_TOKENS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['buttonStyle', new Set(['automatic', 'plain', 'borderless', 'bordered', 'borderedProminent', 'glass', 'glassProminent'])],
   ['tabViewStyle', new Set(['automatic', 'page'])],
+  ['indexViewStyle', new Set(['page'])],
+  // A ScrollView that pages snaps by its size (Wave 4c); one aligned to its views scrolls freely.
+  ['scrollTargetBehavior', new Set(['paging'])],
   ['pickerStyle', new Set(['automatic', 'menu', 'segmented', 'inline', 'wheel'])],
   ['toggleStyle', new Set(['automatic', 'switch', 'button', 'checkbox'])],
   ['labelStyle', new Set(['automatic', 'titleAndIcon', 'titleOnly', 'iconOnly'])],
