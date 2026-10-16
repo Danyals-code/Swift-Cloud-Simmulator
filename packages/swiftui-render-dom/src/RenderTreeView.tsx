@@ -2,7 +2,7 @@ import { createContext, useContext, useId, useState, useRef, useLayoutEffect, us
 import { ScrollIndicator } from './ScrollIndicator'
 import { ShapeView, VectorPathView } from './ShapeView'
 import { SliderView, ControlStyles } from './SliderView'
-import { placeholderWords, symbolMetrics, shapePath } from '@studio/shared'
+import { inlineSymbolBox, placeholderWords, symbolMetrics, shapePath, type Point, type Size } from '@studio/shared'
 import { memo, useMemo, type CSSProperties, type ReactNode } from 'react'
 import {
   cssAnimation,
@@ -1215,7 +1215,7 @@ function TextLines({ node, roll }: { node: RenderNode; roll?: Roll }) {
   // line is made of more than one. Single-run text is almost all text, so this is the
   // path that has to stay cheap - and it keeps the colour on the element the line *is*
   // rather than on a child, which is what anything reading the painted colour expects.
-  const typography: CSSProperties = { ...runStyle(first, node.frame), ...(payload.runs.length > 1 ? { textDecoration: undefined, textDecorationColor: undefined, backgroundImage: undefined, backgroundClip: undefined, WebkitBackgroundClip: undefined } : {}), whiteSpace: 'pre' }
+  const typography: CSSProperties = { ...runStyle(first, node.frame), ...(payload.runs.length > 1 ? { textDecoration: undefined, textDecorationColor: undefined, backgroundImage: undefined, backgroundClip: undefined, WebkitBackgroundClip: undefined, backgroundSize: undefined, backgroundPosition: undefined } : {}), whiteSpace: 'pre' }
 
   if (payload.lines && payload.lines.length > 0) {
     return (
@@ -1244,12 +1244,16 @@ function TextLines({ node, roll }: { node: RenderNode; roll?: Roll }) {
               }}
             >
               {line.slices
-                ? line.slices.map((slice, j) => {
+                ? line.slices.map((slice, j, slices) => {
                     const run = payload.runs[slice.run] ?? first
-                    return <span key={j} dir="auto" style={{ ...runStyle(run, node.frame), position: 'relative',
-                      top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{decoratedText(run, slice.text)}</span>
+                    // Where the slice starts in the text, so a gradient runs across the whole of it (Wave 6a).
+                    let x = justify === 'center' ? (node.frame.width - line.width) / 2 : justify === 'flex-end' ? node.frame.width - line.width : 0
+                    for (let k = 0; k < j; k++) x += slices[k]!.width
+                    const at = { x, y: line.origin.y }
+                    return <span key={j} dir="auto" style={{ ...runStyle(run, node.frame, at), position: 'relative',
+                      top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{inlineContent(run, slice.text, node.frame, at)}</span>
                   })
-                : <span dir="auto" aria-hidden={roll?.exiting || undefined} style={{ position: 'relative', top: line.baseline - fontBaseline - (first.baselineOffset ?? 0) }}>{roll ? rolled(line.text, roll) : decoratedText(first, line.text)}</span>}
+                : <span dir="auto" aria-hidden={roll?.exiting || undefined} style={{ position: 'relative', top: line.baseline - fontBaseline - (first.baselineOffset ?? 0) }}>{roll ? rolled(line.text, roll) : inlineContent(first, line.text, node.frame)}</span>}
             </div>
           )
         })}
@@ -1283,7 +1287,42 @@ function TextLines({ node, roll }: { node: RenderNode; roll?: Roll }) {
  * CSS has one property for both and a span may have either or both.
  */
 function RunSpan({ run, text }: { run: TextRun; text: string }) {
-  return <span style={runStyle(run)}>{decoratedText(run, text)}</span>
+  return <span style={runStyle(run)}>{inlineContent(run, text)}</span>
+}
+
+/** What a run draws: its words, or the symbol or image it stands for (Wave 6a). */
+function inlineContent(run: TextRun, text: string, size?: Size, at?: Point): ReactNode {
+  if (run.symbol) return <InlineSymbol run={run} size={size} at={at} />
+  if (run.bitmap) return <img src={run.bitmap.url} alt={run.bitmap.name} draggable={false} style={{ display: 'inline-block', width: run.bitmap.width, height: run.bitmap.height, verticalAlign: 'baseline' }} />
+  return decoratedText(run, text)
+}
+
+/**
+ * An SF Symbol in text (Wave 6a), in the box `inlineSymbolBox` gives it, as iOS 27 draws
+ * its ink (docs/parity/native/iphone18pro-text). Under a gradient it shows its part of the
+ * gradient the text is painted with, which `background-clip: text` can't reach.
+ */
+function InlineSymbol({ run, size, at }: { run: TextRun; size?: Size | undefined; at?: Point | undefined }) {
+  const id = useId().replaceAll(':', '')
+  const asset = symbolAsset(run.symbol!, id)
+  const box = inlineSymbolBox(run.symbol!, run.font.size)
+  const weight = { '--symbol-weight': symbolStrokeScale(run.font.weight) } as CSSProperties
+  const area = run.fillFrame ?? (size && { x: 0, y: 0, width: size.width, height: size.height })
+  const fill = run.foregroundFill && area
+  return (
+    <span data-symbol={run.symbol} aria-hidden style={{ display: 'inline-block', width: box.advance, height: box.height, verticalAlign: -box.bottom }}>
+      {asset && (fill
+        ? <svg width="100%" height="100%" viewBox={`0 0 ${box.advance} ${box.height}`} style={{ display: 'block' }}>
+            <defs><mask id={`${id}-ink`} maskUnits="userSpaceOnUse" x="0" y="0" width={box.advance} height={box.height}>
+              <svg width={box.advance} height={box.height} viewBox={asset.viewBox} fill="white" color="white" style={weight} dangerouslySetInnerHTML={{ __html: asset.body }} />
+            </mask></defs>
+            <foreignObject width={box.advance} height={box.height} mask={`url(#${id}-ink)`}>
+              <div style={{ width: '100%', height: '100%', backgroundImage: cssFill(run.foregroundFill!, area), backgroundSize: `${area.width}px ${area.height}px`, backgroundPosition: `${area.x - (at?.x ?? 0)}px ${area.y - (at?.y ?? 0)}px`, backgroundRepeat: 'no-repeat' }} />
+            </foreignObject>
+          </svg>
+        : <svg width="100%" height="100%" viewBox={asset.viewBox} fill="currentColor" style={{ display: 'block', ...weight }} dangerouslySetInnerHTML={{ __html: asset.body }} />)}
+    </span>
+  )
 }
 
 function decoratedText(run: TextRun, text: string): ReactNode {
@@ -1292,7 +1331,7 @@ function decoratedText(run: TextRun, text: string): ReactNode {
 }
 
 /** Everything one run says about how its characters are drawn. */
-function runStyle(run: TextRun, size?: {width:number;height:number}): CSSProperties {
+function runStyle(run: TextRun, size?: Size, at?: Point): CSSProperties {
   // CSS has one property for both, and a run may carry either or both.
   const separate = run.underline && run.strikethrough && cssColor(run.underlineColor ?? run.color) !== cssColor(run.strikethroughColor ?? run.color)
   const decoration = separate ? '' : [
@@ -1301,6 +1340,9 @@ function runStyle(run: TextRun, size?: {width:number;height:number}): CSSPropert
   ]
     .filter(Boolean)
     .join(' ')
+  // A symbol paints its own fill; the box a fill spans is a mask's view, or the text's.
+  const fill = run.symbol ? undefined : run.foregroundFill
+  const area = run.fillFrame ?? (at && size ? { x: 0, y: 0, width: size.width, height: size.height } : undefined)
 
   return {
     fontFamily: run.font.family,
@@ -1310,7 +1352,9 @@ function runStyle(run: TextRun, size?: {width:number;height:number}): CSSPropert
     fontKerning: 'normal',
     lineHeight: `${run.font.lineHeight}px`,
     color: cssColor(run.color),
-    ...(run.foregroundFill ? { backgroundImage: cssFill(run.foregroundFill, size), backgroundClip: 'text', WebkitBackgroundClip: 'text', color: 'transparent' } : {}),
+    ...(fill ? { backgroundImage: cssFill(fill, area ?? size), backgroundClip: 'text', WebkitBackgroundClip: 'text', color: 'transparent' } : {}),
+    // Spread across the masked view, or across the whole text from where this slice starts (Wave 6a).
+    ...(fill && area ? { backgroundSize: `${area.width}px ${area.height}px`, backgroundPosition: `${area.x - (at?.x ?? 0)}px ${area.y - (at?.y ?? 0)}px`, backgroundRepeat: 'no-repeat' } : {}),
     ...(decoration ? { textDecoration: decoration, textDecorationColor: cssColor((run.underline ? run.underlineColor : run.strikethroughColor) ?? run.color) } : {}),
     // The paint half of tracking; the measurement half already happened in the worker,
     // so the two agree by construction rather than by both guessing.

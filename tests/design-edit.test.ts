@@ -48,7 +48,10 @@ describe('R03/R04 minimal source recipes', () => {
   it('does not expose computed, token or unsupported values as writable', () => {
     const source = wrap('Text(title.uppercased()).padding(gap).opacity(0.5)', 'let title = "A"; let gap = 8')
     const controls = target(source).controls!
-    expect(controls.some(c => ['Text', 'padding'].includes(c.label))).toBe(false)
+    // The words show read only, as the code writes them (Wave 6a); nothing else of them or the padding.
+    expect(controls.filter(c => ['Text', 'padding'].includes(c.label))).toEqual([
+      expect.objectContaining({ id: 'content:data', value: 'title.uppercased()', disabledReason: 'These words are worked out in Swift. Change them in Code.' }),
+    ])
     expect(edited(source, 'opacity', '0.75')).toBe(source.replace('opacity(0.5)', 'opacity(0.75)'))
   })
   it.each(['NaN', 'Infinity', '1e999', '', '-', '1 + 2', '0); bad()', '2'])('rejects invalid opacity %j without changing any source', value => {

@@ -54,6 +54,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
 | `Text` | ✅ | 3 | interpolation, with `specifier:` and `format:` inside it too, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`), and `Date.FormatStyle` field chains (`.dateTime.weekday(.wide).hour().minute()`) written in en-US order as Foundation writes them. `Text + Text` concatenates, and each half keeps its own face, colour and attributes, as does a `Text` interpolated into a `Text`. Interpolated into a `Button`'s or a navigation title, it is drawn as its words, without its styling. A title written as a literal, a `Text`'s or a `Button`'s, a `Label`'s, a `Section`'s or a navigation title, writes a number put into it as iOS 27 does: 2,000, and a Double with six decimals, 3.500000; a `String`, `verbatim:` and a project's own views keep Swift's text, 2000 |
+| Markdown in a literal title | ✅ | Wave 6a | a `Text`'s, `Button`'s, `Label`'s, `Toggle`'s, `Link`'s or `NavigationLink`'s title written as a literal is drawn as iOS 27 draws it: `**bold**`, `*italic*`, `***both***`, `~~strike~~` and `~strike~`, `` `code` `` in the monospaced face, and `[a link](url)` in the accent colour, with the marks left out. One parser, Apple's rules, decides what is Markdown for both the canvas and the Design panel: the flanking rules hold, so `5 * 3 * 2` and `snake_case` stay as written; a bare `https://apple.com`, `www.apple.com` or `support@apple.com`, and `<https://apple.com>`, are links; and `&amp;` is `&`. The marks reach across what is interpolated: `Text("**Rated \(Image(systemName: "star.fill")) 4.8**")` draws the words bold around the star, and a `Text` put into the title keeps its own styling inside the marks around it. The characters of an interpolated value are never parsed, and a `String` variable and `verbatim:` keep theirs, as on iOS. A `LocalizedStringKey` held in a variable is drawn as written, where iOS formats it. Before Wave 6a the marks were drawn as written, with no warning |
+| Images in text | ✅ | Wave 6a | `Text("Rated \(Image(systemName: "star.fill")) 4.8")` and `Text(Image(systemName: "heart.fill")) + Text(" Favourites")` draw the symbol inline, at the size iOS 27 gives it beside the text's font and on its baseline, in the text's colour or, under a gradient `.foregroundStyle`, in the gradient. A project image, `Text("Named \(Image("photo")) here")`, draws inline too. Before Wave 6a the first drew "View" and the second dropped the image |
 | `Label` | ✅ | 6 | icon then title. In a list row, as iOS 27 draws it, the icon is a quarter larger than the row's text, tinted and centred in a 24-pt column, with the title at 72 on the phone |
 | `Image(systemName:)` | 🟡 | 6 | mapped Ionicons approximations, and shapes drawn here after the iOS 27 simulator's glyph where no Ionicon is close (a cup and saucer, a flame, a waveform, a closed book, outlined charts); unknown names use an explicit fallback, not Apple artwork |
 | `Image("asset")` | ✅ | - | PNG and JPEG images in the project's Assets, with light and dark variants, resized, scaled and clipped as iOS does. SVG, PDF and HEIC are rejected when added, rather than drawn wrongly |
@@ -68,7 +70,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Gauge` | 🟡 | 7 | linear labelled bars and value-dependent circular arcs/markers; native metrics and all label/style arrangements remain approximate |
 | `Canvas` | ✅ | 7 | `fill` and `stroke`; drawings become the same vector nodes a `Path` does |
 | `TimelineView` | 🟡 | - | its content is drawn once, for the moment of the render: `context.date` is now. The schedule is a clock the preview does not run |
-| `Chart` (Swift Charts) | ⬜ | - | needs a mark model and a plottable-value protocol of its own, which is a package rather than a view |
+| `Chart` (Swift Charts) | ⬜ | Wave 6e | drawn as a labelled box until Wave 6e draws the marks, axes and legend. Since Wave 6a every mark (`SectorMark` too) and the chart modifiers (`.chartXAxis`, `.chartYScale`, `.chartLegend`, `.annotation`) are known names, so none of them says Xcode won't build |
 | `Map` (MapKit) | ✗ | - | Needs a licensed tile source; placeholder with a note |
 | `UIViewRepresentable` | ✗ | - | Cannot run UIKit; labelled placeholder |
 
@@ -105,6 +107,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.navigationDestination` | 🟡 | 6 | `for:` with a metatype, resolved on link push. `isPresented:` and `item:` overloads warn as unsupported |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
 | `.toolbar` | 🟡 | 6 | leading/trailing items work, drawn as iOS 27 draws them: a Label as its icon alone in a 44-pt glass circle, text in a 44-pt capsule, the label colour unless a tint is written, and items side by side in one capsule. A NavigationLink in the toolbar pushes. Keyboard, bottomBar and principal placements warn and are omitted |
+| `ToolbarSpacer`, `DefaultToolbarItem` | ⬜ | Wave 6c | known Apple names since Wave 6a: drawn as labelled boxes that say they are not drawn in the preview, where the checker used to say Xcode won't build them |
 | `.toolbarBackground` | 🟡 | - | navigation bar only: `.hidden` paints no bar background, so the content behind shows, and a colour or gradient paints that. `.visible` and the other bars draw as before. A view extending under the bar with `.ignoresSafeArea` also clears the bar, as iOS does at the top of the content |
 | `TabView` | ✅ | 6 | tab bar with `.tabItem` or `Tab`, bound or unbound selection, pages from `ForEach` selected by their ids, a `TabSection`'s tabs in the bar with the others, and `.page`, whose dots are also the way through - a preview has no swipe |
 | `NavigationSplitView` | 🟡 | - | collapsed sidebar stack on every device; no iPad multi-column layout |
@@ -142,6 +145,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.safeAreaInset` | ✅ | - | all four edges; the content is *inset*, not overlaid, so a bar drawn this way does not cover the last row |
 | `.alignmentGuide` | ✅ | - | the stack aligns guides rather than edges, so a guide can be replaced. `d.width`, `d.height` and `d[.leading]` and friends all read |
 | `.containerRelativeFrame` | 🟡 | - | takes the container's size along the named axes, divided by `count`. The container is whatever proposed the size, which is the scroll view or stack above it |
+| `.zIndex` | ✅ | Wave 6a | raises or lowers a view in the paint order of its `ZStack`, stack or overlay, keeping the written order among equal values. Layout doesn't change, as on iOS |
 
 ## Modifiers - appearance
 
@@ -151,6 +155,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.background` (colour, gradient, shape, view) | ✅ | 6 | materials, content builders, alignment, and built-in shape clipping via `in:`; `fillStyle:` warns as unsupported. A colour, gradient or material reaches into the safe area its view touches, as the ShapeStyle form does in iOS 27; a view given as the background stays inside |
 | `.overlay` | ✅ | 6 | view arguments and content builders, including interactive content and alignment |
 | `.font` (text styles and `.system(size:weight:design:)`) | ✅ | 6 | a size from an `@ScaledMetric` property grows with Dynamic Type, as `.font(.system(size: iconSize, weight: .semibold))` does in the app |
+| `.font(.custom(_:size:))` with a family iOS ships | 🟡 | Wave 6a | Avenir Next, Georgia, Menlo, Helvetica Neue, Futura, Didot, Baskerville, Gill Sans, Palatino, Optima, American Typewriter, Courier New, Times New Roman, Verdana, Snell Roundhand, Marker Felt, Noteworthy, Rockwell, Chalkboard SE and Zapfino, by family name or by the exact PostScript name of a face iOS ships (`AvenirNext-DemiBold` is weight 600), with `relativeTo:` and `fixedSize:`. A name that looks like a face but isn't one, such as `Georgia-Light`, is a font iOS doesn't have: iOS draws the system font for it, and the checker warns rather than drawing Georgia. Drawn in the browser's own copy of the face where it has one, and in the closest web face otherwise, with no warning. A family iOS doesn't ship still warns that it is not in this project; font files of a project's own come in Wave 6f |
 | `.bold` / `.italic` / `.fontWeight` | ✅ | 6 | compose with `.font` in either order |
 | `.opacity` | ✅ | 3 |
 | `.cornerRadius` | ✅ | 3 |
@@ -159,7 +164,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.border` | ✅ | 6 |
 | `.rotationEffect` / `.scaleEffect` | ✅ | 6 | paint-time, so layout keeps the untransformed size |
 | `.blur` / `.saturation` / `.brightness` / `.contrast` / `.grayscale` | ✅ | 7 |
-| `.mask` | 🟡 | - | a gradient or a colour, as an argument or in the closure - the fade of an image into its background. Any other view as a mask warns and is drawn unmasked |
+| `.mask` | 🟡 | Wave 6a | a gradient or a colour, as an argument or in the closure, the fade of an image into its background. Since Wave 6a also a shape (`Color.blue.mask(Circle())`, drawn as its clip), a `Text` (the masked gradient or colour paints the letters, so a gradient masked by a Text is gradient text, as is `.overlay(gradient).mask(sameText)`), and a symbol `Image`, in either the argument or the `alignment:` closure form. A mask's own opacity counts, as on iOS: `.mask(Circle().fill(.black.opacity(0.3)))` shows the view at 30% inside the circle, and a mask painted with a translucent colour lets that much through. Any other view as a mask warns and is drawn unmasked |
 | `.blendMode` | 🟡 | - | the sixteen modes CSS shares with SwiftUI; `.plusLighter` and the `sourceAtop` family warn rather than drawing the nearest one |
 | `.hueRotation` / `.colorMultiply` | ✅ | - | the multiply is an overlay, since no CSS filter multiplies by a colour |
 | `.rotation3DEffect` | ✅ | - | a real rotation with a perspective, about the axis vector given |
@@ -182,7 +187,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.truncationMode` | ✅ | - | `.head`, `.middle` and `.tail`, decided against the whole remaining text rather than the last visible line |
 | `.allowsTightening` | ✅ | - | condenses up to half a point per character, and only where the text would otherwise break |
 | `.monospacedDigit` | ✅ | - | every digit takes the widest one's advance, in the measured frame as well as the paint |
-| `.symbolRenderingMode` / `.symbolVariant` | ⬜ | - | the substitute glyphs have no multicolour variants |
+| `.symbolVariant` | 🟡 | Wave 6a | `.fill`, `.circle`, `.square`, `.slash` and their chains, such as `.fill.circle`, draw the variant symbol (`star` becomes `star.circle.fill`) where iOS has that symbol, in SF Symbols' order whichever way the chain is written. Where the preview has no drawing for the composed name it draws the symbol as written, and the checker says so; iOS does the same where it has no such symbol (`folder` with `.square` draws `folder`). A variant on a container reaches every symbol inside it, and `.environment(\.symbolVariants, .fill)` does the same. `.symbolVariant(.none)` on a `TabView` changes nothing: iOS 27 keeps the tab icons filled, and so does the preview. `SymbolVariants` is a known type, so `let v: SymbolVariants = .fill` draws without a warning. Before Wave 6a a chain stopped the screen |
+| `.symbolRenderingMode` | ⬜ | Wave 6b | the substitute glyphs have no multicolour or hierarchical layers yet |
 
 ## Shapes and styles
 
@@ -201,6 +207,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `RadialGradient` / `AngularGradient` | ✅ | 6 | drawn as radial and conic gradients |
 | `Material` (`.ultraThinMaterial` etc.) | ✅ | 7 | a real translucent, blurred panel via `backdrop-filter`. `Material.ultraThin` and `.ultraThinMaterial` are the same value. Cut to a shape, as `.background(.regularMaterial, in: .capsule)` and `.fill(.regularMaterial)` are, the panel is cut itself, because a browser blurs nothing behind a box whose parent is cut |
 | `.glassEffect(_:in:)`, `Glass` | 🟡 | - | approximated as a material cut to the shape (a capsule unless `in:` gives another), with a light rim inside a hairline, measured over colour in the iOS 27 simulator: `.regular` lightens what is behind it by about 40% and blurs it over about 6 pt, `.clear` by about 12% with almost no blur, and `.tint(_:)` covers it at about 90%. `.interactive()` draws as the glass does at rest, and `.identity` draws nothing. The lens refraction, the highlights and the shadow are not drawn, and neither is `GlassEffectContainer`'s merging |
+| `GlassEffectContainer` | ⬜ | Wave 6c | a known Apple name since Wave 6a: drawn as a labelled box that says it is not drawn in the preview, where the checker used to say Xcode won't build it. It builds at iOS 26 |
 | `ShapeStyle` conformances generally | 🟡 | 6 | colours, tokens and gradients anywhere a style is taken |
 
 ## Interaction and lifecycle
@@ -365,6 +372,7 @@ missing without anything saying so.
 | `Calendar` | 🟡 | - | `Calendar.current`, in the preview's time zone: `component(_:from:)`, `date(byAdding:value:to:)`, `startOfDay(for:)`, `isDateInToday` and its neighbours, `isDate(_:inSameDayAs:)`, `isDate(_:equalTo:toGranularity:)` by year, month, week (starting on Sunday), day, hour, minute or second, and `dateComponents` from one date or between two, largest unit first |
 | `Timer` | 🟡 | - | `Timer.publish(every:on:in:).autoconnect()` with `.onReceive`, and `Timer.scheduledTimer`, are accepted and never fire: the preview draws one moment, and warns where a timer is made |
 | `URL` | 🟡 | - | `URL(string:)` is failable and the string is kept as written; `absoluteString`, `path`, `host`, `scheme`, `query`, `lastPathComponent`, `pathExtension`, `appendingPathComponent`. Nothing is fetched |
+| `AttributedString` | 🟡 | Wave 6a | a value of runs: `AttributedString("…")` and `try AttributedString(markdown:)`, `+` and `+=`, the whole-string `.font`, `.foregroundColor`, `.backgroundColor`, `.underlineStyle`, `.strikethroughStyle`, `.kern` and `.link`, `range(of:)` with a range subscript that sets one of them, and `characters.count`; `AttributedString(localized:)`; the same attributes set through the `.swiftUI` scope (`text.swiftUI.foregroundColor = .red`), through an `AttributeContainer`, or as `inlinePresentationIntent` (`.stronglyEmphasized` is bold). `Text(attributed)` draws it, and so does a `Text` it is interpolated into, `Text("Note: \(text)")`, run by run. `.backgroundColor` is kept but not drawn, and the checker says so on an `AttributedString` only. A member it doesn't model warns rather than stopping. Before Wave 6a any use was an error that blanked the screen. Needs iOS 15 |
 | `Codable` over JSON | ⬜ | - | listed in Phase 2's scope and never built |
 | `DateFormatter`, `NumberFormatter`, `Measurement` | ⬜ | - | `Text`'s `format:` styles cover what view code usually needs |
 
@@ -517,6 +525,20 @@ The right-hand column is the half that matters. A pass that cries wolf is worse 
 pass, because people stop reading the panel and then the true warnings go unread too -
 and the `mutating` row was exactly that until the defect register's Phase 6: it fired on
 the commonest shape in SwiftUI and offered a fix-it that broke the file it was applied to.
+
+## False warnings fixed in Wave 6a
+
+The checker said these real Apple names would not build in Xcode, with "Cannot find … in scope" or
+"does not recognise the modifier". Each builds in Xcode 27, so each is now a known name. Where the
+preview doesn't draw it yet, its warning says it is not drawn in the preview instead:
+
+- `GlassEffectContainer`, `ToolbarSpacer` and `DefaultToolbarItem` (drawn in Wave 6c);
+- `SectorMark`, `.chartXAxis`, `.chartYScale`, `.chartLegend` and `.annotation` (drawn in Wave 6e);
+- `AttributedString`, which was an error that blanked the screen, `AttributeContainer` and `SymbolVariants`, and `.symbolVariant(.fill.circle)`, which stopped it;
+- `.font(.custom(_:size:))` with a family iOS ships, which warned that the font was not in this project;
+- `.position(by:)` on a Charts mark and `.searchToolbarBehavior(.minimize)`, which both build in Xcode 27.
+
+Two warnings were narrowed so they fire only where they are true: the one that an `AttributedString`'s `backgroundColor` is not drawn fires on an `AttributedString` alone, never on a `backgroundColor` of a project's own type, and the Design panel's "Drawn as Markdown" note shows only where Apple's parser formats something, not on every `*` or `_`.
 
 ## Additional confirmed gaps from the September 2026 audit
 

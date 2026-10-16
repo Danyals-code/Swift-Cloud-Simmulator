@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
 import { buildAuthoringModel } from '@studio/swift-sema'
+import { typecheckInXcode, XCODE } from '../../../../tests/helpers/layer-project'
 import { STYLE_EXAMPLE, SWIFTUI_GUIDANCE } from './guidance'
 
 /**
@@ -10,6 +11,52 @@ import { STYLE_EXAMPLE, SWIFTUI_GUIDANCE } from './guidance'
 
 /** The SF Symbols the prompts offer, as the guidance lists them. */
 const offered = () => new Set(SWIFTUI_GUIDANCE.match(/SF Symbols[^:]*: ([^\n]+)/)![1]!.split(', '))
+
+/** The forms the guidance asks for since Wave 6a, on one screen. */
+const RICH_TEXT = `import SwiftUI
+@main struct NotesApp: App { var body: some Scene { WindowGroup { NavigationStack { NoteScreen() } } } }
+struct NoteScreen: View {
+    private var greeting: AttributedString {
+        var text = AttributedString("Welcome back")
+        text.foregroundColor = .blue
+        return text
+    }
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("**Bold** and *italic*, with a [link](https://apple.com)")
+            Text(greeting)
+            Text("Rated \\(Image(systemName: "star.fill")) 4.8")
+            Image(systemName: "star").symbolVariant(.fill.circle)
+            LinearGradient(colors: [.pink, .orange], startPoint: .leading, endPoint: .trailing)
+                .frame(height: 40)
+                .mask(Text("Gradient").font(.largeTitle.bold()))
+            ZStack {
+                Circle().fill(.red).frame(width: 40, height: 40).zIndex(1)
+                Circle().fill(.blue).frame(width: 60, height: 60)
+            }
+        }
+        .navigationTitle("Notes")
+    }
+}`
+
+/** Real SwiftUI the preview can't draw yet, which the guidance still steers away from (Wave 6a). */
+const GLASS = `import SwiftUI
+@main struct GlassApp: App { var body: some Scene { WindowGroup { NavigationStack { GlassScreen() } } } }
+struct GlassScreen: View {
+    var body: some View {
+        GlassEffectContainer {
+            HStack {
+                Text("One").padding().glassEffect()
+                Text("Two").padding().glassEffect()
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { Button("Edit") { } }
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
+            ToolbarItem(placement: .topBarTrailing) { Button("Share") { } }
+        }
+    }
+}`
 
 describe('the SwiftUI the AI is asked for', () => {
   it('says how iOS writes a number put into a title, and the forms that write it as meant', () => {
@@ -81,6 +128,31 @@ struct MessageScreen: View {
     expect([...preview.diagnostics.map(d => d.message), ...preview.logs.filter(log => log.level === 'error' || log.level === 'warn').map(log => log.message)]).toEqual([])
   })
 
+  it('asks for Markdown, AttributedString, images in text, masks, zIndex and symbol variants, which the preview draws as iOS does (Wave 6a)', () => {
+    for (const banned of ['Markdown or links inside Text strings', 'GlassEffectContainer and glass button styles']) expect(SWIFTUI_GUIDANCE).not.toContain(banned)
+    for (const offered of ['Markdown', 'AttributedString', 'Text("Rated \\(Image(systemName: "star.fill")) 4.8")', '.mask', '.zIndex', '.symbolVariant(.fill.circle)']) expect(SWIFTUI_GUIDANCE).toContain(offered)
+    resetPipelineState()
+    const files = [{ id: 'App.swift', text: RICH_TEXT }]
+    const preview = compile({ files, canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1 })
+    expect([...preview.diagnostics.map(d => d.message), ...preview.logs.filter(log => log.level === 'error' || log.level === 'warn').map(log => log.message)]).toEqual([])
+  })
+
+  it('steers away from GlassEffectContainer and ToolbarSpacer as real SwiftUI the preview can’t draw yet, which the checker no longer says Xcode won’t build (Wave 6a)', () => {
+    expect(SWIFTUI_GUIDANCE).toContain("Real SwiftUI that Xcode builds but the preview can't draw yet, so leave it out for now: GlassEffectContainer and ToolbarSpacer")
+    resetPipelineState()
+    const files = [{ id: 'App.swift', text: GLASS }]
+    const preview = compile({ files, canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1 })
+    expect(preview.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(preview.diagnostics.map(d => d.message).filter(message => /won.t build|Cannot find|does not recognise/.test(message))).toEqual([])
+    expect(preview.logs.filter(log => log.level === 'error')).toEqual([])
+  })
+
+  it('keeps Charts out until the preview draws them, saying so rather than that Xcode rejects them (Wave 6a)', () => {
+    expect(SWIFTUI_GUIDANCE).toContain("and Charts, as the preview can't draw Charts yet")
+    expect(SWIFTUI_GUIDANCE).not.toMatch(/never use them:[^\n]*Charts/)
+    expect(SWIFTUI_GUIDANCE).not.toMatch(/Charts[^\n]*(Xcode won.t|cannot be built)/)
+  })
+
   it('offers only SF Symbols the preview draws and Apple ships', () => {
     const symbols = offered()
 
@@ -108,4 +180,10 @@ struct MessageScreen: View {
     expect(design.nodes.find(node => node.kind === 'collection')?.collection).toMatchObject({ recordType: 'Trip', mutable: true })
     expect(design.nodes.filter(node => node.behavior?.canConfigureAction).length).toBeGreaterThanOrEqual(2)
   })
+})
+
+describe.skipIf(!XCODE)('the Wave 6a forms, in Xcode 27', () => {
+  it('type-check with warnings as errors', () => {
+    typecheckInXcode([RICH_TEXT, GLASS])
+  }, 300_000)
 })

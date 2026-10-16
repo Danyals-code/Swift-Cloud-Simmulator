@@ -1,4 +1,4 @@
-import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, TEXT_STYLES, TOOLBAR_ITEMS, authoringCapability, colorInputText, deploymentVersion, helperPlaces, readTextParts, stackLayoutOf, variantCaseWords, writeTextParts, type AuthoringNode, type DesignControl, type SourceSpan, type VariantProperty } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, MARKDOWN_MARK, TEXT_STYLES, TOOLBAR_ITEMS, authoringCapability, markdownSpans, colorInputText, deploymentVersion, helperPlaces, readTextParts, stackLayoutOf, variantCaseWords, writeTextParts, type AuthoringNode, type DesignControl, type SourceSpan, type VariantProperty } from '@studio/shared'
 import { advancedControls } from './design-advanced-controls'
 import { toolbarItemControls } from './design-object-controls'
 import { sheetControls } from './design-sheet-controls'
@@ -116,6 +116,10 @@ export function buttonRole(written: string | undefined): 'none' | 'destructive' 
   return role === 'destructive' || role === 'cancel' ? role : undefined
 }
 
+/** The views whose literal title iOS draws as Markdown, as a Text's words are (Wave 6a). */
+const MARKDOWN_TITLES: ReadonlySet<string> = new Set(['Button', 'Label', 'Toggle', 'Link', 'NavigationLink'])
+/** Whether a call's callee is `Image`: a Text made of one (Wave 6a). */
+const isImage = (callee: Expr | undefined): boolean => callee?.kind === 'identifier' && callee.name === 'Image'
 /** A value read from somewhere, `item.title` or `price`, rather than one a type spells: `Date.now` names a type first. */
 const reference = (expr: Expr): boolean => expr.kind === 'identifier' ? /^[a-z_]/.test(expr.name) : expr.kind === 'memberAccess' && !!expr.base && reference(expr.base)
 
@@ -546,7 +550,26 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   if (node.kind !== 'component' && constructorEditable && node.name === 'List' && !modifiers.some(m => modifierName(m) === 'listStyle')) append('add:listStyle', 'List style', 'select', '', v => `.listStyle(.${v})`, listStyles)
   if (node.kind !== 'component' && constructorEditable && node.name === 'RoundedRectangle') argument('shape:radius', 'Shape corner radius', 'cornerRadius', 'pt', '', undefined, 0)
   if (node.kind !== 'component' && constructorEditable && node.name === 'Spacer') argument('spacer:minLength', 'Minimum spacing', 'minLength', 'pt', '', undefined, 0)
-  if (node.kind !== 'component' && node.name === 'Text' && base.args[0]) textContent(base.args[0].value)
+  if (node.kind !== 'component' && node.name === 'Text' && base.args[0]) {
+    const at = recipes.length
+    textContent(base.args[0].value)
+    markdown(base.args[0], at)
+  }
+  /**
+   * Marks the control added at `at` as words iOS draws as Markdown (Wave 6a): a literal
+   * `LocalizedStringKey` whose Markdown changes what is drawn, by the parser the preview
+   * draws with, given its parts as the preview gives them, `[text, value, text, …]`, each
+   * value's words unread; `verbatim:` never is.
+   */
+  function markdown(arg: { label: string | null; value: Expr }, at: number): void {
+    if (arg.label !== null || arg.value.kind !== 'stringLiteral' || !recipes[at]) return
+    const parts = ['']
+    for (const segment of arg.value.segments) {
+      if (segment.kind === 'text') parts[parts.length - 1] += segment.value
+      else parts.push('', '')
+    }
+    if (MARKDOWN_MARK.test(parts.join('')) && markdownSpans(parts)) Object.assign(recipes[at]!.control, { markdown: true })
+  }
   /**
    * A Text's words. Written with values in them, the words around each `\(…)` are one
    * value of their own (`textPartsRecipe`); a Text that is a value on its own shows it, read-only.
@@ -560,16 +583,35 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       add('content:parts', 'Text', 'text', parts.value, parts.write, undefined, undefined, undefined, 'Changes the words around the values; each value stays as the code writes it.', undefined, parts.disabledReason, parts.problem)
       return
     }
+    const before = recipes.length
     if (constructorEditable) replace('content', 'Text', value, 'text')
     const kind = property?.valueKind
     const reason = value.kind === 'stringLiteral' ? undefined
       : kind === 'data-binding' || base.args.slice(1).some(arg => ['format', 'style', 'formatter'].includes(arg.label ?? '')) && reference(value) ? 'This text comes from data. Change it in Code.'
-        : kind === 'component-argument' ? `This text is set where this ${property?.helperArgument ? 'helper' : 'view'} is used. Change it there.` : undefined
+        : kind === 'component-argument' || kind === 'computed' && perCopy(property!.declaration) ? `This text is set where this ${property?.helperArgument ? 'helper' : 'view'} is used. Change it there.`
+          // Nothing else says what these words are, so the card still shows them (Wave 6a): the words, or a choice's cases.
+          : recipes.length > before ? undefined
+            : isImage(viewCallChain(value)?.base.callee) ? `This text is an image. ${CHANGE_IN_CODE}`
+              : 'These words are worked out in Swift. Change them in Code.'
     if (!reason) return
     add('content:data', 'Text', 'text', raw(value.span), () => ({ ...value.span, text: raw(value.span) }), undefined, undefined, undefined, 'Shown as the code writes it.', undefined, reason)
   }
+  /**
+   * Whether the stored property declared at `name` is one each copy of this view sets: a
+   * `var` with a default, which the memberwise initialiser takes (Wave 6a). One with no
+   * default is already a component's argument.
+   */
+  function perCopy(name: SourceSpan | undefined): boolean {
+    const decl = project.structs.get(node.owner)
+    const field = decl?.members.find((m): m is VarDecl => m.kind === 'varDecl' && m.nameSpan.start === name?.start && m.nameSpan.file === name.file)
+    return !!field && !field.isLet && !field.accessor && !field.attributes.length && !field.modifiers.some(m => ['static', 'private', 'fileprivate'].includes(m.name)) && !decl!.members.some(m => m.kind === 'initDecl')
+  }
   // A Section's title is its Header, read with its footer (Wave 4a).
-  if (node.kind !== 'component' && constructorEditable && ['SecureField', 'Menu', 'DisclosureGroup', 'ContentUnavailableView', 'ProgressView', 'TextField', 'Toggle', 'Button', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Stepper', 'Picker', 'DatePicker', 'ColorPicker'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
+  if (node.kind !== 'component' && constructorEditable && ['SecureField', 'Menu', 'DisclosureGroup', 'ContentUnavailableView', 'ProgressView', 'TextField', 'Toggle', 'Button', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Stepper', 'Picker', 'DatePicker', 'ColorPicker'].includes(node.name) && base.args[0]?.label === null) {
+    const at = recipes.length
+    replace('title', 'Title', base.args[0].value, 'text')
+    if (MARKDOWN_TITLES.has(node.name)) markdown(base.args[0], at)
+  }
   // A card titled with its label before iOS 15, `GroupBox(label: Text("Title"))`, has the Title the words give it (Wave 4c).
   const cardLabel = node.kind !== 'component' && constructorEditable && node.name === 'GroupBox' && base.args[0]?.label === 'label' ? viewCallChain(base.args[0].value)?.base : undefined
   if (cardLabel?.callee.kind === 'identifier' && cardLabel.callee.name === 'Text' && cardLabel.args.length === 1 && cardLabel.args[0]!.label === null) replace('title', 'Title', cardLabel.args[0]!.value, 'text')

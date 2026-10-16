@@ -59,11 +59,12 @@ const APPLIED = [
   '.listRowInsets(EdgeInsets())', '.ignoresSafeArea()', '.mask { Circle() }', '.monospacedDigit()',
   '.safeAreaInset(edge: .bottom) { Text("Bar") }', '.searchable(text: .constant(""))', '.presentationDetents([.medium])',
   '.shadow(color: .black, radius: 4, y: 2)', '.swipeActions { Button("Delete") { } }', '.contentTransition(.numericText())',
+  '.zIndex(1)',
 ]
 /** Apple modifiers the preview names and does not draw, and real ones it has no list of. */
 const NOT_DRAWN = [
   '.refreshable { }', '.contentShape(Rectangle())', '.symbolRenderingMode(.hierarchical)',
-  '.zIndex(1)', '.fontWidth(.condensed)', '.scrollTransition { content, phase in content }',
+  '.fontWidth(.condensed)', '.scrollTransition { content, phase in content }',
   '.sensoryFeedback(.success, trigger: count)', '.labelsHidden()',
 ]
 
@@ -103,7 +104,6 @@ describe('what a known Apple modifier reads as', () => {
     ['.refreshable { }', 'behavior'],
     ['.contentShape(Rectangle())', 'behavior'],
     ['.symbolRenderingMode(.hierarchical)', 'appearance'],
-    ['.zIndex(1)', 'layout'],
     ['.fontWidth(.condensed)', 'text'],
     ['.sensoryFeedback(.success, trigger: count)', 'behavior'],
   ])('%s is not drawn in the preview, in its own category', (modifier, category) => {

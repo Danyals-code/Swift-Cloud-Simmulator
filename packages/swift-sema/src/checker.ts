@@ -1,5 +1,5 @@
 import type { Diagnostic, DiagnosticCode, FixIt, SourceSpan } from '@studio/shared'
-import { SYMBOL_MAP, TEXT_STYLES, symbolDefinition } from '@studio/shared'
+import { MASK_PAINTS, MASK_RECEIVER_MODIFIERS, MASK_SHAPES, MASK_SHAPE_MODIFIERS, SYMBOL_MAP, TEXT_STYLES, iosFont, symbolDefinition, symbolVariantName } from '@studio/shared'
 import type {
   Block,
   ConformanceModel,
@@ -39,6 +39,8 @@ import {
   BLEND_MODES,
   STYLE_TOKENS,
   UNIMPLEMENTED_MODIFIERS,
+  CHART_MARKS,
+  CHART_MARK_MODIFIERS,
   APPLE_VIEW_MODIFIERS,
   UNIMPLEMENTED_VIEWS,
 } from './builtins'
@@ -428,7 +430,7 @@ export class Checker {
         this.checkAttributes(decl.attributes)
         const inner = scope.child()
         for (const param of decl.params) {
-          inner.declare({ name: param.internalName, kind: 'parameter', span: param.span })
+          inner.declare({ name: param.internalName, kind: 'parameter', span: param.span, words: holdsWords(param.type) })
           if (param.type) this.checkType(param.type)
           if (param.defaultValue) this.checkExpression(param.defaultValue, scope)
         }
@@ -555,7 +557,7 @@ export class Checker {
       if (member.kind === 'varDecl') {
         if (seen.has(member.name)) continue
         seen.add(member.name)
-        scope.declare({ name: member.name, kind: 'property', span: member.nameSpan })
+        scope.declare({ name: member.name, kind: 'property', span: member.nameSpan, words: holdsWords(member.typeAnnotation, member.initializer) })
         // `@State var count` also exposes the projection `$count`.
         if (propertyWrapperOf(member)) {
           scope.declare({ name: `$${member.name}`, kind: 'property', span: member.nameSpan })
@@ -675,7 +677,7 @@ export class Checker {
     switch (statement.kind) {
       case 'exprStmt': {
         const outer = this.viewCallee
-        this.viewCallee = rootCallee(statement.expression)
+        this.viewCallee = rootCall(statement.expression)?.callee ?? null
         this.checkExpression(statement.expression, scope)
         this.viewCallee = outer
         return
@@ -691,7 +693,7 @@ export class Checker {
               scope.declare({ name: binding.name, kind: 'local', span: binding.span })
             }
           } else {
-            scope.declare({ name: decl.name, kind: 'local', span: decl.nameSpan })
+            scope.declare({ name: decl.name, kind: 'local', span: decl.nameSpan, words: holdsWords(decl.typeAnnotation, decl.initializer) })
           }
         } else if (decl.kind === 'funcDecl') {
           scope.declare({ name: decl.name, kind: 'function', span: decl.nameSpan })
@@ -837,13 +839,16 @@ export class Checker {
           // Called on a view's type itself, it is a static member making that view,
           // `ContentUnavailableView.search(text:)`, not a modifier (Wave 4b).
           const onAView = expr.callee.base?.kind !== 'identifier' && rootsInAView(expr.callee.base)
-          this.checkModifierCoverage(expr.callee.member, expr.callee.memberSpan, onAView)
+          this.checkModifierCoverage(expr.callee.member, expr.callee.memberSpan, onAView, expr.callee.base)
           if (onAView) {
-            this.checkArgumentLabels(expr.callee.member, expr.args)
+            // A mark's own `.position(by:)` is not a view's `.position(x:y:)` (Wave 6a).
+            if (!onAMark(expr.callee.base)) this.checkArgumentLabels(expr.callee.member, expr.args)
             this.checkBlendMode(expr.callee.member, expr.args)
-            this.checkMask(expr.callee.member, expr.args, expr.trailingClosure)
             this.checkStyleToken(expr.callee.member, expr.args)
+            if (expr.callee.member === 'symbolVariant') this.checkSymbolVariant(expr.callee.base, expr.args[0]?.value)
           }
+          // A colour is a view too, `Color.blue.mask(Circle())`, though its chain starts at no view's name.
+          if (expr.callee.member === 'mask' && expr.callee.base) this.checkMask(expr.callee.base, expr.args, expr.trailingClosure)
         }
         // `Color(.systemGray6)` and `Color(uiColor: .systemGray6)`, UIKit's colour by name.
         const only = expr.args.length === 1 ? expr.args[0]! : null
@@ -924,6 +929,11 @@ export class Checker {
       case 'assign':
         this.checkExpression(expr.target, scope)
         this.checkExpression(expr.value, scope)
+        // The one attribute of an AttributedString the preview keeps and does not draw (Wave 6a),
+        // on words the checker can see are attributed: `words`, `words[range]`, `words.swiftUI`.
+        if (expr.target.kind === 'memberAccess' && expr.target.member === 'backgroundColor' && expr.target.base && this.holdsWords(expr.target.base, scope)) {
+          this.report(expr.target.span, 'warning', 'unsupported_swiftui_modifier', "An AttributedString's backgroundColor is not drawn in the preview. The app draws it as written.", 'AttributedString.backgroundColor')
+        }
         return
 
       case 'ternary':
@@ -955,6 +965,14 @@ export class Checker {
       case 'errorExpr':
         return
     }
+  }
+
+  /** Whether `expr` is attributed words the checker can type: a name declared as them, a range of them, or their SwiftUI scope. */
+  private holdsWords(expr: Expr, scope: Scope): boolean {
+    if (expr.kind === 'identifier') return !!scope.lookup(expr.name)?.words
+    if (expr.kind === 'subscript') return this.holdsWords(expr.base, scope)
+    if (expr.kind !== 'memberAccess' || !expr.base) return false
+    return expr.base.kind === 'selfExpr' ? !!scope.lookup(expr.member)?.words : expr.member === 'swiftUI' && this.holdsWords(expr.base, scope)
   }
 
   /** A known view name does not imply that every SwiftUI overload works. */
@@ -1011,7 +1029,10 @@ export class Checker {
     const feature = `Font.${callee.member}`
     if (callee.member === 'custom' && (callee.base === null || isFontType(callee.base)) && expr.args[0]?.label === null) {
       const name = expr.args[0].value
-      const written = name.kind === 'stringLiteral' && name.segments.every(segment => segment.kind === 'text') ? `'${name.segments.map(segment => segment.kind === 'text' ? segment.value : '').join('')}' ` : ''
+      const family = name.kind === 'stringLiteral' && name.segments.every(segment => segment.kind === 'text') ? name.segments.map(segment => segment.kind === 'text' ? segment.value : '').join('') : undefined
+      // A family iOS ships needs no file, and the preview draws it (Wave 6a).
+      if (family !== undefined && iosFont(family)) return
+      const written = family !== undefined ? `'${family}' ` : ''
       this.report(expr.span, 'warning', 'unsupported_swiftui_modifier', `Custom font ${written}is not in this project; the preview draws the system font at the same size.`, feature)
     } else if (onFont && callee.member === 'width') {
       const width = expr.args[0]?.value
@@ -1145,7 +1166,7 @@ export class Checker {
    * the code is fine and the preview quietly ignores it, which is exactly what the
    * coverage contract exists to prevent.
    */
-  private checkModifierCoverage(member: string, span: SourceSpan, onAView: boolean): void {
+  private checkModifierCoverage(member: string, span: SourceSpan, onAView: boolean, base: Expr | null = null): void {
     if ((member === 'repeatForever' || member === 'repeatCount') && !this.declaredMethods.has(member)) {
       this.report(span, 'warning', 'unsupported_swiftui_modifier', `'.${member}' repeats the animation on iOS. The preview plays it once.`, `.${member}`)
       return
@@ -1166,8 +1187,9 @@ export class Checker {
     // know - `.frame(width: size.rounded())` - but those sit under an argument, not
     // on the chain, so they never reach here.
     if (NON_MODIFIER_MEMBERS.has(member)) return
-    // A real SwiftUI modifier on a view, which the preview does not draw: one Xcode builds.
-    if (APPLE_VIEW_MODIFIERS.has(member)) {
+    // A real SwiftUI modifier on a view, which the preview does not draw: one Xcode builds. A
+    // mark's own is real only on a mark (Wave 6a).
+    if (APPLE_VIEW_MODIFIERS.has(member) || CHART_MARK_MODIFIERS.has(member) && onAMark(base)) {
       this.report(span, 'warning', 'unsupported_swiftui_modifier', notApplied(member), `.${member}`)
       return
     }
@@ -1196,28 +1218,29 @@ export class Checker {
    * and guessing at one would warn on correct code.
    */
   /**
-   * `.mask` is drawn when the mask is a gradient or a colour - what fades an image
-   * into its background - and not for any other view, which says so here rather than
+   * `.mask` is drawn for a gradient or a colour, which fades what it masks; for a shape,
+   * which cuts it (Wave 6a); and for text or a symbol over a colour or a gradient, which is
+   * that text or symbol in the paint (Wave 6a). Any other mask says so here rather than
    * leaving the content drawn unmasked without a word.
    */
-  private checkMask(member: string, args: readonly { label: string | null; value: Expr }[], trailing: ClosureExpr | null): void {
-    if (member !== 'mask') return
+  private checkMask(base: Expr, args: readonly { label: string | null; value: Expr }[], trailing: ClosureExpr | null): void {
     const statement = trailing?.body.statements.length === 1 ? trailing.body.statements[0] : undefined
     const mask = args.find(arg => arg.label === null || arg.label === 'mask')?.value
       ?? (statement?.kind === 'exprStmt' ? statement.expression : statement?.kind === 'returnStmt' ? statement.value ?? undefined : undefined)
     if (!mask) return
-    let root: Expr = mask
-    while (root.kind === 'call' && root.callee.kind === 'memberAccess' && root.callee.base) root = root.callee.base
-    const name = root.kind === 'call' && root.callee.kind === 'identifier' ? root.callee.name
-      : root.kind === 'memberAccess' && root.base?.kind === 'identifier' ? root.base.name
-      : root.kind === 'memberAccess' && !root.base ? 'Color'
-      : null
-    if (name && ['LinearGradient', 'RadialGradient', 'AngularGradient', 'EllipticalGradient', 'Color'].includes(name)) return
+    const drawn = chainOf(mask), name = paintName(drawn.root) ?? ''
+    if (MASK_PAINTS.has(name)) return
+    // A shape cuts in a colour's opacity, never a gradient's (Wave 6a).
+    if (MASK_SHAPES.has(name) && drawn.calls.every(call => MASK_SHAPE_MODIFIERS.has(call)) && !drawn.firsts.some(isGradient)) return
+    const masked = chainOf(base)
+    const words = name === 'Text' || name === 'Image' && drawn.root.kind === 'call' && drawn.root.args.some(arg => arg.label === 'systemName')
+    const painted = MASK_PAINTS.has(paintName(masked.root) ?? '') || masked.overlays.some(overlay => MASK_PAINTS.has(paintName(chainOf(overlay).root) ?? ''))
+    if (words && painted && masked.calls.every(call => MASK_RECEIVER_MODIFIERS.has(call))) return
     this.report(
       mask.span,
       'warning',
       'unsupported_swiftui_modifier',
-      "'.mask' is drawn by the preview for a gradient or a colour; this mask is not, so the view is shown unmasked. It is exported to Xcode unchanged.",
+      "'.mask' is drawn by the preview for a gradient, a colour or a shape, and for text or a symbol masking a colour or a gradient; this mask is not, so the view is shown unmasked. It is exported to Xcode unchanged.",
       '.mask',
     )
   }
@@ -1355,6 +1378,31 @@ export class Checker {
   }
 
   /**
+   * Warns where `.symbolVariant` asks for a symbol the preview has no drawing for: it draws
+   * the base symbol (Wave 6a). Whether iOS has the composed one isn't known here, so nothing
+   * is said of what the app draws: `folder` with `.square` draws `folder` there too. Only a
+   * literal chain, `.fill.circle`, on literal names, the first such one said.
+   */
+  private checkSymbolVariant(base: Expr | null, variant: Expr | undefined): void {
+    const parts: string[] = []
+    for (let part = variant; part?.kind === 'memberAccess'; part = part.base ?? undefined) parts.unshift(part.member)
+    if (!base || !parts.length) return
+    // Each symbol named by a literal in what the variant is written on, an Image or Label or a
+    // container of them, short of one with a variant of its own.
+    let missing: readonly [asked: string, name: string] | undefined
+    walk(base, node => {
+      if (missing || node.kind === 'call' && node.callee.kind === 'memberAccess' && node.callee.member === 'symbolVariant') return false
+      const literal = node.kind === 'call' ? node.args.find(arg => arg.label === 'systemName' || arg.label === 'systemImage')?.value : undefined
+      if (literal?.kind !== 'stringLiteral' || literal.segments.some(segment => segment.kind !== 'text')) return
+      const name = literal.segments.map(segment => (segment.kind === 'text' ? segment.value : '')).join('')
+      const asked = symbolVariantName(name, parts.join('.'))
+      if (asked !== name && !symbolDefinition(asked) && symbolDefinition(name)) missing = [asked, name]
+    })
+    if (missing) this.report(variant!.span, 'warning', 'unsupported_swiftui_modifier', `The preview has no drawing for the symbol '${missing[0]}', so it draws '${missing[1]}'.`, '.symbolVariant')
+  }
+
+
+  /**
    * Warns on a style token the preview does not apply.
    *
    * The same rule as `checkBlendMode` above, generalised to every style modifier with
@@ -1438,16 +1486,64 @@ export class Checker {
   }
 }
 
-/** The callee of the call a chain of modifiers is rooted at: `RatingView` in `RatingView().padding()`. */
 /** What the preview says of a real SwiftUI modifier it does not apply, which Xcode builds as written. */
 function notApplied(member: string): string {
   return `'.${member}' is recognized but not applied by the preview. It is exported to Xcode unchanged.`
 }
 
-function rootCallee(expr: Expr): Expr | null {
+/** A gradient written as a shape's paint, which a shape mask doesn't cut with in the preview (Wave 6a). */
+const GRADIENTS: ReadonlySet<string> = new Set(['LinearGradient', 'RadialGradient', 'AngularGradient', 'EllipticalGradient', 'Gradient', 'linearGradient', 'radialGradient', 'angularGradient', 'ellipticalGradient'])
+
+/** A chain's root, the names of the calls made on it, the first argument of each, and what each `.overlay` lays over it. */
+function chainOf(expr: Expr): { root: Expr; calls: string[]; firsts: Expr[]; overlays: Expr[] } {
+  const calls: string[] = [], firsts: Expr[] = [], overlays: Expr[] = []
+  let root = expr
+  while (root.kind === 'call' && root.callee.kind === 'memberAccess' && root.callee.base) {
+    calls.push(root.callee.member)
+    const first = root.args[0]?.value, only = root.trailingClosure?.body.statements.length === 1 ? root.trailingClosure.body.statements[0] : undefined
+    if (first) firsts.push(first)
+    const laid = root.callee.member !== 'overlay' ? undefined : first ?? (only?.kind === 'exprStmt' ? only.expression : undefined)
+    if (laid) overlays.push(laid)
+    root = root.callee.base
+  }
+  return { root, calls, firsts, overlays }
+}
+
+/** Whether a paint is a gradient: `LinearGradient(…)`, `Gradient(…)` or `.linearGradient(…)`. */
+function isGradient(paint: Expr): boolean {
+  const callee = rootCall(paint)?.callee
+  return callee?.kind === 'identifier' ? GRADIENTS.has(callee.name) : callee?.kind === 'memberAccess' && !callee.base && GRADIENTS.has(callee.member)
+}
+
+/** The view or type a chain's root names: `Circle` for `Circle()`, `Color` for `Color.blue` or `.blue`. */
+function paintName(root: Expr): string | null {
+  return root.kind === 'call' && root.callee.kind === 'identifier' ? root.callee.name
+    : root.kind === 'memberAccess' && root.base?.kind === 'identifier' ? root.base.name
+      : root.kind === 'memberAccess' && !root.base ? 'Color'
+        : null
+}
+
+/** Attributed words: `backgroundColor` on these is kept and not drawn (Wave 6a). */
+const WORDS_TYPES: ReadonlySet<string> = new Set(['AttributedString', 'AttributeContainer'])
+/** Whether a declaration holds attributed words: written as their type, or made by its initialiser. */
+function holdsWords(type: TypeRef | null, value: Expr | null = null): boolean {
+  const named = type?.kind === 'optionalType' ? type.wrapped : type
+  if (named) return named.kind === 'namedType' && WORDS_TYPES.has(named.name)
+  while (value?.kind === 'try') value = value.operand
+  return value?.kind === 'call' && value.callee.kind === 'identifier' && WORDS_TYPES.has(value.callee.name)
+}
+
+/** The call a chain starts at: `Image(…)` for `Image(…).resizable()`. */
+function rootCall(expr: Expr): Extract<Expr, { kind: 'call' }> | undefined {
   let current: Expr = expr
   while (current.kind === 'call' && current.callee.kind === 'memberAccess' && current.callee.base) current = current.callee.base
-  return current.kind === 'call' && current.callee.kind === 'identifier' ? current.callee : null
+  return current.kind === 'call' ? current : undefined
+}
+
+/** Whether a chain starts at a chart's mark, `BarMark(…)`, whose modifiers are the mark's own. */
+function onAMark(expr: Expr | null): boolean {
+  const callee = expr && rootCall(expr)?.callee
+  return callee?.kind === 'identifier' && CHART_MARKS.has(callee.name)
 }
 
 /**

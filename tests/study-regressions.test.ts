@@ -957,7 +957,7 @@ describe("E11a: a view the preview doesn't know draws a placeholder, not a blank
   })
 
   it('says it may still build, since it may be part of SwiftUI', () => {
-    const [warning] = reported('var body: some View { GlassEffectContainer { Text("Inside") } }')
+    const [warning] = reported('var body: some View { Mystery { Text("Inside") } }')
     expect(warning!.message).toContain("If it isn't part of SwiftUI")
   })
 

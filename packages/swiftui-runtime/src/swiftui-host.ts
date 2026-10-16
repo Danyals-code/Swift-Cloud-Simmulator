@@ -1,5 +1,5 @@
 import type { LogLevel, SourceSpan } from '@studio/shared'
-import { hasCornerRadii } from '@studio/shared'
+import { hasCornerRadii, MARKDOWN_MARK, markdownSpans, type MarkdownSpan } from '@studio/shared'
 import {
   array,
   asKeyPath,
@@ -29,6 +29,8 @@ import {
 import { LEGACY_STYLE_TOKENS, SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS, isKnownGlobal } from '@studio/swift-sema'
 import { ZERO_INSETS } from '@studio/swiftui-layout'
 import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
+import { isSymbolVariant } from './sf-symbols'
+import { attributedMember, attributedRange, attributedSlice, attributedText, changeAttributed, isAttributed, isAttributeScope, joinAttributed, makeAttributed, markModifiers } from './attributed'
 import { CORNER_NAMES, cornerRadii, cornerRadiiOf, radiiValue } from './corners'
 import { containable, toFailure } from './failures'
 import { customFont, fontTokenName, parseFontToken } from './font-token'
@@ -295,13 +297,66 @@ const TITLED_VIEWS = new Set([
 ])
 const TITLED_MODIFIERS = new Set(['navigationTitle', 'alert', 'confirmationDialog', 'badge', 'help'])
 
-/** `call` with its title as a title writes it, when `titled` and the interpreter wrote one. */
+/** The titles iOS 27 reads as Markdown, as measured in docs/parity/native/iphone18pro-text. */
+const MARKDOWN_VIEWS = new Set(['Text', 'Button', 'Label', 'Toggle', 'Link', 'NavigationLink'])
+
+/**
+ * A value put into a `Text`'s literal that draws in it (Wave 6a): a `Text` as itself, an
+ * image as `Text(Image)` draws it, and an `AttributedString` as its runs. Null for any
+ * other value, which is written as words.
+ */
+function inText(value: SwiftValue, span: SourceSpan): ViewValue | null {
+  if (isAttributed(value)) return asView(attributedText(value, span, view, token('tint')))
+  const given = asView(value)
+  return isTextLike(given) ? given : given?.name === 'Image' ? { name: 'Text', args: [{ label: null, value }], children: [], modifiers: [], action: null, span } : null
+}
+
+/**
+ * `call` with a literal title's Markdown drawn (Wave 6a): the title becomes its plain words,
+ * and a `Text` of one run per span stands for it, each with the modifiers its marks mean.
+ * What was put into the literal is not read: `"Hi \(name)"` keeps a name's asterisks, and
+ * a `Text` or an image put in takes the marks around it.
+ */
+function withMarkdown(call: HostCall): HostCall {
+  const index = call.args.findIndex((arg) => arg.titleParts !== undefined)
+  const parts = call.args[index]?.titleParts
+  if (!parts?.some((part, i) => i % 2 === 0 && MARKDOWN_MARK.test(part as string))) return call
+  const spans = markdownSpans(parts.length === 1 ? parts[0] as string : parts.map((part, i) => i % 2 ? '' : part as string))
+  if (!spans) return call
+  const tint = token('tint')
+  const children: ViewValue[] = []
+  let styled = false, last: MarkdownSpan | null = null
+  for (const span of spans) {
+    const marks = markModifiers((mark) => span[mark as keyof MarkdownSpan], call.span, tint)
+    const put = span.part === undefined ? span.text : parts[span.part]!
+    const shown = typeof put === 'string' ? null : inText(put, call.span)
+    styled ||= marks.length > 0 || shown !== null
+    if (shown) { children.push(marks.length ? { ...shown, modifiers: [...shown.modifiers, ...marks] } : shown); last = null; continue }
+    const words = typeof put === 'string' ? put : describe(put, false)
+    // A value's words join the literal's beside them where both are drawn alike.
+    const previous = children[children.length - 1]
+    if (last && previous && sameMarks(last, span)) children[children.length - 1] = { ...previous, args: [{ label: null, value: str(plainText(previous) + words) }] }
+    else children.push({ name: 'Text', args: [{ label: null, value: str(words) }], children: [], modifiers: marks, action: null, span: call.span })
+    last = span
+  }
+  const text = children.map(plainText).join('')
+  const args = [...call.args]
+  args[index] = { ...args[index]!, value: styled ? { kind: 'string', value: text, styled: view({ name: 'Text', args: [], children, modifiers: [], action: null, span: call.span }) } : str(text) }
+  return { ...call, args }
+}
+
+function sameMarks(a: MarkdownSpan, b: MarkdownSpan): boolean {
+  return a.bold === b.bold && a.italic === b.italic && a.code === b.code && a.strike === b.strike && a.link === b.link
+}
+
+/** `call` with its title as a title writes it, when `titled` and something was put into it. */
 function withTitleText(titled: boolean, call: HostCall): HostCall {
   if (!titled) return call
-  const index = call.args.findIndex((arg) => arg.title !== undefined)
-  if (index < 0) return call
+  const index = call.args.findIndex((arg) => (arg.titleParts?.length ?? 0) > 1)
+  const parts = call.args[index]?.titleParts
+  if (!parts?.every((part) => typeof part === 'string')) return call
   const args = [...call.args]
-  args[index] = { ...args[index]!, value: str(args[index]!.title!) }
+  args[index] = { ...args[index]!, value: str(parts.join('')) }
   return { ...call, args }
 }
 
@@ -842,6 +897,7 @@ export class SwiftUIHost implements InterpreterHost {
 
   callGlobal(name: string, call: HostCall): SwiftValue | undefined {
     call = withTitleText(TITLED_VIEWS.has(name), call)
+    if (MARKDOWN_VIEWS.has(name)) call = withMarkdown(call)
     // Values first: these are not views, so they have to be handled before the
     // "is this a view name?" guard below rejects them.
     if (name === 'Task') return this.runTask(call)
@@ -858,6 +914,8 @@ export class SwiftUIHost implements InterpreterHost {
       return view({ name, args: [{ label: 'icon', value: configuration.fields.get('icon')! }], children: title ? [title] : [], modifiers: [], action: null, span: call.span })
     }
     if (name === 'Binding') return this.makeBinding(call)
+    if (name === 'AttributedString' || name === 'AttributeContainer') return makeAttributed(name, call)
+    if (name === 'Text' && call.args[0]?.label === null && isAttributed(call.args[0].value)) return attributedText(call.args[0].value, call.span, view, token('tint'))
     // `NavigationPath()` holds values of any type, each pushed by the destination for its type,
     // which is what a list of them is to a stack: `append`, `removeLast` and `count` are the list's.
     if (name === 'NavigationPath') return array(call.args[0]?.value.kind === 'array' ? call.args[0].value.elements.map(copyValue) : [])
@@ -989,7 +1047,9 @@ export class SwiftUIHost implements InterpreterHost {
 
     // `Text("\(Text("Bold").bold()) and plain")` arrives already joined, as a Text.
     const given = call.args[0]
-    if (name === 'Text' && given?.label === null && given.value.kind === 'string' && given.value.styled) return given.value.styled
+    // It stands for this call, so a click on it selects this Text rather than the view around it.
+    const styled = name === 'Text' && given?.label === null && given.value.kind === 'string' && given.value.styled ? asView(given.value.styled) : null
+    if (styled) return view({ ...styled, span: call.span })
     if (name === 'Path') return this.makePath(call)
     if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
@@ -1122,6 +1182,9 @@ export class SwiftUIHost implements InterpreterHost {
 
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
     call = withTitleText(TITLED_MODIFIERS.has(member), call)
+    const changed = isAttributed(target) ? changeAttributed(target, member, call) : undefined
+    if (changed) return changed
+    if (member === 'range' && isAttributed(target)) return attributedRange(target, call)
     // `ContentUnavailableView.search(text: query)`: the stock search empty state, which says
     // what was searched for (Wave 4b). Without this the screen stopped on an unknown member.
     if (target.kind === 'type' && target.name === 'ContentUnavailableView' && member === 'search' && !this.declaresType?.(target.name)) {
@@ -1390,8 +1453,9 @@ export class SwiftUIHost implements InterpreterHost {
    * Anything else given the string, a Button's title, reads its plain words.
    */
   interpolate(parts: readonly (string | SwiftValue)[], span: SourceSpan): { text: string; styled: SwiftValue } | undefined {
-    if (!parts.some((part) => typeof part !== 'string' && isTextLike(asView(part)))) return undefined
-    const pieces = parts.map((part): string | ViewValue => typeof part === 'string' ? part : isTextLike(asView(part)) ? asView(part)! : describe(part, false))
+    // An image or an AttributedString in text draws in it too (Wave 6a).
+    const pieces = parts.map((part): string | ViewValue => typeof part === 'string' ? part : inText(part, span) ?? describe(part, false))
+    if (pieces.every((piece) => typeof piece === 'string')) return undefined
     const children = pieces.filter((piece) => piece !== '').map((piece): ViewValue =>
       typeof piece === 'string' ? { name: 'Text', args: [{ label: null, value: str(piece) }], children: [], modifiers: [], action: null, span } : piece)
     return { text: pieces.map((piece) => typeof piece === 'string' ? piece : plainText(piece)).join(''), styled: view({ name: 'Text', args: [], children, modifiers: [], action: null, span }) }
@@ -1411,6 +1475,8 @@ export class SwiftUIHost implements InterpreterHost {
    */
   applyOperator(operator: string, left: SwiftValue, right: SwiftValue, span: SourceSpan): SwiftValue | undefined {
     if (operator !== '+') return undefined
+    const strings = joinAttributed(left, right)
+    if (strings) return strings
 
     const a = asView(left)
     const b = asView(right)
@@ -1478,6 +1544,7 @@ export class SwiftUIHost implements InterpreterHost {
    * `.alignmentGuide(.leading) { d in d[.trailing] }` line up the right edges.
    */
   subscript(target: SwiftValue, index: SwiftValue): SwiftValue | undefined {
+    if (isAttributed(target)) return attributedSlice(target, index)
     if (target.kind !== 'opaque' || target.typeName !== DIMENSIONS_TYPE) return undefined
     const size = target.payload as { width: number; height: number }
 
@@ -1653,7 +1720,8 @@ export class SwiftUIHost implements InterpreterHost {
       const size = numberOf(call.args.find((a) => a.label === 'size')?.value)
       const fixed = numberOf(call.args.find((a) => a.label === 'fixedSize')?.value)
       const relativeTo = size === null ? null : tokenNameOf(call.args.find((a) => a.label === 'relativeTo')?.value) ?? 'body'
-      return token(fontTokenName(customFont(size ?? fixed ?? 17, relativeTo)))
+      const name = call.args.find((a) => a.label === null)?.value
+      return token(fontTokenName(customFont(size ?? fixed ?? 17, relativeTo, name?.kind === 'string' ? name.value : null)))
     }
 
     // `.currency(code:)` carries the code, and a format style that loses it renders
@@ -1693,6 +1761,10 @@ export class SwiftUIHost implements InterpreterHost {
     } satisfies TokenPayload)
   }
 
+  isSelfMember(target: SwiftValue, member: string): boolean {
+    return isAttributeScope(target, member)
+  }
+
   getMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
     // `binding.wrappedValue` - the long spelling of reading the binding, and how a
     // computed `Binding(get:set:)` is nearly always read.
@@ -1705,6 +1777,10 @@ export class SwiftUIHost implements InterpreterHost {
     if (member === 'wrappedValue') {
       return asProjection(target)?.get() ?? target
     }
+    if (isAttributed(target)) return attributedMember(target, member)
+    // `.fill.circle`: a symbol variant chain, one token naming both (Wave 6a).
+    const variant = tokenNameOf(target)
+    if (variant !== null && isSymbolVariant(variant) && isSymbolVariant(member)) return token(`${variant}.${member}`)
 
     // `value.translation.width`, `value.location.x`, `size.width` …
     const geometry = geometryMember(target, member)

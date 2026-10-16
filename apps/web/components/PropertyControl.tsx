@@ -1,10 +1,12 @@
 'use client'
 
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { AUTO_SPACING, LAYOUT_WORDS, spreadOut, textPartsOf, writeTextParts, type Alignment9, type DesignControl } from '@studio/shared'
+import { symbolAsset } from '@studio/swiftui-render-dom'
 import { Icon, type IconName } from './ui/Icon'
 import { TokenChip } from './controls/TokenChip'
 import { COLOR_NAME_LABELS } from '../lib/colorValue'
+import { inlineImageOf, textPartsSummary, textValueName } from '../lib/inlineImage'
 import styles from './AuthoringInspector.module.css'
 import own from './PropertyControl.module.css'
 import chips from './controls/TokenChip.module.css'
@@ -37,7 +39,7 @@ function stored(control: DesignControl, typed: string): string {
 export function propertyValueLabel(control: DesignControl): string {
   if (control.kind === 'select' || control.kind === 'toggle') return propertyOptionLabel(control.value)
   const parts = textPartsOf(control)
-  if (parts) return parts.map((part, index) => index % 2 ? `{${part}}` : part).join('') || 'Default'
+  if (parts) return textPartsSummary(parts) || 'Default'
   return control.value ? shown(control, control.value) + (control.unit === '%' || control.unit === '°' ? control.unit : '') : 'Default'
 }
 
@@ -106,7 +108,7 @@ function TextPartsControl({ control, onChange, label = control.label, caption }:
   const latest = useRef(initial)
   const committing = useRef(false)
   const busy = pending || !!control.disabledReason
-  const values = initial.filter((_, index) => index % 2)
+  const values = initial.filter((_, index) => index % 2).map(textValueName)
   function change(index: number, words: string) {
     const next = latest.current.map((part, at) => at === index ? words : part)
     latest.current = next; setDraft(next); setError(null)
@@ -140,14 +142,38 @@ function TextPartsControl({ control, onChange, label = control.label, caption }:
       <div role="group" aria-label={label} data-control-id={control.id} aria-invalid={!!error} aria-disabled={busy || undefined} className={own.parts}
         onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) void commit() }}>
         {draft.map((part, index) => index % 2
-          ? <span key={index} className={own.value} title={`\\(${part}) is a value from the code. Change it in Code.`}>{part}</span>
+          ? <ValueChip key={index} swift={part} />
           : <span key={index} className={own.words} data-words={part}><input aria-label={named(index)} value={part} readOnly={busy} size={1} spellCheck={false} onChange={event => change(index, event.target.value)} onKeyDown={keyDown} /></span>)}
       </div>
     </div>
+    <MarkdownNote control={control} />
     {control.disabledReason && <p className={styles.note}>{control.disabledReason}</p>}
     {error && <p role="alert" className={styles.error}>{error}</p>}
     {pending && <small role="status">Applying…</small>}
   </div>
+}
+
+/**
+ * A value among the words, as a chip of its Swift (Wave 3a). An image written there (Wave 6a)
+ * shows as the canvas draws it, the symbol or a picture glyph with its name.
+ */
+function ValueChip({ swift }: { swift: string }) {
+  const id = useId().replaceAll(':', '')
+  const image = inlineImageOf(swift)
+  if (!image) return <span className={own.value} title={`\\(${swift}) is a value from the code. Change it in Code.`}>{swift}</span>
+  const asset = 'symbol' in image ? symbolAsset(image.symbol, `chip${id}`) : null
+  return <span className={`${own.value} ${own.image}`} title="An image drawn in the text. Change it in Code.">
+    {asset ? <svg viewBox={asset.viewBox} width="12" height="12" aria-hidden="true" dangerouslySetInnerHTML={{ __html: asset.body }} /> : <Icon name="image" size={12} />}
+    {textValueName(swift)}
+  </span>
+}
+
+/**
+ * Words iOS draws as Markdown (Wave 6a): the field keeps the marks as the code writes them,
+ * and the canvas draws them formatted, as a literal title is on iOS.
+ */
+function MarkdownNote({ control }: { control: DesignControl }) {
+  return control.markdown ? <p className={styles.note}>Drawn as Markdown: **bold**, *italic*, `code` and [links](url) show formatted.</p> : null
 }
 
 function ValueControl({ control, onChange, label = control.label, caption }: PropertyControlProps) {
@@ -271,6 +297,7 @@ function ValueControl({ control, onChange, label = control.label, caption }: Pro
       onKeyDown={keyDown}
       onKeyUp={event => { if (RANGE_KEYS.includes(event.key)) void commit() }}
     />}
+    <MarkdownNote control={control} />
     {control.disabledReason && <p className={styles.note}>{control.disabledReason}</p>}
     {error && <p role="alert" className={styles.error}>{error}</p>}
     {pending && <small role="status">Applying…</small>}

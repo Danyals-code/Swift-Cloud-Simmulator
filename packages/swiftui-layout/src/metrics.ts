@@ -1,4 +1,4 @@
-import { graphemes, textLineHeight, textMeasureKey, type ResolvedFont, type TextMeasureRequest, type TextMetricsData, type MeasuredTextData } from '@studio/shared'
+import { graphemes, inlineSymbolBox, textLineHeight, textMeasureKey, type ResolvedFont, type TextMeasureRequest, type TextMetricsData, type MeasuredTextData } from '@studio/shared'
 
 /**
  * Synchronous shaped-run measurement, cached by the full font and text. Browsers
@@ -227,6 +227,10 @@ export interface MeasuredRun {
   /** `.monospacedDigit`: every digit measures as the widest one. */
   readonly tabularNumbers?: boolean
   readonly baselineOffset?: number
+  /** An SF Symbol in place of the text: one cluster as far as `inlineSymbolBox` advances it. */
+  readonly symbol?: string
+  /** A project image in place of the text: one cluster as wide as it, its bottom on the baseline. */
+  readonly bitmap?: { readonly width: number; readonly height: number }
 }
 
 
@@ -257,6 +261,10 @@ function clustersOf(
     // stops a counter jittering as it counts. Measured, not painted: a column of
     // numbers that lines up on screen and not in the reported frame is no use.
     const digitWidth = spec.tabularNumbers ? widestDigit(spec.font, table) : 0
+    if (spec.symbol || spec.bitmap) {
+      out.push({ text: spec.text, run, width: inlineWidth(spec) + tracking, spec: { ...spec, tracking } })
+      continue
+    }
 
     for (const text of graphemes(spec.text)) {
       const width = digitWidth > 0 && text >= '0' && text <= '9'
@@ -491,7 +499,39 @@ function slicesOf(clusters: readonly Cluster[]): { run: number; text: string; sp
  */
 function halfLeading(slices: readonly { spec: MeasuredRun }[], font: ResolvedFont): number {
   const fonts = slices.length ? slices.map(slice => slice.spec.font) : [font]
-  return (Math.max(...fonts.map(f => f.lineHeight)) - Math.max(...fonts.map(f => textLineHeight(f.size)))) / 2
+  return (Math.max(...fonts.map(f => f.lineHeight)) - Math.max(...fonts.map(glyphHeight))) / 2
+}
+
+/**
+ * How tall one line of a built-in iOS family is, for 1 pt of its size, as the iOS 27
+ * simulator draws them at 22 pt (docs/parity/native/iphone18pro-text, Wave 6a). Its own
+ * ascender and descender, as SF Pro's 1.19336 is for the system face.
+ */
+const FAMILY_HEIGHTS: Readonly<Record<string, number>> = {
+  'Avenir Next': 1.37879, Georgia: 1.13636, Menlo: 1.16667, 'Helvetica Neue': 1.16667, Futura: 1.30303,
+  'Gill Sans': 1.15152, Palatino: 1.10606, 'Courier New': 1.13636, 'Times New Roman': 1.12121, 'Snell Roundhand': 1.27273,
+}
+
+/** Each CSS stack's measured height, or 0 for SF Pro's, read once per stack rather than per line. */
+const stackHeights = new Map<string, number>()
+
+/** How tall a line of `font`'s glyphs is: a measured built-in family's, or SF Pro's. */
+export function glyphHeight(font: Pick<ResolvedFont, 'family' | 'size'>): number {
+  let ratio = stackHeights.get(font.family)
+  if (ratio === undefined) stackHeights.set(font.family, ratio = FAMILY_HEIGHTS[/^"([^"]+)"/.exec(font.family)?.[1] ?? ''] ?? 0)
+  return ratio ? Math.round(font.size * ratio * 3) / 3 : textLineHeight(font.size)
+}
+
+/**
+ * SF Pro's ascender, 1950 of 2048 units: a project image in text taller than this above
+ * the baseline makes the line taller by the difference, as iOS 27 draws a 30 pt image in a
+ * body line 34.33 tall and in a large title line no taller (docs/parity/native/iphone18pro-text).
+ */
+const ASCENDER = 0.952
+
+/** How far a symbol or image in text advances the line. */
+function inlineWidth(spec: MeasuredRun): number {
+  return spec.bitmap ? spec.bitmap.width : inlineSymbolBox(spec.symbol!, spec.font.size).advance
 }
 
 function toLineBox(clusters: readonly Cluster[], multiRun: boolean, table: FontMetricsTable, font: ResolvedFont, first: boolean, last: boolean): TextLineBox {
@@ -499,8 +539,10 @@ function toLineBox(clusters: readonly Cluster[], multiRun: boolean, table: FontM
   const base = table.baseline(font)
   let above = base
   let below = font.lineHeight - base
+  let rise = 0
   const boxes = slices.map(({ run, text, spec }) => {
-    const metrics = table.measure({ ...spec, text })
+    if (spec.bitmap) rise = Math.max(rise, spec.bitmap.height - spec.font.size * ASCENDER)
+    const metrics = measureSlice(spec, text, table)
     const baseline = (spec.font.lineHeight - metrics.ascent - metrics.descent) / 2 + metrics.ascent
     above = Math.max(above, baseline + (spec.baselineOffset ?? 0))
     below = Math.max(below, spec.font.lineHeight - baseline - (spec.baselineOffset ?? 0))
@@ -509,6 +551,7 @@ function toLineBox(clusters: readonly Cluster[], multiRun: boolean, table: FontM
   const trim = first || last ? halfLeading(slices, font) : 0
   if (first) above -= trim
   if (last) below -= trim
+  above += rise
   return {
     text: clusters.map((c) => c.text).join(''),
     width: boxes.reduce((sum, slice) => sum + slice.width, 0),
@@ -553,7 +596,14 @@ function truncate(
 }
 
 function measure(clusters: readonly Cluster[], table: FontMetricsTable): number {
-  return slicesOf(clusters).reduce((sum, slice) => sum + table.measure({ ...slice.spec, text: slice.text }).width, 0)
+  return slicesOf(clusters).reduce((sum, slice) => sum + measureSlice(slice.spec, slice.text, table).width, 0)
+}
+
+/** A slice's width and its font's ascent and descent; a symbol or image advances as `inlineWidth` says. */
+function measureSlice(spec: MeasuredRun, text: string, table: FontMetricsTable): { width: number; ascent: number; descent: number } {
+  if (!spec.symbol && !spec.bitmap) return table.measure({ ...spec, text })
+  const { ascent, descent } = table.measure({ text: 'Hg', font: spec.font })
+  return { ascent, descent, width: inlineWidth(spec) + (spec.tracking ?? 0) }
 }
 
 function trimEnd(clusters: readonly Cluster[]): Cluster[] {

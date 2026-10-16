@@ -1104,7 +1104,7 @@ export class Interpreter {
    * format the preview cannot read or write, such as `.iso8601`, leaves the value as
    * Swift describes it rather than stopping the view.
    */
-  private stringLiteral(expr: Expr & { kind: 'stringLiteral' }, env: Environment, asTitle = false): { readonly value: SwiftValue; readonly title?: string } {
+  private stringLiteral(expr: Expr & { kind: 'stringLiteral' }, env: Environment, asTitle = false): { readonly value: SwiftValue; readonly titleParts?: readonly (string | SwiftValue)[] } {
     const parts: (string | SwiftValue)[] = []
     const styles: ({ readonly specifier?: SwiftValue | null; readonly format?: SwiftValue | null } | null)[] = []
     for (const segment of expr.segments) {
@@ -1128,10 +1128,9 @@ export class Interpreter {
       styles.push(segment.options ? { specifier: option('specifier'), format: option('format') } : null)
     }
     const hosted = parts.some((part) => typeof part !== 'string' && part.kind !== 'string') ? this.host.interpolate?.(parts, expr.span) : undefined
-    if (hosted !== undefined) return { value: { kind: 'string', value: hosted.text, styled: hosted.styled } }
+    if (hosted !== undefined) return { value: { kind: 'string', value: hosted.text, styled: hosted.styled }, titleParts: asTitle ? alternating(parts, (part) => part) : undefined }
 
-    const write = (title: boolean) => parts.map((part, i) => {
-      if (typeof part === 'string') return part
+    const written = (part: SwiftValue, i: number, title: boolean) => {
       const style = styles[i]
       if (style?.specifier?.kind === 'string') {
         const written = formatString(style.specifier.value, [part])
@@ -1139,9 +1138,11 @@ export class Interpreter {
       }
       if (style?.format !== undefined) return (style.format && (formatNumber(part, leadingDotName(style.format)) ?? formatDateValue(part, leadingDotName(style.format)))) ?? describe(part, false)
       return (title ? titleNumber(part) : null) ?? describe(part, false)
-    }).join('')
-    const interpolates = parts.some((part) => typeof part !== 'string')
-    return { value: str(write(false)), ...(asTitle && interpolates ? { title: write(true) } : {}) }
+    }
+    const value = str(parts.map((part, i) => typeof part === 'string' ? part : written(part, i, false)).join(''))
+    // A title is its literal's own text and what was put into it, as the title writes it.
+    if (!asTitle) return { value }
+    return { value, titleParts: parts.length === 1 && typeof parts[0] === 'string' ? parts : alternating(parts, (part, i) => written(part, i, true)) }
   }
 
   private hostCall(args: readonly CallArgument[], trailing: ClosureValue | null, span: SourceSpan): HostCall {
@@ -2331,8 +2332,8 @@ export class Interpreter {
     const titled = argExprs.findIndex((arg) => arg.label === null)
     const args: CallArgument[] = argExprs.map((arg, index) => {
       if (index !== titled || arg.value.kind !== 'stringLiteral') return { label: arg.label, value: this.evaluate(arg.value, env), span: arg.span }
-      const { value, title } = this.stringLiteral(arg.value, env, true)
-      return { label: arg.label, value, span: arg.span, ...(title === undefined ? {} : { title }) }
+      const { value, titleParts } = this.stringLiteral(arg.value, env, true)
+      return { label: arg.label, value, span: arg.span, titleParts }
     })
     const trailingClosure = trailing ? this.makeClosure(trailing, env) : null
 
@@ -3019,6 +3020,7 @@ export class Interpreter {
         const owner = this.tryResolveLValue(expr.base, env)
         const target = owner ? owner.get() : this.evaluate(expr.base, env)
         if (target.kind !== 'struct') return null
+        if (owner && this.host.isSelfMember?.(target, expr.member)) return owner
 
         // A property written with an explicit `set { … }` is not storage: assigning
         // to it runs the setter with `newValue` bound, and whatever that writes is
@@ -3452,7 +3454,8 @@ export class Interpreter {
     // A value the interpreter does not own - a view, a colour, a font. Every branch
     // below wants a number, so without this the operator traps and the whole preview
     // stops rather than the one expression failing.
-    if (left.kind === 'opaque' || right.kind === 'opaque') {
+    // A framework struct with an operator of its own too: `AttributedString` joins with `+`.
+    if (left.kind === 'opaque' || right.kind === 'opaque' || left.kind === 'struct') {
       const fromHost = this.host.applyOperator?.(operator, left, right, span)
       if (fromHost !== undefined) return fromHost
     }
@@ -3881,4 +3884,18 @@ function isBuiltinOperand(value: SwiftValue): boolean {
 /** The enum a value belongs to, or null when it is not an enum case. */
 function enumTypeOf(value: SwiftValue): string | null {
   return value.kind === 'enum' ? value.typeName : null
+}
+
+/**
+ * A literal's parts as `CallArgument.titleParts` holds them: its own text and each value
+ * put into it, alternately, starting and ending with its own text.
+ */
+function alternating(parts: readonly (string | SwiftValue)[], put: (part: SwiftValue, index: number) => string | SwiftValue): (string | SwiftValue)[] {
+  const out: (string | SwiftValue)[] = ['']
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!
+    if (typeof part === 'string') out[out.length - 1] += part
+    else out.push(put(part, i), '')
+  }
+  return out
 }

@@ -57,3 +57,6 @@
   text-overflow: ellipsis;
   cursor: default;
 }
+/* An image among the words (Wave 6a): its glyph beside its name. */
+.image { gap: 4px; }
+.image > svg { flex: none; }

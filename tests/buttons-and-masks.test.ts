@@ -109,8 +109,9 @@ describe('.mask', () => {
   })
 
   it('says when a mask is one it does not draw, and leaves the view unmasked', () => {
-    const result = run(app('Text("Masked").mask(Circle())'))
-    expect(result.renderTree?.nodes.some(node => node.mask)).toBe(false)
-    expect(result.diagnostics.map(d => d.message).join(' ')).toContain("'.mask' is drawn by the preview for a gradient or a colour")
+    // A shape is drawn as a mask since Wave 6a; one with padding on it still is not.
+    const result = run(app('Text("Masked").mask(Circle().padding(4))'))
+    expect(result.renderTree?.nodes.some(node => node.mask || node.clipShape)).toBe(false)
+    expect(result.diagnostics.map(d => d.message).join(' ')).toContain("'.mask' is drawn by the preview for a gradient, a colour or a shape")
   })
 })

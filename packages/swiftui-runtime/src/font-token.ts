@@ -1,3 +1,4 @@
+import { iosFont } from '@studio/shared'
 import { IOS_27 } from './appearance/ios27'
 
 /**
@@ -27,6 +28,9 @@ export interface FontSpec {
   /** `tight`, `loose`, or '' for the style's own. */
   readonly leading: string
   readonly smallCaps: boolean
+  /** `.custom(name, …)` of a family iOS ships (Wave 6a): the family, and a PostScript name's weight. */
+  readonly family?: string
+  readonly faceWeight?: number
 }
 
 const PLAIN: Omit<FontSpec, 'style' | 'size'> = { weight: '', design: '', italic: false, leading: '', smallCaps: false }
@@ -53,7 +57,12 @@ export function fontTokenName(font: FontSpec): string {
   return `font:${JSON.stringify(font)}`
 }
 
-/** `.custom("Avenir", size: 24, relativeTo: .title)`, drawn in the system face. */
-export function customFont(size: number, relativeTo: string | null): FontSpec {
-  return { ...PLAIN, style: null, size, relativeTo }
+/**
+ * `.custom("Avenir Next", size: 24, relativeTo: .title)`: a family or PostScript name iOS
+ * ships is drawn in that face (Wave 6a), and any other in the system face, as iOS draws a
+ * font the app doesn't bundle.
+ */
+export function customFont(size: number, relativeTo: string | null, name?: string | null): FontSpec {
+  const face = name ? iosFont(name) : undefined
+  return { ...PLAIN, style: null, size, relativeTo, ...face ? { family: face.family, italic: face.italic, ...face.weight ? { faceWeight: face.weight } : {} } : {} }
 }

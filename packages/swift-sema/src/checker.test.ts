@@ -196,7 +196,8 @@ describe('coverage diagnostics are honest, not wrong', () => {
   })
 
   it('names an unimplemented modifier', () => {
-    const [warning] = warnings(app('        Text("x").mask(Circle())'))
+    // A shape mask with padding on it is one the preview does not cut with (Wave 6a).
+    const [warning] = warnings(app('        Text("x").mask(Circle().padding(4))'))
     expect(warning?.code).toBe('unsupported_swiftui_modifier')
     expect(warning?.feature).toBe('.mask')
   })
@@ -317,8 +318,8 @@ struct V: View {
     // `.padding()` appears repeatedly in real code; a warning per occurrence would
     // bury everything else in the problems panel.
     const source = app(`        VStack {
-            Text("a").mask(Circle())
-            Text("b").mask(Circle())
+            Text("a").mask(Circle().padding(4))
+            Text("b").mask(Circle().padding(4))
         }`)
     expect(warnings(source).filter((d) => d.feature === '.mask')).toHaveLength(2)
   })
