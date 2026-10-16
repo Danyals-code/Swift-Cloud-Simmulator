@@ -1,6 +1,6 @@
 import type { AuthoringModifier, ModifierCatalogEntry } from './authoring-modifiers'
 import type { SharedStyle, StyleProperty } from './design-resources'
-import type { AppNavigationModel, CollectionSettings, ComponentSettings, BehaviorSettings, NavigationSettings, ScreenBars, StateInput, ViewVisibility } from './authoring-features'
+import type { AppNavigationModel, CollectionSettings, ComponentSettings, BehaviorSettings, NavigationSettings, ScreenBars, StateInput, VariantProperty, ViewVisibility } from './authoring-features'
 import type { Diagnostic } from './diagnostics'
 import type { SourceFile } from './protocol'
 import type { SourceSpan } from './source'
@@ -27,6 +27,15 @@ export interface AuthoringProperty {
   readonly helperArgument?: true
 }
 
+/**
+ * What a copy of a component can become instead (Wave 5b): each other component, with why
+ * not where it can't, and why it can't become the plain views it shows, absent when it can.
+ */
+export interface InstanceSettings {
+  readonly swap: readonly { readonly component: string; readonly disabledReason?: string }[]
+  readonly detachDisabledReason?: string
+}
+
 export interface AuthoringNode {
   readonly modifiers?: readonly AuthoringModifier[]
   readonly modifierCatalog?: readonly ModifierCatalogEntry[]
@@ -46,6 +55,13 @@ export interface AuthoringNode {
   readonly controls?: readonly DesignControl[]
   readonly collection?: CollectionSettings
   readonly component?: ComponentSettings
+  /**
+   * The variant properties of the Main this is, or is a view inside (Wave 5b): empty when it has
+   * none yet, and absent for anything not in a Main.
+   */
+  readonly variants?: readonly VariantProperty[]
+  /** On a copy of a component (Wave 5b): the components it can become, and whether it can become the plain views it shows. */
+  readonly instance?: InstanceSettings
   readonly behavior?: BehaviorSettings
   readonly navigation?: NavigationSettings
   /** On a screen's definition (Wave 4b): its title, toolbar items and search field, for the Bars section of Screen settings. */

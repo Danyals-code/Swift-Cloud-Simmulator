@@ -1,4 +1,4 @@
-import type { ColorValue, LayerValue } from '@studio/shared'
+import type { AuthoringNode, ColorValue, LayerValue } from '@studio/shared'
 import type { CallExpr, Expr } from '@studio/swift-syntax'
 import { SWIFTUI_COLOR_NAMES as SWIFTUI, UIKIT_SEMANTIC_COLOR_NAMES as UIKIT } from '../builtins'
 import type { LayerContext } from './context'
@@ -31,6 +31,9 @@ const NEWER: Readonly<Record<string, number>> = { mint: 15, teal: 15, cyan: 15, 
 
 const COMPUTED = 'This color is worked out in Swift. Change it in Code.'
 
+/** What reading a colour needs: the text of the file it is in, and the properties of the view it is read for, which say what is data (Wave 5b). */
+export type ColorContext = Pick<LayerContext, 'text'> & { readonly node: Pick<AuthoringNode, 'properties'> }
+
 /** An identifier or a chain of members on one: `Theme.accent`, `Color.brand`, `.brand`. */
 function plainName(value: Expr): boolean {
   if (value.kind === 'identifier') return true
@@ -43,7 +46,7 @@ const isColorType = (value: Expr | null): boolean => value?.kind === 'identifier
 const channel = (value: number) => Math.round(value * 255).toString(16).padStart(2, '0').toUpperCase()
 
 /** `Color(red:green:blue:)`, `Color(.sRGB, red:…)` and `Color(white:)` with literal amounts, as a hex and its opacity. */
-function rgbOf(call: CallExpr, ctx: LayerContext): ColorValue | undefined {
+function rgbOf(call: CallExpr, ctx: ColorContext): ColorValue | undefined {
   const args = call.args.filter((arg, index) => !(index === 0 && arg.label === null && sourceOf(ctx, arg.value).replace(/\s/g, '') === '.sRGB'))
   const labels = args.map(arg => arg.label).join()
   const amounts = args.map(arg => numberOf(arg.value, ctx, false))
@@ -56,7 +59,7 @@ function rgbOf(call: CallExpr, ctx: LayerContext): ColorValue | undefined {
 }
 
 /** A colour and whether it is a token, or undefined for one worked out in Swift. */
-function colorOf(value: Expr, ctx: LayerContext): { color: ColorValue; token: boolean } | undefined {
+function colorOf(value: Expr, ctx: ColorContext): { color: ColorValue; token: boolean } | undefined {
   const written = sourceOf(ctx, value)
   if (value.kind === 'call' && !value.trailingClosure && value.callee.kind === 'memberAccess' && value.callee.member === 'opacity' && value.callee.base) {
     const inner = colorOf(value.callee.base, ctx)
@@ -92,7 +95,7 @@ function colorOf(value: Expr, ctx: LayerContext): { color: ColorValue; token: bo
  * A colour as the panel shows it. One worked out in Swift is `'code'`, with its
  * expression as written for the panel to show.
  */
-export function readColor(value: Expr, ctx: LayerContext): LayerValue<ColorValue> {
+export function readColor(value: Expr, ctx: ColorContext): LayerValue<ColorValue> {
   const read = colorOf(value, ctx)
   if (!read) return { value: { token: sourceOf(ctx, value) }, state: 'code', disabledReason: COMPUTED }
   return { value: read.color, state: read.token ? 'token' : 'literal' }

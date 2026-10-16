@@ -4,6 +4,8 @@ import type { ResourceOperation } from './design-resources'
 import type { SourceSpan } from './source'
 import type { DesignControl } from './design-edit'
 import type { ContainerLayout } from './layer-moves'
+import type { ColorValue } from './layer'
+import { nameInWords } from './render-tree'
 
 export type DesignValue = string | number | boolean | null
 export interface RecordField { readonly name: string; readonly type: 'String' | 'Int' | 'Double' | 'Bool'; readonly optional: boolean; readonly defaultValue?: DesignValue; readonly mutable?: boolean }
@@ -227,6 +229,11 @@ export interface ViewVisibility {
   readonly problem?: string
   /** The name a new on/off switch for it takes, free on its screen. */
   readonly newName: string
+  /**
+   * The view is in a Main (Wave 5b): a new switch is an on/off property each copy sets,
+   * `var isShown: Bool = true`, which Shown when offers as "+ New on/off property…".
+   */
+  readonly property?: true
   /** When it shows, in words: "Details is on", "Items is empty"; absent when the condition can't be said plainly. */
   readonly label?: string
   /** The other side of `label`, for "Hidden while Details is off". */
@@ -336,6 +343,41 @@ export type NavigationOperation =
   | { readonly kind: 'tab-remove'; readonly index: number }
   | { readonly kind: 'tab-move'; readonly index: number; readonly toIndex: number }
 
+/**
+ * A variant property of a Main (Wave 5b): `var style: Style` of a nested `enum Style` of two
+ * cases, which a value of the Main can differ by and each copy picks one of.
+ */
+export interface VariantProperty {
+  readonly name: string
+  readonly cases: readonly [string, string]
+}
+/** What kind of value a copy of a component can set (Wave 5b). */
+export type ComponentInputKind = 'text' | 'symbol' | 'image' | 'color' | 'number' | 'shown'
+/**
+ * Words a designer types as a Swift name, in camel case (Wave 5b): "Extra large" is
+ * `extraLarge`, "frame · width" is `frameWidth`; empty when they make no name.
+ */
+export function swiftName(words: string): string {
+  const name = words.split(/[^A-Za-z0-9_]+/).filter(Boolean).map((word, index) => (index ? word.charAt(0).toUpperCase() : word.charAt(0).toLowerCase()) + word.slice(1)).join('')
+  return /^[A-Za-z_]\w*$/.test(name) ? name : ''
+}
+/** A variant's case as the panel says it (Wave 5b): `extraLarge` is "Extra large". */
+export const variantCaseWords = (name: string) => { const words = nameInWords(name); return words.charAt(0).toUpperCase() + words.slice(1) }
+/**
+ * A colour as a copy's colour input holds it (Wave 5b): a system name, `#RRGGBB`, a hex with
+ * its opacity as `#RRGGBBAA`, or a token as written. A system colour with an opacity is its
+ * hex in `swatches`, as the colour field picks it; undefined for one not there, as reading
+ * code finds it, since a system colour is no one hex in light and dark, and for a token with one.
+ */
+export function colorInputText(color: ColorValue, swatches: Readonly<Record<string, string>> = {}): string | undefined {
+  const opacity = color.opacity ?? 1
+  if (!('hex' in color) && opacity === 1) return 'name' in color ? color.name : color.token
+  const hex = 'hex' in color ? color.hex : 'name' in color ? swatches[color.name] : undefined
+  if (!hex) return undefined
+  const alpha = Math.round((hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1) * opacity * 255)
+  return hex.slice(0, 7).toUpperCase() + (alpha === 255 ? '' : alpha.toString(16).padStart(2, '0').toUpperCase())
+}
+
 /** Where a toolbar item sits (Wave 4b): the bar's leading or trailing side, in place of the title, the bottom bar, or where iOS puts it. */
 export type ToolbarPlacement = 'leading' | 'trailing' | 'principal' | 'bottom' | 'automatic'
 /** Each placement in a designer's words, as the Placement field and the Bars section name it (Wave 4b). */
@@ -379,7 +421,16 @@ export type AuthoringOperation = ResourceOperation | ModifierOperation | Navigat
   /** A search field on the screen, searching text kept in the screen's state (Wave 4b). */
   | { readonly kind: 'searchable-add'; readonly prompt: string }
   | { readonly kind: 'searchable-remove' }
-  | { readonly kind: 'component-expose'; readonly control: string; readonly name: string }
+  /** A value of the Main each copy can set: text as before, or a symbol, image, colour, number, or whether a view is shown (Wave 5b). */
+  | { readonly kind: 'component-expose'; readonly control: string; readonly name: string; readonly as?: ComponentInputKind }
+  /** A variant property on the Main: a nested enum of two cases and a property of it, defaulting to the first (Wave 5b). */
+  | { readonly kind: 'component-variant-add'; readonly name: string; readonly cases: readonly [string, string] }
+  /** A value in the Main that differs by a variant property: `property == .first ? value : value` (Wave 5b). */
+  | { readonly kind: 'component-differs'; readonly control: string; readonly property: string }
+  /** This copy becomes a copy of another component, keeping the inputs both have (Wave 5b). */
+  | { readonly kind: 'instance-swap'; readonly component: string }
+  /** This copy becomes the plain views it shows, with its inputs put in their place (Wave 5b). */
+  | { readonly kind: 'instance-detach' }
   | { readonly kind: 'component-insert'; readonly component: string }
   | { readonly kind: 'component-variant'; readonly variant: ComponentVariant }
   | { readonly kind: 'screen-create'; readonly name: string; readonly title: string; readonly layout: ContainerLayout }

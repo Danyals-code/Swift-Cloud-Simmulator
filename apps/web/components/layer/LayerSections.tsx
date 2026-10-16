@@ -10,6 +10,7 @@ import { FillSection } from './FillSection'
 import { LayoutSection } from './LayoutSection'
 import { StrokeSection } from './StrokeSection'
 import { TextSection } from './TextSection'
+import { VariantsContext } from './parts'
 
 const NO_TOKENS: readonly SharedStyle[] = []
 
@@ -33,12 +34,12 @@ export function LayerSections({ node, onCommand, tokens = NO_TOKENS, disabled = 
   if (!layer || !onCommand) return null
   const props = { node, layer, set, busy: disabled || pending, tokens, command: onCommand, measure, sizeOverlap }
   // A run of joined text is part of one Text: only its text styles are its own (Wave 3a).
-  return <div data-testid="settings-layer">
+  return <VariantsContext.Provider value={node.variants}><div data-testid="settings-layer">
     {!layer.textRun && <LayoutSection {...props} />}
     <FillSection {...props} />
     <CornersSection {...props} />
     <StrokeSection {...props} />
     <TextSection {...props} />
     {!layer.textRun && <EffectsSection {...props} />}
-  </div>
+  </div></VariantsContext.Provider>
 }

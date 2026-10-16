@@ -1,10 +1,10 @@
-import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, TEXT_STYLES, TOOLBAR_ITEMS, authoringCapability, deploymentVersion, helperPlaces, readTextParts, stackLayoutOf, writeTextParts, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, TEXT_STYLES, TOOLBAR_ITEMS, authoringCapability, colorInputText, deploymentVersion, helperPlaces, readTextParts, stackLayoutOf, variantCaseWords, writeTextParts, type AuthoringNode, type DesignControl, type SourceSpan, type VariantProperty } from '@studio/shared'
 import { advancedControls } from './design-advanced-controls'
 import { toolbarItemControls } from './design-object-controls'
 import { sheetControls } from './design-sheet-controls'
 import { pagerControls, safeAreaControl, setAround } from './design-content-controls'
 import { authoringViewMinimum } from './authoring-view'
-import { Lexer, type CallExpr, type Expr, type Stmt, type StringLiteralExpr } from '@studio/swift-syntax'
+import { Lexer, type CallExpr, type EnumDecl, type Expr, type Stmt, type StringLiteralExpr, type StructDecl, type VarDecl } from '@studio/swift-syntax'
 import { BORDER_POSITIONS, borderOf, cornersOf, modifierName, rewriteBorder, type BorderPosition } from './authoring-border'
 import { isAppleCall } from './builtins'
 import type { LayerProject } from './layer/context'
@@ -12,6 +12,7 @@ import { LENGTH_HOSTS, constantNumber, declarationOf, literalNumber, resolveCons
 import { isConstantToken } from './layer/values'
 import { enumCases } from './authoring-context'
 import { pickerAbove } from './authoring-picker-tags'
+import { colorSource, readColor } from './layer/color'
 
 interface Patch { readonly start: number; readonly end: number; readonly text: string }
 export interface ControlRecipe {
@@ -70,6 +71,8 @@ export function viewCallChain(expr: Expr): { base: CallExpr; modifiers: CallExpr
   }
   return { base: expr, modifiers: [] }
 }
+/** What a read-only value's reason ends with, where the code is still the place to change it (Wave 5b). */
+export const CHANGE_IN_CODE = 'Change it in Code.'
 export const AUTHORING_COLORS = ['primary', 'secondary', 'black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'mint', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink', 'brown', 'clear']
 export const AUTHORING_FONTS = TEXT_STYLES
 export const SYSTEM_COLORS = ['systemBackground', 'secondarySystemBackground', 'tertiarySystemBackground', 'systemGroupedBackground', 'secondarySystemGroupedBackground', 'tertiarySystemGroupedBackground']
@@ -337,6 +340,57 @@ export function spreadRoomProblem(nodes: readonly AuthoringNode[], node: Authori
   return null
 }
 
+/** The Swift of a colour a copy's colour input or a variant's colour case is given: a name, a hex, or a token (Wave 5b). */
+export const colorArgument = (value: string, target: number) => colorSource(value.startsWith('#') ? { hex: value } : /^[a-z]\w*$/.test(value) ? { name: value } : { token: value }, 'Color', { target })
+/** A number as a control writes it, `8`, `-2` or `0.5`, rather than worked out. */
+/** Whether a select's choices are the colours a colour control offers. */
+const isColors = (options?: readonly string[]) => options === COLORS_FROM_15 || options === COLORS_BEFORE_15
+const PLAIN_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/
+/**
+ * What a control's value is when it is written plainly where the control reads it (Wave 5b):
+ * a text `"star"`, a number `8`, an on/off, or a system colour `.red` or `Color.red`. Only
+ * these can become a copy's input or differ by a variant; a ternary's side, a modifier not yet
+ * written, a fill or a motion setting can't.
+ */
+export function plainValue(control: DesignControl, written: string): 'text' | 'number' | 'toggle' | 'color' | undefined {
+  const { kind, value } = control
+  if (control.disabledReason || /^(?:add|fill|motion):|:(?:then|else)$/.test(control.id)) return undefined
+  if (kind === 'text') return written === swiftString(value) ? kind : undefined
+  if (kind === 'number') return PLAIN_NUMBER.test(written) && Number(written) === Number(value) ? kind : undefined
+  if (kind === 'toggle') return written === value ? kind : undefined
+  return kind === 'select' && isColors(control.options) && AUTHORING_COLORS.includes(value) && written.replace(/^(?:SwiftUI\.)?Color(?=\.)/, '') === `.${value}` ? 'color' : undefined
+}
+
+/**
+ * The variant property `member` of the Main `owner` is (Wave 5b), or undefined when it is none:
+ * a stored property a copy sets, typed as an enum of two plain cases, nested in the Main or not.
+ * The panel's Differs by labels and the Main's variant list both read it here.
+ */
+export function variantOf(owner: StructDecl, member: VarDecl, casesOf: (type: string) => readonly string[] | undefined): VariantProperty | undefined {
+  if (member.accessor || member.typeAnnotation?.kind !== 'namedType' || member.attributes.length || member.modifiers.some(m => ['static', 'private', 'fileprivate'].includes(m.name))) return undefined
+  const type = member.typeAnnotation.name, nested = owner.members.find((m): m is EnumDecl => m.kind === 'enumDecl' && m.name === type)
+  const cases = nested ? nested.cases.every(c => !c.associated.length) ? nested.cases.map(c => c.name) : undefined : casesOf(type)
+  return cases?.length === 2 ? { name: member.name, cases: [cases[0]!, cases[1]!] } : undefined
+}
+
+/**
+ * The cases a condition on a variant property chooses between (Wave 5b), in a designer's
+ * words, the one it asks for first: `style == .primary` or `style == Style.primary` on a
+ * Main's `var style: Style` of two cases is Primary, then Secondary. Undefined for any other.
+ */
+function variantCases(condition: Expr, owner: StructDecl | undefined, project: LayerProject): readonly [string, string] | undefined {
+  if (!owner || condition.kind !== 'binary' || condition.operator !== '==') return undefined
+  const nameOf = (side: Expr) => side.kind === 'identifier' ? side.name : side.kind === 'memberAccess' && side.base?.kind === 'selfExpr' ? side.member : undefined
+  for (const [subject, chosen] of [[condition.left, condition.right], [condition.right, condition.left]] as const) {
+    const member = owner.members.find((m): m is VarDecl => m.kind === 'varDecl' && m.name === nameOf(subject))
+    const variant = member && variantOf(owner, member, type => enumCases(project.context, type))
+    // `.primary` or `Style.primary`: Swift takes no other type's case here.
+    const at = variant && chosen.kind === 'memberAccess' && chosen.base?.kind !== 'memberAccess' ? variant.cases.indexOf(chosen.member) : -1
+    if (at >= 0) return [variantCaseWords(variant!.cases[at]!), variantCaseWords(variant!.cases[1 - at]!)]
+  }
+  return undefined
+}
+
 /**
  * Recipes are reconstructed from syntax on every request; the UI never supplies offsets.
  * `project` is the project the view is read in, as its layer is, where the constants a
@@ -366,7 +420,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
    * A control, shown read only with `disabledReason` when it can't be changed here, and with
    * the `problem` a value it is given can have beyond its kind and range.
    */
-  function add(id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description = 'Changes this source value; existing modifier order is preserved.', origin = node.source, disabledReason?: string, problem?: ControlRecipe['problem'], placeholder?: string): void {
+  function add(id: string, label: string, kind: ControlKind, value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description = 'Changes this source value; existing modifier order is preserved.', origin = node.source, disabledReason?: string, problem?: ControlRecipe['problem'], placeholder?: string): DesignControl {
     // Written out for each shape of kind: spreading `controlKind` between other keys sent
     // every key after it down V8's slowest path, for every value of every view.
     const { kind: shown, unit, step } = controlKind(kind)
@@ -375,13 +429,26 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       : step === undefined ? { id, label, kind: shown, unit, value, options, min, max, scope, description, source: origin, disabledReason }
       : { id, label, kind: shown, unit, step, value, options, min, max, scope, description, source: origin, disabledReason }
     recipes.push({ control, patch, problem })
+    return control
+  }
+  /** A value shown as the code writes it, read only with `reason`, so its card is never empty. */
+  function asWritten(id: string, label: string, kind: ControlKind, span: SourceSpan, reason: string, options?: readonly string[]): void {
+    add(id, label, kind, raw(span), () => ({ ...span, text: raw(span) }), options, undefined, undefined, 'Shown as the code writes it.', span, reason)
   }
   function replace(id: string, label: string, value: Expr, kind: ControlKind, options?: readonly string[], min?: number, max?: number, prefix = '.'): void {
     // Edit the literal branches, never erase the condition or replace linked data.
     if (value.kind === 'ternary' && ['text', 'select', 'toggle', 'number'].includes(controlKind(kind).kind)) {
-      const condition = raw(value.condition.span)
-      replace(id + ':then', `${label} · when ${condition} is true`, value.then, kind, options, min, max, prefix)
-      replace(id + ':else', `${label} · otherwise`, value.else, kind, options, min, max, prefix)
+      const condition = raw(value.condition.span), cases = variantCases(value.condition, project.structs.get(node.owner), project)
+      // A variant's case that isn't a value the panel writes is still shown, read only, so neither case goes missing (Wave 5b).
+      for (const [side, branch, words] of [[':then', value.then, cases ? `When ${cases[0]}` : `when ${condition} is true`], [':else', value.else, cases ? `When ${cases[1]}` : 'otherwise']] as const) {
+        const before = recipes.length
+        // A colour case takes a name, a hex or a token, as a copy's colour does (Wave 5b).
+        if (cases && isColors(options)) {
+          const read = readColor(branch, { text, node }), color = read.state === 'code' || branch.kind === 'identifier' ? undefined : colorInputText(read.value)
+          if (color !== undefined) Object.assign(add(id + side, `${label} · ${words}`, kind, color, v => ({ ...branch.span, text: colorArgument(v, targetVersion) }), options, undefined, undefined, undefined, branch.span), { inputKind: 'color' })
+        } else replace(id + side, `${label} · ${words}`, branch, kind, options, min, max, prefix)
+        if (cases && recipes.length === before) asWritten(id + side, `${label} · ${words}`, kind, branch.span, `This case is worked out in Swift. ${CHANGE_IN_CODE}`, options)
+      }
       return
     }
     const property = node.properties.find(p => p.source?.start === value.span.start && p.source?.end === value.span.end)
@@ -536,7 +603,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     if (cases && tag.kind === 'memberAccess' && cases.includes(tag.member)) add('tag', 'Value', 'select', tag.member, v => ({ ...tag.span, text: `${type}.${v}` }), cases, undefined, undefined, undefined, tag.span)
     else replace('tag', 'Value', tag, tag.kind === 'stringLiteral' ? 'text' : 'number')
     const recipe = recipes[first]
-    if (!recipe) add('tag', 'Value', 'text', raw(tag.span), () => ({ ...tag.span, text: raw(tag.span) }), undefined, undefined, undefined, 'Shown as the code writes it.', tag.span, 'This value is worked out in code. Change it in Code.')
+    if (!recipe) asWritten('tag', 'Value', 'text', tag.span, `This value is worked out in code. ${CHANGE_IN_CODE}`)
     else if (recipe.control.kind === 'number' && /^-?\d+$/.test(raw(tag.span).replace(/\s/g, ''))) recipes[first] = { ...recipe, control: { ...recipe.control, integer: true } }
   }
   const corners = cornersOf(chain, text)
@@ -579,7 +646,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       if ((name === 'listRowBackground' || name === 'listRowSeparatorTint') && !arg.label) {
         const first = recipes.length, rowLabel = name === 'listRowBackground' ? 'Row background' : 'Separator color'
         replace(id, rowLabel, arg.value, 'select', colors, undefined, undefined, 'Color.')
-        if (recipes.length === first) add(id, rowLabel, 'text', raw(arg.value.span), () => ({ ...arg.value.span, text: raw(arg.value.span) }), undefined, undefined, undefined, 'Shown as the code writes it.', arg.value.span, 'This value is worked out in code. Change it in Code.')
+        if (recipes.length === first) asWritten(id, rowLabel, 'text', arg.value.span, `This value is worked out in code. ${CHANGE_IN_CODE}`)
       }
       const colorArgument = ['foregroundColor', 'foregroundStyle', 'background', 'fill', 'tint', 'border'].includes(name) && j === 0 && !arg.label || name === 'shadow' && arg.label === 'color'
       const translucent = colorArgument && colorOpacityParts(arg.value)
@@ -707,8 +774,9 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
 }
 
 export function constrainNumericControl(control: DesignControl, view: string, type?: string): DesignControl {
-  return view === 'Stepper' && ['stepper:min', 'stepper:max', 'range:step'].includes(control.id)
-    ? { ...control, integer: !type || type === 'Int' } : control
+  if (view === 'Stepper' && ['stepper:min', 'stepper:max', 'range:step'].includes(control.id)) return { ...control, integer: !type || type === 'Int' }
+  // Swift takes an Int for a line limit and a grid's count, so a copy's input for one is an Int too (Wave 5b).
+  return !control.integer && control.kind === 'number' && (control.label.startsWith('lineLimit') || control.id.endsWith(':detail:limit') || control.id === 'grid:count') ? { ...control, integer: true } : control
 }
 
 export function validateControlValue(control: DesignControl, value: string): string | null {
@@ -725,9 +793,10 @@ export function validateControlValue(control: DesignControl, value: string): str
     // A share of one is typed as a percentage, so its range is said as one too.
     const bound = (limit: number) => control.unit === '%' ? `${Number((limit * 100).toPrecision(12))}%` : String(limit)
     if (!Number.isFinite(number) || Math.abs(number) > 1_000_000 || control.min !== undefined && number < control.min || control.max !== undefined && number > control.max) return `Value is outside the supported range${control.min !== undefined ? ' (minimum ' + bound(control.min) + ')' : ''}${control.max !== undefined ? ' (maximum ' + bound(control.max) + ')' : ''}.`
-    if ((control.integer || control.label.startsWith('lineLimit') || control.id.endsWith(':detail:limit') || control.id === 'grid:count') && !Number.isInteger(number)) return 'Enter a whole number.'
+    if (control.integer && !Number.isInteger(number)) return 'Enter a whole number.'
   }
-  if (control.kind === 'select' && !control.options?.includes(value)) return 'Choose a supported value.'
+  // A copy's colour input takes a hex or a token too, which its writer checks (Wave 5b).
+  if (control.kind === 'select' && control.inputKind !== 'color' && !control.options?.includes(value)) return 'Choose a supported value.'
   if (control.kind === 'toggle' && !BOOLEANS.includes(value)) return 'Switch it on or off.'
   if (value.length > 16_384) return 'This value is too long.'
   return null

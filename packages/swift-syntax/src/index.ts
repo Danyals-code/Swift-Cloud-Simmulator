@@ -27,3 +27,4 @@ export {
   type ViewSite, type SourceEdit, type HiddenView, type RefusalReason,
 } from './edits'
 export { DIRECTIVE_LINE } from './conditional-compilation'
+export { substitute, isAtomic, constantOf, type Constant, type Substitution } from './substitute'

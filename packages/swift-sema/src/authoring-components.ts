@@ -1,14 +1,17 @@
-import { deploymentVersion, nameInWords, swiftIdentifier } from '@studio/shared'
-import type { AuthoringNode, ComponentSettings, ComponentVariant, DesignControl, SourceFile } from '@studio/shared'
+import { colorInputText, deploymentVersion, nameInWords, swiftIdentifier, swiftName } from '@studio/shared'
+import type { AuthoringNode, ComponentInputKind, ComponentSettings, ComponentVariant, DesignControl, SourceFile } from '@studio/shared'
 import { Parser, callParameter, fitsParameters, insertView, forEachChild, type Attribute, type CallExpr, type Expr, type FuncDecl, type InitDecl, type Node, type StructDecl, type TypeRef, type VarDecl } from '@studio/swift-syntax'
 import { readsNoValue } from './authoring-clipboard'
-import { AUTHORING_COLORS, swiftString, validateControlValue, designControlRecipes } from './design-controls'
-import { applyPatches, allDeclarations, callOf, enumCases, expressionOf, insertMember, insertArgument, literal, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, type FeatureContext, type SourcePatch, sourceRoot } from './authoring-context'
+import { AUTHORING_COLORS, CHANGE_IN_CODE, colorArgument, plainValue, swiftString, validateControlValue, designControlRecipes, viewCallChain } from './design-controls'
+import { applyPatches, allDeclarations, callOf, enumCases, expressionOf, insertMember, insertStoredMember, insertArgument, layerById, literal, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, type FeatureContext, type SourcePatch, sourceRoot } from './authoring-context'
 import { SUPPORTED_VIEWS } from './builtins'
 import { enclosingCollection } from './authoring-collections'
 import { buildAuthoringModel } from './authoring'
 import { layerProject } from './layer'
+import { readColor } from './layer/color'
 import { Checker } from './checker'
+import { visibilityEdit } from './authoring-visibility'
+import { pagesThrough } from './page-style'
 
 export function namedActions(ctx: FeatureContext, node: AuthoringNode): FuncDecl[] {
   const owner = ownerOf(ctx, node)
@@ -55,6 +58,73 @@ function componentInputs(decl: StructDecl, call: CallExpr): ComponentInput[] | u
   }) : undefined
 }
 
+/** Views a screen can be wrapped in and stay the screen, as a tab's `NavigationStack { Home() }` (Wave 5b). */
+const AROUND_SCREENS = new Set(['NavigationStack', 'NavigationView', 'Group'])
+/** Where a copy is a screen: the app's window, an iOS 18 `Tab`, or a part of a view pushed or presented over it. */
+const SCREEN_PLACES = new Set(['WindowGroup', 'Tab', 'Destination', 'Sheet', 'Full screen cover', 'Popover'])
+const componentCache = new WeakMap<FeatureContext, { readonly names: readonly string[]; readonly set: ReadonlySet<string> }>()
+/**
+ * The project's components, by name (Wave 5b): each View struct with a copy in a view, unless a
+ * copy is placed as a screen is, as the navigator's `pageViews` reads one: in the app's window,
+ * as a tab, pushed or presented, or as the whole of a screen's body. A component's Main is one
+ * of these, never a screen; Swap lists them. Worked out once for the project.
+ */
+function componentsOf(ctx: FeatureContext) {
+  let found = componentCache.get(ctx)
+  if (found) return found
+  const screens = new Set<string>(), copies = new Set<string>(), roots: [string, string][] = []
+  for (const node of ctx.nodes) {
+    if (node.kind !== 'component') continue
+    copies.add(node.name)
+    let around = layerById(ctx, node.parentId)
+    while (around?.kind === 'view' && AROUND_SCREENS.has(around.name)) around = layerById(ctx, around.parentId)
+    const place = around?.name ?? ''
+    if (around?.kind === 'definition') roots.push([place, node.name])
+    // A TabView's tab, unless it swipes through pages; `NavigationLink("Title") { Detail() }`'s closure is where it goes.
+    else if (SCREEN_PLACES.has(place) || place === 'TabView' && !pagesThrough(viewCallChain(expressionOf(ctx, around!)!)?.modifiers ?? []) || place === 'NavigationLink' && callOf(ctx, around!)?.args[0]?.label === null) screens.add(node.name)
+  }
+  // The view a screen's body is, the tabs `MainTabs()` holds, is that screen still.
+  for (let grew = true; grew;) {
+    grew = false
+    for (const [screen, root] of roots) if (screens.has(screen) && !screens.has(root)) grew = !!screens.add(root)
+  }
+  const names = [...copies].filter(name => { const decl = !screens.has(name) && namedStruct(ctx, name); return !!decl && !decl.isReference && decl.inherits.some(t => t.name === 'View') }).sort()
+  componentCache.set(ctx, found = { names, set: new Set(names) })
+  return found
+}
+/** Every component of the project, by name in order (Wave 5b): the Mains Swap chooses among. */
+export const projectComponents = (ctx: FeatureContext): readonly string[] => componentsOf(ctx).names
+/** Whether `name` is a component, whose Main each copy is drawn from, rather than a screen (Wave 5b). */
+export const isComponent = (ctx: FeatureContext, name: string): boolean => componentsOf(ctx).set.has(name)
+/** Whether a Main has an init of its own, which every copy calls, so its inputs can't be told apart (Wave 5b). */
+export const ownInit = (decl: StructDecl): boolean => decl.members.some(m => m.kind === 'initDecl')
+
+const usesCache = new WeakMap<StructDecl, ReadonlyMap<string, 'symbol' | 'image'>>()
+/**
+ * The inputs a Main shows as a symbol, `Image(systemName: icon)` or `Label(…, systemImage:
+ * icon)`, or as an image, `Image(artwork)` (Wave 5b): read once for each Main.
+ */
+function inputUses(decl: StructDecl): ReadonlyMap<string, 'symbol' | 'image'> {
+  let uses = usesCache.get(decl)
+  if (uses) return uses
+  const found = new Map<string, 'symbol' | 'image'>()
+  const name = (value: Expr) => value.kind === 'identifier' ? value.name : value.kind === 'memberAccess' && value.base?.kind === 'selfExpr' ? value.member : undefined
+  const visit = (n: Node) => {
+    if (n.kind === 'call') for (const [index, arg] of n.args.entries()) {
+      const input = name(arg.value)
+      if (input && (arg.label === 'systemName' || arg.label === 'systemImage')) found.set(input, 'symbol')
+      else if (input && index === 0 && arg.label === null && n.args.length === 1 && n.callee.kind === 'identifier' && n.callee.name === 'Image') found.set(input, 'image')
+    }
+    forEachChild(n, visit)
+  }
+  for (const member of decl.members) if (member.kind === 'varDecl' && member.name === 'body') visit(member)
+  usesCache.set(decl, uses = found)
+  return uses
+}
+
+/** A view's properties where the expression read is in another file than the view: none of them are its (Wave 5b). */
+const ELSEWHERE = { properties: [] }
+
 export function componentRecipes(ctx: FeatureContext, node: AuthoringNode): ComponentRecipe[] {
   if (node.kind !== 'component') return []
   const call = callOf(ctx, node), decl = namedStruct(ctx, node.name)
@@ -73,16 +143,30 @@ export function componentRecipes(ctx: FeatureContext, node: AuthoringNode): Comp
     const type = field.typeAnnotation
     const scalar = scalarType(type, field.initializer) ?? (type?.kind === 'namedType' && ['CGFloat', 'Float'].includes(type.name) ? { type: 'Double' as const, optional: false } : undefined)
     let kind: DesignControl['kind'] = 'text', value: string | undefined, options: readonly string[] | undefined
-    let format = (v: string) => swiftString(v)
+    let format = (v: string) => swiftString(v), inputKind: DesignControl['inputKind'], disabledReason: string | undefined
     const input = literal(ctx, expr)
     if (scalar && !scalar.optional && input !== undefined && input !== null) {
       value = String(input)
       kind = scalar.type === 'String' ? 'text' : scalar.type === 'Bool' ? 'toggle' : 'number'
       format = v => scalar.type === 'String' ? swiftString(v) : scalar.type === 'Bool' ? v : String(Number(v))
+      if (scalar.type === 'String') inputKind = inputUses(decl).get(field.name)
     } else if (type?.kind === 'namedType') {
-      options = type.name === 'Color' && !allDeclarations(ctx).some(d => 'name' in d && d.name === 'Color') ? AUTHORING_COLORS.filter(c => deploymentVersion(ctx.deploymentTarget) >= 15 || !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c)) : enumCases(ctx, type.name)
-      if (options && expr?.kind === 'memberAccess' && (!expr.base || expr.base.kind === 'identifier' && expr.base.name === type.name) && options.includes(expr.member)) {
-        value = expr.member; kind = 'select'; format = v => `${type.name}.${v}`
+      if (type.name === 'Color' && !allDeclarations(ctx).some(d => 'name' in d && d.name === 'Color')) {
+        // A colour input reads a name, a hex or a token, each in the file it is written in, and
+        // writes what the colour control gives it; one it can't say is shown read only (Wave 5b).
+        options = AUTHORING_COLORS.filter(c => deploymentVersion(ctx.deploymentTarget) >= 15 || !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c))
+        if (expr) {
+          const file = expr.span.file, text = ctx.files.find(f => f.id === file)?.text ?? '', read = readColor(expr, { text, node: file === node.source.file ? node : ELSEWHERE })
+          value = read.state === 'code' ? undefined : colorInputText(read.value)
+          if (value === undefined) { value = text.slice(expr.span.start, expr.span.end); disabledReason = read.disabledReason ?? `This color has an opacity a copy’s color can’t hold. ${CHANGE_IN_CODE}` }
+          kind = 'select'; inputKind = 'color'; format = v => colorArgument(v, deploymentVersion(ctx.deploymentTarget))
+        }
+      } else {
+        // A case is written as `.secondary`, which names a nested enum's case as well as any other's (Wave 5b).
+        options = enumCases(ctx, type.name)
+        if (options && expr?.kind === 'memberAccess' && (!expr.base || expr.base.kind === 'identifier' && expr.base.name === type.name) && options.includes(expr.member)) {
+          value = expr.member; kind = 'select'; format = v => `.${v}`
+        }
       }
     } else if (type?.kind === 'functionType' && !type.params.length && type.result.kind === 'namedType') {
       if (type.result.name === 'Void') {
@@ -101,10 +185,10 @@ export function componentRecipes(ctx: FeatureContext, node: AuthoringNode): Comp
     }
     if (value === undefined) continue
     const descriptive = description?.properties.find(p => p.name === field.name)
-    const probe = insertArgument(ctx, call, field.name, format(value), fields.map(f => f.name))
-    if (!probe) continue
-    const control: DesignControl = { id: `component:${field.name}`, source: argument?.value.span ?? call.span, group: descriptive?.group, label: descriptive?.label || field.name, description: descriptive?.description || 'Changes this call-site argument. Other component instances and the shared definition remain independent.', kind, value, options, min: descriptive?.min, max: descriptive?.max, scope: 'This component instance' }
-    result.push({ control, portable: type?.kind !== 'functionType', write(v) {
+    // A value it can read but not write here, a colour newer than the target, is shown read only with why.
+    try { if (!disabledReason && !insertArgument(ctx, call, field.name, format(value), fields.map(f => f.name))) continue } catch (error) { disabledReason = (error as Error).message }
+    const control: DesignControl = { id: `component:${field.name}`, source: argument?.value.span ?? call.span, group: descriptive?.group, label: descriptive?.label || field.name, description: descriptive?.description || 'Changes this call-site argument. Other component instances and the shared definition remain independent.', kind, value, options, min: descriptive?.min, max: descriptive?.max, scope: 'This component instance', inputKind, disabledReason }
+    result.push({ control, portable: type?.kind !== 'functionType' && !disabledReason, write(v) {
       if (scalar?.type === 'Int' && !Number.isSafeInteger(Number(v))) throw new Error('Use a whole number for this component property.')
       return insertArgument(ctx, call, field.name, format(v), fields.map(f => f.name))!
     } })
@@ -170,7 +254,7 @@ export function extractComponent(ctx: FeatureContext, node: AuthoringNode, name:
  * A value of `type` for a new copy to start with, when its screen's own cannot come along:
  * words from the input's name, zero, false, blue, an enum's first case, or no value at all.
  */
-function sampleOf(ctx: FeatureContext, type: TypeRef | null, label: string): string | undefined {
+export function sampleOf(ctx: FeatureContext, type: TypeRef | null, label: string): string | undefined {
   if (type?.kind === 'optionalType') return 'nil'
   if (type?.kind !== 'namedType') return undefined
   switch (type.name) {
@@ -183,7 +267,7 @@ function sampleOf(ctx: FeatureContext, type: TypeRef | null, label: string): str
   return first === undefined ? undefined : `.${first}`
 }
 
-const isAction = (type: TypeRef | null) => type?.kind === 'functionType' && !type.params.length && type.result.kind === 'namedType' && type.result.name === 'Void'
+export const isAction = (type: TypeRef | null) => type?.kind === 'functionType' && !type.params.length && type.result.kind === 'namedType' && type.result.name === 'Void'
 
 /**
  * A new copy of component `name`, to put on any screen (D6): each input as a copy can
@@ -258,13 +342,47 @@ export function applyComponentVariant(ctx: FeatureContext, node: AuthoringNode, 
   return { files: [...current.files], offset: node.source.start }
 }
 
-/** Promote a literal label to a defaulted input without changing existing instances. */
-export function exposeComponentInput(ctx: FeatureContext, node: AuthoringNode, control: string, name: string) {
+/** The name an input of each kind takes when the designer gives none (Wave 5b), numbered past any the Main has; a number's is what it sets, `padding`, and Shown's the view's, `showsImage`. */
+const INPUT_NAMES: Readonly<Record<Exclude<ComponentInputKind, 'number' | 'shown'>, string>> = { text: 'label', symbol: 'icon', image: 'image', color: 'tint' }
+
+/**
+ * What a view's control in a Main can become as an input of each copy (Wave 5b): a value
+ * written plainly where the control reads it, `"star"`, `.red` or `8`, so the Main still
+ * shows what it showed. A text is the view's own words, or a symbol's or an image's name.
+ */
+function exposeKind(ctx: FeatureContext, node: AuthoringNode, control: DesignControl, written: string): DesignControl['exposeAs'] {
+  const plain = plainValue(control, written), { id } = control
+  if (plain !== 'text') return plain === 'toggle' ? undefined : plain
+  // An Image's name is an asset's, unless it is given as its systemName; a Label's and a Button's is a symbol's.
+  return id === 'content' || id === 'title' ? 'text' : id === 'image' && node.name === 'Image' && callOf(ctx, node)?.args[0]?.label !== 'systemName' ? 'image' : id === 'image' || id === 'icon' ? 'symbol' : undefined
+}
+/** A view's controls in a Main, each that can become a copy's input saying what kind (Wave 5b); any other view's as they are. */
+export function exposable(ctx: FeatureContext, node: AuthoringNode, controls: DesignControl[] | undefined): DesignControl[] | undefined {
+  if (!controls || node.kind !== 'view' || !isComponent(ctx, node.owner)) return controls
+  const text = ctx.files.find(f => f.id === node.source.file)?.text ?? ''
+  return controls.map(control => { const as = control.source.file === node.source.file ? exposeKind(ctx, node, control, text.slice(control.source.start, control.source.end)) : undefined; return as ? { ...control, exposeAs: as } : control })
+}
+/** What each kind of input can be made from, for why a value can't become one. */
+const KIND_WORDS: Readonly<Record<Exclude<ComponentInputKind, 'text' | 'shown'>, string>> = { symbol: 'a symbol written by its name', image: 'an image written by its asset name', color: 'a color written by its name, such as .red,', number: 'a number written as a number' }
+
+/**
+ * A value of a Main each copy can set (Wave 5b), as a defaulted input, so the copies there
+ * build still and keep what they showed: text as before, a symbol, an image, a colour or a
+ * number in place of the value the control reads, or `shown`, an on/off input the selected
+ * view is shown by. An empty `name` takes the kind's own, numbered past any taken.
+ */
+export function exposeComponentInput(ctx: FeatureContext, node: AuthoringNode, control: string, name: string, as: ComponentInputKind = 'text'): SourcePatch[] | ReturnType<typeof visibilityEdit> {
   const owner = ownerOf(ctx, node), expression = expressionOf(ctx, node)
-  if (!owner || !expression || !ctx.nodes.some(n => n.kind === 'component' && n.name === owner.name)) throw new Error('Select text inside a reusable component’s shared design.')
-  if (!swiftIdentifier(name) || owner.members.some(m => 'name' in m && m.name === name) || owner.members.some(m => m.kind === 'initDecl')) throw new Error('Choose an unused input name on a component without a custom initializer.')
-  const recipe = designControlRecipes(node, expression, ctx.files.find(f => f.id === node.source.file)!.text, layerProject(ctx.ast, ctx.deploymentTarget, ctx.files), ctx.deploymentTarget).find(r => ['content', 'title'].includes(r.control.id) && r.control.id === control && r.control.kind === 'text')
-  if (!recipe) throw new Error('Only plain text or a plain control title can become a text input here. Linked or conditional text keeps its existing connection.')
-  const patches = [insertMember(ctx, owner, `var ${name}: String = ${swiftString(recipe.control.value)}`), patch(recipe.control.source, `self.${name}`)]
-  return { files: applyPatches(ctx, patches), offset: node.source.start + patches.filter(p => p.file === node.source.file && p.end <= node.source.start).reduce((delta, p) => delta + p.text.length - (p.end - p.start), 0) }
+  if (!owner || !expression || !isComponent(ctx, owner.name)) throw new Error('Select text inside a reusable component’s shared design.')
+  if (ownInit(owner)) throw new Error(`${owner.name} has an init of its own, which every copy calls. Add the input in Code.`)
+  const free = (n: string) => swiftIdentifier(n) && !owner.members.some(m => 'name' in m && m.name === n) && !shadowsMember(ctx, node, n)
+  const text = ctx.files.find(f => f.id === node.source.file)!.text
+  const recipe = as === 'shown' ? undefined : designControlRecipes(node, expression, text, layerProject(ctx.ast, ctx.deploymentTarget, ctx.files), ctx.deploymentTarget).find(r => r.control.id === control)
+  if (!name) for (let suffix = 2, base = name = as === 'shown' ? `shows${node.name}` : as === 'number' ? swiftName(recipe?.control.label ?? '') || 'amount' : INPUT_NAMES[as]; !free(name); suffix++) name = `${base}${suffix}`
+  if (!free(name)) throw new Error('Choose an unused input name on a component without a custom initializer.')
+  if (as === 'shown') return visibilityEdit(ctx, node, { kind: 'visibility', when: { input: name, is: true }, create: { name, value: true } })
+  if (!recipe || exposeKind(ctx, node, recipe.control, text.slice(recipe.control.source.start, recipe.control.source.end)) !== as) throw new Error(as === 'text' ? 'Only plain text or a plain control title can become a text input here. Linked or conditional text keeps its existing connection.' : `Only ${KIND_WORDS[as]} can become a ${as} input here. ${CHANGE_IN_CODE}`)
+  const { source, value } = recipe.control
+  return as === 'text' ? [insertMember(ctx, owner, `var ${name}: String = ${swiftString(value)}`), patch(source, `self.${name}`)]
+    : [insertStoredMember(ctx, owner, as === 'color' ? `var ${name}: Color = .${value}` : as === 'number' ? `var ${name}: ${recipe.control.integer ? 'Int' : 'CGFloat'} = ${Number(value)}` : `var ${name}: String = ${swiftString(value)}`), patch(source, name)]
 }

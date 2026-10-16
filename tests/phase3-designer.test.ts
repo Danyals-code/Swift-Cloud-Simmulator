@@ -20,7 +20,7 @@ describe('component authoring and saved variants', () => {
   it('applies omitted inputs atomically in declaration order to one instance', () => {
     const source = app('VStack { Card(); Card(title: "Other") }', card)
     const result = apply(source, component(source), { kind: 'component-variant', variant: variant(source, [{ control: 'component:tone', value: 'loud' }, { control: 'component:featured', value: 'true' }, { control: 'component:count', value: '2' }, { control: 'component:title', value: 'Featured' }]) })
-    expect(result).toContain('Card(title: "Featured", count: 2, featured: true, tone: Tone.loud)')
+    expect(result).toContain('Card(title: "Featured", count: 2, featured: true, tone: .loud)')
     expect(texts(result)).toEqual(['Featured', 'Other'])
   })
   it('rejects invalid variants without applying a partial input update', () => {

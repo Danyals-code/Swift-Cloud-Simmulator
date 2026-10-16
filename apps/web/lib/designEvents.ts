@@ -68,6 +68,9 @@ function details(operation: DesignEditRequest['operation'], node: AuthoringNode 
     // Which sections changed, never their values: a token's name or a colour is the project's own.
     case 'layer-set': return { control: `layer:${[...new Set(operation.changes.map(change => change.section))].join('+')}` }
     case 'modifier-add': return offered(node, operation.name)
+    // What kind of input a copy gets, and which field differs by a variant: never their names (Wave 5b).
+    case 'component-expose': return operation.as ? { control: `as:${operation.as}` } : {}
+    case 'component-differs': return { control: controlFamily(operation.control) }
     case 'modifier-remove':
     case 'modifier-duplicate':
     case 'modifier-move':

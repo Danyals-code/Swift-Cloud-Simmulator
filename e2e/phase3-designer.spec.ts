@@ -36,7 +36,7 @@ async function expand(details: Locator) {
   if (!await details.evaluate(element => (element as HTMLDetailsElement).open)) await details.locator('summary').first().click()
   await expect(details).toHaveAttribute('open', '')
 }
-/** A copy's saved inputs live under Advanced › Variants. */
+/** A copy's saved inputs live under Advanced › Saved inputs. */
 async function variants(page: Page) {
   await expand(page.getByTestId('settings-advanced'))
   await expand(page.getByTestId('component-variants'))
@@ -76,8 +76,8 @@ test('creates and reuses a component, exposes text, saves variants, and edits th
   await expect(instances).toHaveCount(2)
   await instances.first().click(); await input(page, 'label', 'Featured member')
   await variants(page)
-  await page.getByLabel('Variant name', { exact: true }).fill('Featured')
-  await page.getByRole('button', { name: 'Save variant from this instance', exact: true }).click()
+  await page.getByLabel('Saved inputs name', { exact: true }).fill('Featured')
+  await page.getByRole('button', { name: 'Save inputs from this copy', exact: true }).click()
   await instances.last().click(); await ready(page)
   await variants(page)
   await page.getByRole('button', { name: 'Apply Featured', exact: true }).click()
