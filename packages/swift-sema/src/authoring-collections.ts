@@ -1,8 +1,8 @@
 import { SUPPORTED_VIEWS } from './builtins'
-import { deploymentVersion } from '@studio/shared'
+import { deploymentVersion, swiftIdentifier } from '@studio/shared'
 import type { AuthoringNode, CollectionSettings, DesignValue, DesignRecord, RecordField } from '@studio/shared'
 import { afterOffMarkers, Lexer, type Expr, type VarDecl } from '@studio/swift-syntax'
-import { callOf, hasComments, shadowsMember, identifier, insertMember, layerById, lineIndent, literal, namedStruct, ownerOf, patch, raw, scalarType, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
+import { callOf, hasComments, shadowsMember, insertMember, layerById, lineIndent, literal, namedStruct, ownerOf, patch, raw, scalarType, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { swiftString } from './design-controls'
 
 export function recordDeclaration(ctx: FeatureContext, variable: VarDecl): { name: string; fields: RecordField[]; signature: string } | undefined {
@@ -13,7 +13,7 @@ export function recordDeclaration(ctx: FeatureContext, variable: VarDecl): { nam
   const fields: RecordField[] = []
   for (const member of decl.members) {
     if (member.kind !== 'varDecl' || member.accessor || member.modifiers.some(m => m.name === 'static')) continue
-    if (member.attributes.length || member.modifiers.length || member.isLet && member.initializer || !identifier(member.name)) return undefined
+    if (member.attributes.length || member.modifiers.length || member.isLet && member.initializer || !swiftIdentifier(member.name)) return undefined
     const type = scalarType(member.typeAnnotation)
     if (!type) return undefined
     const defaultValue = member.initializer ? literal(ctx, member.initializer) : undefined
@@ -66,7 +66,7 @@ export function collectionFor(ctx: FeatureContext, node: AuthoringNode): Collect
   if (node.kind !== 'collection') return undefined
   const call = callOf(ctx, node), owner = ownerOf(ctx, node)
   const value = call?.args[0]?.value, closure = call?.trailingClosure
-  if (!owner || !value || value.kind !== 'identifier' || !closure || closure.params.length !== 1 || !identifier(closure.params[0]!.name.replace(/^\$/, '')) || closure.params[0]!.type) return undefined
+  if (!owner || !value || value.kind !== 'identifier' || !closure || closure.params.length !== 1 || !swiftIdentifier(closure.params[0]!.name.replace(/^\$/, '')) || closure.params[0]!.type) return undefined
   if (call.args.length > 2 || call.args[1] && (call.args[1].label !== 'id' || raw(ctx, call.args[1].value.span) !== '\\.id')) return undefined
   const variable = owner.members.find((m): m is VarDecl => m.kind === 'varDecl' && m.name === value.name.replace(/^\$/, '') && !m.accessor && !m.setter && !m.observers && m.attributes.every(a => a.name === 'State'))
   if (value.name.startsWith('$') !== closure.params[0]!.name.startsWith('$')) return undefined
@@ -165,7 +165,7 @@ export function convertCollection(ctx: FeatureContext, node: AuthoringNode, name
   const owner = ownerOf(ctx, node), call = callOf(ctx, node)
   const range = node.name === 'ForEach' ? rangeRows(ctx, node) : null
   if (!owner || !call?.trailingClosure || (node.name === 'List' ? node.kind !== 'view' || call.args.length > 0 : !range)) throw new Error('Only a static List of Text rows, or a Repeat over a range, can become a collection.')
-  if (!identifier(name) || !identifier(recordType) || SUPPORTED_VIEWS.has(recordType) || ['String', 'Int', 'Double', 'Bool', 'Color', 'Font', 'View', 'App', 'UUID', 'CGFloat', 'Array', 'Dictionary', 'Optional'].includes(recordType) || name === recordType || owner.members.some(m => 'name' in m && m.name === name) || ctx.ast.some(f => f.declarations.some(d => 'name' in d && d.name === recordType))) throw new Error('Choose unused Swift names for the collection and record type.')
+  if (!swiftIdentifier(name) || !swiftIdentifier(recordType) || SUPPORTED_VIEWS.has(recordType) || ['String', 'Int', 'Double', 'Bool', 'Color', 'Font', 'View', 'App', 'UUID', 'CGFloat', 'Array', 'Dictionary', 'Optional'].includes(recordType) || name === recordType || owner.members.some(m => 'name' in m && m.name === name) || ctx.ast.some(f => f.declarations.some(d => 'name' in d && d.name === recordType))) throw new Error('Choose unused Swift names for the collection and record type.')
   if (hasComments(ctx, call.span)) throw new Error('This list has comments whose ownership would change during conversion. Convert it in Swift.')
   let titles: readonly string[], template: string
   if (range) ({ titles, template } = range)
@@ -199,7 +199,7 @@ export function emptyState(ctx: FeatureContext, node: AuthoringNode, message: st
 /** Defaults preserve every existing initializer, including developer action bodies. */
 export function addCollectionField(ctx: FeatureContext, node: AuthoringNode, name: string, type: RecordField['type'], optional: boolean, value: DesignValue): SourcePatch[] {
   const info = collectionFor(ctx, node), decl = info && namedStruct(ctx, info.recordType)
-  if (!info || !decl || !identifier(name) || !['String', 'Int', 'Double', 'Bool'].includes(type) || !validScalar(value, { type, optional })) throw new Error('Choose a supported field name, type and default value.')
+  if (!info || !decl || !swiftIdentifier(name) || !['String', 'Int', 'Double', 'Bool'].includes(type) || !validScalar(value, { type, optional })) throw new Error('Choose a supported field name, type and default value.')
   if (decl.members.some(m => 'name' in m && m.name === name) || info.fields.length >= 32) throw new Error('The field already exists or the record has reached its 32-field limit.')
   const eol = ctx.files.find(f => f.id === decl.span.file)?.text.includes('\r\n') ? '\r\n' : '\n'
   return [{ file: decl.span.file, start: decl.span.end - 1, end: decl.span.end - 1, text: `${eol}    var ${name}: ${type}${optional ? '?' : ''} = ${swiftValue(value)}${eol}` }]

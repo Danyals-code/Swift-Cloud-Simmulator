@@ -108,6 +108,9 @@ details.settingsSection[open] > summary + * { margin-top: 12px; }
 
 /* A value the view is shown for, with the code it comes from. */
 .shownWhen { display: grid; gap: 8px; }
+/* Visibility (Wave 5a): Shown when, then how the view comes and goes, under one caption. */
+.visibility { display: grid; gap: 8px; min-width: 0; }
+.visibility > small { font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); font-weight: 600; color: var(--color-xc-text-2); }
 .row { composes: row from "./ui/Field.module.css"; align-items: baseline; }
 .row > span:last-child { display: grid; justify-items: start; gap: 4px; min-width: 0; }
 

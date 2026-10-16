@@ -58,13 +58,13 @@ const APPLIED = [
   '.animation(.default, value: count)', '.transition(.opacity)', '.id(count)', '.badge(3)', '.listRowBackground(Color.yellow)',
   '.listRowInsets(EdgeInsets())', '.ignoresSafeArea()', '.mask { Circle() }', '.monospacedDigit()',
   '.safeAreaInset(edge: .bottom) { Text("Bar") }', '.searchable(text: .constant(""))', '.presentationDetents([.medium])',
-  '.shadow(color: .black, radius: 4, y: 2)', '.swipeActions { Button("Delete") { } }',
+  '.shadow(color: .black, radius: 4, y: 2)', '.swipeActions { Button("Delete") { } }', '.contentTransition(.numericText())',
 ]
 /** Apple modifiers the preview names and does not draw, and real ones it has no list of. */
 const NOT_DRAWN = [
   '.refreshable { }', '.contentShape(Rectangle())', '.symbolRenderingMode(.hierarchical)',
   '.zIndex(1)', '.fontWidth(.condensed)', '.scrollTransition { content, phase in content }',
-  '.sensoryFeedback(.success, trigger: count)', '.labelsHidden()', '.contentTransition(.numericText())',
+  '.sensoryFeedback(.success, trigger: count)', '.labelsHidden()',
 ]
 
 describe('the Add list and the quick fields', () => {
@@ -106,9 +106,14 @@ describe('what a known Apple modifier reads as', () => {
     ['.zIndex(1)', 'layout'],
     ['.fontWidth(.condensed)', 'text'],
     ['.sensoryFeedback(.success, trigger: count)', 'behavior'],
-    ['.contentTransition(.numericText())', 'behavior'],
   ])('%s is not drawn in the preview, in its own category', (modifier, category) => {
     expect(textOf(`Text("A")${modifier}`).modifiers?.[0]).toMatchObject({ category, summary: 'Not drawn in the preview' })
+  })
+
+  it('reads .contentTransition(.numericText()) as drawn, since the preview rolls the digits (Wave 5a)', () => {
+    const card = textOf('Text("A").contentTransition(.numericText())').modifiers?.[0]
+    expect(card).toMatchObject({ name: 'contentTransition', category: 'behavior' })
+    expect(card?.summary).not.toBe('Not drawn in the preview')
   })
 
   it('keeps the modifiers the preview draws as they read', () => {

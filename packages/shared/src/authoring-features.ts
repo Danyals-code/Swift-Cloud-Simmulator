@@ -152,12 +152,113 @@ export interface BehaviorSettings {
     /** The name a new value for it takes: free on its screen, as the canvas names a control's value (D13). */
     readonly newName: string
   }
+  /**
+   * How the Button's action animates what it changes (Wave 5a): read when the action is
+   * `withAnimation(…) { … }` and nothing else. Absent when it isn't animated.
+   */
+  readonly animation?: ReadAnimation
 }
+/**
+ * The animation styles Animate this change offers (Wave 5a), with Apple's names: Smooth,
+ * Snappy and Bouncy are springs, and Ease in and out and Linear take a duration.
+ */
+export type AnimationStyle = 'smooth' | 'snappy' | 'bouncy' | 'default' | 'easeInOut' | 'linear'
+/** Each style in a designer's words, in the order the select lists them (Wave 5a). */
+export const ANIMATION_STYLE_WORDS: Readonly<Record<AnimationStyle, string>> = { smooth: 'Smooth', snappy: 'Snappy', bouncy: 'Bouncy', default: 'Default', easeInOut: 'Ease in and out', linear: 'Linear' }
+/** The styles, in the order the select lists them (Wave 5a). */
+export const ANIMATION_STYLES = Object.keys(ANIMATION_STYLE_WORDS) as readonly AnimationStyle[]
+/** Whether a style takes a duration (Wave 5a): Ease in and out and Linear do; the springs and Default don't. */
+export const takesDuration = (style: AnimationStyle | null | undefined): boolean => style === 'easeInOut' || style === 'linear'
+/** The duration in seconds a style that takes one starts at, and plays for when none is written: Apple's default (Wave 5a). */
+export const DEFAULT_ANIMATION_DURATION = 0.35
+/** An animation a tap action plays (Wave 5a): `withAnimation(.smooth) { … }`, or `.easeInOut(duration: 0.4)`. */
+export interface ActionAnimation {
+  readonly style: AnimationStyle
+  /** In seconds, for Ease in and out and Linear; Apple's default, `DEFAULT_ANIMATION_DURATION`, when absent. */
+  readonly duration?: number
+}
+/**
+ * An action's animation as read (Wave 5a). `style` is null for one written in code that
+ * Design doesn't name, `.spring(response: 0.4)`, which `written` shows as it is: it is kept
+ * by Replace, and can be switched off or replaced by a style.
+ */
+export interface ReadAnimation {
+  readonly style: AnimationStyle | null
+  readonly duration?: number
+  /** The animation as the code writes it, `.smooth` or `.spring(response: 0.4)`; empty for `withAnimation { … }`, which is Default. */
+  readonly written: string
+}
+/**
+ * What a Shown when asks of one value (Wave 5a). `input` is the value, as a screen's states
+ * name it (`StateInput.name`): `showDetails`, `model.isLoading`, `items`, `selection`. `is` is
+ * what it holds while the view shows: true or false for a Bool, a case's name for an enum,
+ * `empty` or `items` for a list, `none` or `some` for an optional.
+ */
+export interface VisibilityWhen {
+  readonly input: string
+  readonly is: boolean | string
+}
+/** One choice of the Shown when select, as it lists it: "When Show details is on" (Wave 5a). */
+export interface VisibilityOption {
+  readonly when: VisibilityWhen
+  readonly label: string
+}
+/** The name a new on/off switch of Shown when takes (Wave 5a), numbered past any the screen has: `isShown`, then `isShown2`. */
+export const NEW_SWITCH_NAME = 'isShown'
+/** The words Swift keeps for itself, and names a view has already, which no value Design names can take (Wave 5a). */
+const RESERVED_NAMES: ReadonlySet<string> = new Set(['self', 'Self', 'body', 'init', 'deinit', 'class', 'struct', 'enum', 'var', 'let', 'func', 'if', 'else', 'return', 'true', 'false', 'nil', 'switch', 'case', 'default', 'in', 'for', 'while', 'import', 'some', 'any', 'Type', 'where', 'extension', 'protocol', 'private', 'public', 'static', 'repeat', 'try', 'throw', 'throws', 'async', 'await'])
+/** Whether Design can name a value, a type or a screen `value` (Wave 5a): letters, digits and `_`, starting with no digit, up to 64 long, and no word Swift keeps. */
+export function swiftIdentifier(value: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(value) && !RESERVED_NAMES.has(value)
+}
+/**
+ * When a view is shown (Wave 5a): always, or while an `if` around it holds. Every view a
+ * statement of its own carries it, so Shown when can be set on any of them.
+ */
+export interface ViewVisibility {
+  /** What shows it, when an `if` Design can write back says so; absent when it is always shown or `condition` says otherwise. */
+  readonly when?: VisibilityWhen
+  /** The condition as the code writes it, when the view is in an `if`: `showDetails`, `model.items.count > 3`. */
+  readonly condition?: string
+  /** The Shown when choices besides Always and "+ New on/off switch…", each value with its other side. */
+  readonly options: readonly VisibilityOption[]
+  /** Whether Shown when can be changed here; `problem` says why not. */
+  readonly editable: boolean
+  readonly problem?: string
+  /** The name a new on/off switch for it takes, free on its screen. */
+  readonly newName: string
+  /** When it shows, in words: "Details is on", "Items is empty"; absent when the condition can't be said plainly. */
+  readonly label?: string
+  /** The other side of `label`, for "Hidden while Details is off". */
+  readonly hiddenWhile?: string
+  /**
+   * The preview inputs that draw it, which Show it switches to: its own condition holding,
+   * joined with the conditions around it, as a suggested state's are. Set for any view in an
+   * `if` whose conditions the preview can set, editable or not; absent when it can't.
+   */
+  readonly shows?: readonly PreviewInput[]
+}
+/**
+ * The ids of the Visibility group's controls (Wave 5a), which are `DesignControl`s on the view
+ * and are set with the `property` operation as any control is:
+ * - `transition`, a select: None, Fade, Slide, Scale, Move from edge, Push from edge (iOS 16), Blur (iOS 17);
+ * - `edge`, a select for Move and Push from edge: top, bottom, leading, trailing;
+ * - `fades`, a toggle: Fades too, `.combined(with: .opacity)`;
+ * - `rollsDigits`, a toggle on a Text showing a number: `.contentTransition(.numericText())`;
+ * - `movesWith`, a select: None, or a view of another branch of the same `if` or `switch`,
+ *   which it morphs into (`.matchedGeometryEffect`).
+ */
+export const MOTION_CONTROLS = { transition: 'motion:transition', edge: 'motion:edge', fades: 'motion:fades', rollsDigits: 'motion:rolls-digits', movesWith: 'motion:moves-with' } as const
 /** Whether a view offers When tapped: a Button's action, or making any other view tappable (D16). */
 export function offersWhenTapped(behavior: BehaviorSettings | undefined): boolean {
   return !!behavior && (behavior.canConfigureAction || !!behavior.canMakeTappable)
 }
-export type BehaviorAction =
+/**
+ * What a tap does. `animation` (Wave 5a) animates a change of a value, a list or a call:
+ * absent keeps the animation the action has when it is replaced, and null removes it.
+ */
+export type BehaviorAction = BehaviorActionKind & { readonly animation?: ActionAnimation | null }
+type BehaviorActionKind =
   | { readonly type: 'toggle'; readonly state: string }
   | { readonly type: 'set'; readonly state: string; readonly value: DesignValue }
   | { readonly type: 'call'; readonly name: string }
@@ -308,3 +409,11 @@ export type AuthoringOperation = ResourceOperation | ModifierOperation | Navigat
   | { readonly kind: 'behavior'; readonly action: BehaviorAction; readonly replace: boolean }
   | { readonly kind: 'bind-state'; readonly name: string; readonly create?: { readonly value: DesignValue } }
   | { readonly kind: 'transition'; readonly state: string; readonly style: 'opacity' | 'slide' | 'scale'; readonly duration: number }
+  /**
+   * Shown when (Wave 5a): wraps the view in `if`, changes the condition of the `if` it is the
+   * only view of, or with `when` null unwraps it. `create` makes a new on/off switch first,
+   * `@State private var name = value`, which `when.input` then names.
+   */
+  | { readonly kind: 'visibility'; readonly when: VisibilityWhen | null; readonly create?: { readonly name: string; readonly value: boolean } }
+  /** Animate this change (Wave 5a): wraps a Button's action in `withAnimation`, changes its style, or with null unwraps it. */
+  | { readonly kind: 'animate-action'; readonly animation: ActionAnimation | null }

@@ -1,8 +1,9 @@
-import { isNonView, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type PreviewColorAsset, type SourceFile } from '@studio/shared'
+import { isNonView, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type DesignControl, type PreviewColorAsset, type SourceFile } from '@studio/shared'
 import { collectionFor, addCollectionField, bindField, convertCollection, emptyState, enclosingCollection, recordsSwift, validateRecords } from './authoring-collections'
 import { componentRecipes, componentSettings, extractComponent, insertComponent, applyComponentVariant, exposeComponentInput } from './authoring-components'
-import { behaviorSettings, configureAction, configureBinding, configureTransition, stateInputs } from './authoring-behavior'
-import { applyPatches, hasComments, patch, type FeatureContext, type SourcePatch } from './authoring-context'
+import { behaviorSettings, configureAction, configureBinding, stateInputs } from './authoring-behavior'
+import { applyPatches, callOf, hasComments, patch, type FeatureContext, type SourcePatch } from './authoring-context'
+import { animateAction, configureTransition, motionControls, motionEdit } from './authoring-motion'
 import { editResource, sharedStyles, styleProperties } from './authoring-resources'
 import { constrainNumericControl, validateControlValue } from './design-controls'
 import { navigationSettings, configureNavigationTarget, changeNavigationType } from './authoring-navigation'
@@ -13,6 +14,7 @@ import { createScreenValue, guidedAction, screenEdit } from './authoring-screens
 import { customizeCard } from './authoring-card'
 import { makeTappable, structureEdit, unwrapEdit } from './authoring-structure'
 import { barsEdit, screenBars } from './authoring-bars'
+import { visibilityEdit, visibilitySettings } from './authoring-visibility'
 
 export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot): AuthoringSnapshot {
   // A file with an error keeps its own views plain, and what is declared in it gives no settings: a
@@ -33,9 +35,12 @@ export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot
     const parent = sound(enclosingCollection(ctx, node), c => c.source.file)
     // A copy of a component can be made tappable as any view can (D16).
     const behavior = ['view', 'collection', 'component'].includes(node.kind) && !isNonView(node) ? behaviorSettings(ctx, node) : undefined
-    return { ...node, navigation: navigationSettings(ctx, node), styles: styleProperties(ctx, node), collection, component, behavior, bars: node.kind === 'definition' ? screenBars(ctx, node) : undefined, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: (component ? [...component.controls, ...(node.controls ?? [])] : node.controls)?.map(c => constrainNumericControl(c, node.name, behavior?.binding?.type)) }
+    return { ...node, navigation: navigationSettings(ctx, node), styles: styleProperties(ctx, node), collection, component, behavior, visibility: visibilitySettings(ctx, node), bars: node.kind === 'definition' ? screenBars(ctx, node) : undefined, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: withMotion((component ? [...component.controls, ...(node.controls ?? [])] : node.controls)?.map(c => constrainNumericControl(c, node.name, behavior?.binding?.type)), motionControls(ctx, node)) }
   }
 }
+/** A view's controls with its Visibility group's motion settings after them, when it has any (Wave 5a). */
+const withMotion = (controls: DesignControl[] | undefined, motion: readonly DesignControl[]) => motion.length ? [...controls ?? [], ...motion] : controls
+
 export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation: AuthoringOperation | { kind: 'property'; control: string; value: string }): { files: SourceFile[]; offset: number; colors?: PreviewColorAsset[]; removes?: string } {
   let patches: SourcePatch[] = [], files: SourceFile[] = [], colors: PreviewColorAsset[] | undefined, removed: readonly string[] = []
   switch (operation.kind) {
@@ -48,6 +53,7 @@ export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation:
     case 'toolbar-item-add': case 'searchable-add': case 'searchable-remove': return barsEdit(ctx, node, operation)
     case 'layer-duplicate': case 'layer-wrap': case 'layer-reparent': return structureEdit(ctx, node, operation)
     case 'make-tappable': return makeTappable(ctx, node)
+    case 'visibility': return visibilityEdit(ctx, node, operation)
     case 'layer-unwrap': return unwrapEdit(ctx, node)
     case 'navigation-target': patches = configureNavigationTarget(ctx, node, operation.destination); break
     case 'navigation-type': patches = changeNavigationType(ctx, node, operation.type); break
@@ -55,6 +61,7 @@ export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation:
     case 'navigation-style': case 'tab-add': case 'tab-update': case 'tab-remove': case 'tab-move': { const result = navigationPatches(ctx, operation); patches = result.patches; files = result.created ?? []; break }
     case 'style-create-link': case 'style-create': case 'style-edit': case 'style-link': case 'style-local': case 'style-migrate': case 'asset-use': case 'asset-references': { const result = editResource(ctx, node, operation); patches = result.patches; files = result.created ?? []; colors = result.colors; removed = result.removed ?? []; break }
     case 'property': {
+      if (operation.control.startsWith('motion:')) { patches = motionEdit(ctx, node, operation.control, operation.value); break }
       const recipe = componentRecipes(ctx, node).find(r => r.control.id === operation.control)
       if (!recipe) throw new Error('This component argument is not a supported literal or its interface has changed.')
       const error = validateControlValue(recipe.control, operation.value)
@@ -88,6 +95,11 @@ export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation:
     }
     case 'bind-state': patches = configureBinding(ctx, node, operation.name, operation.create); break
     case 'behavior': patches = configureAction(ctx, node, operation.action, operation.replace); break
+    case 'animate-action': {
+      const closure = behaviorSettings(ctx, node)?.canConfigureAction ? callOf(ctx, node)?.trailingClosure : undefined
+      if (!closure) throw new Error('Select a Button with a title or a label, and one action closure.')
+      patches = animateAction(ctx, node, closure, operation.animation); break
+    }
     case 'transition': patches = configureTransition(ctx, node, operation.state, operation.style, operation.duration); break
     default: throw new Error('This design command is not supported.')
   }

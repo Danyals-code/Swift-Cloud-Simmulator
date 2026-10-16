@@ -856,10 +856,14 @@ export class Interpreter {
       if (isViewBuilder) {
         const built: SwiftValue[] = []
         this.collectBuilderValues(body, env, built)
-        if (built.length === 1) return built[0]!
+        // A body whose `if`, `switch` or loop draws more views or fewer as values change is
+        // one group whatever it drew this time, as SwiftUI's `TupleView` is, so the views
+        // in it keep their identity when an `if` opens (Wave 5a).
+        const varies = body.statements.some(statement => statement.kind === 'ifStmt' || statement.kind === 'switchStmt' || statement.kind === 'forInStmt')
+        if (built.length === 1 && !varies) return built[0]!
         // More than one, which is a `TupleView` in Swift. The host owns what that is
         // here, because the interpreter has no idea what a view is.
-        return this.host.groupValues?.(built, span) ?? built[0] ?? VOID
+        return this.host.groupValues?.(built, span, varies) ?? built[0] ?? VOID
       }
 
       const only = body.statements.length === 1 ? body.statements[0] : undefined

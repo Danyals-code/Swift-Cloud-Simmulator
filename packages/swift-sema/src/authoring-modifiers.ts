@@ -264,6 +264,8 @@ function pure(expr: Expr, depth = 0): boolean {
     // plain values built from plain values, with no closure to capture anything.
     || expr.kind === 'call' && !expr.trailingClosure && (expr.callee.kind === 'identifier' || expr.callee.kind === 'memberAccess' && (!expr.callee.base || pure(expr.callee.base, depth + 1))) && expr.args.every(a => pure(a.value, depth + 1))
 }
+/** The motion modifiers a card takes out (Wave 5a). */
+const MOTION_CARDS: ReadonlySet<string> = new Set(['transition', 'animation'])
 /** Reordering is limited to known general View modifiers. Image/Shape operations stay pinned. */
 function structural(call: CallExpr): boolean {
   const name = nameOf(call)
@@ -323,12 +325,14 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { d
   // A border is written as an overlay, but is a setting like any other (D8).
   const borders = segments.map(segment => segment.call && borderOf(segment.call, corners, text))
   const movable = segments.map((segment, index) => editable && !pinned && (segment.off !== undefined || !!segment.call && (structural(segment.call) || !!borders[index])))
+  // A view's transition and the animation of a value come out from their cards, and stay where they are written otherwise (Wave 5a).
+  const removable = (segment: Segment) => editable && !pinned && !!segment.call && MOTION_CARDS.has(nameOf(segment.call)) && !!authoringCapability(nameOf(segment.call), 'modifier', segment.call.args.map(a => a.label))
   // A shape's own modifier stays straight after the shape, and nothing moves past it (Wave 4c).
   const stays = segments.map(segment => !!segment.call && !!CATALOG_BY_NAME.get(nameOf(segment.call))?.first)
   let callIndex = -1
   const modifiers: AuthoringModifier[] = segments.map((segment, index) => {
     const source: SourceSpan = { file: node.source.file, start: segment.start, end: segment.end }
-    const capabilitiesOf = (reason?: string) => ({ remove: movable[index]!, duplicate: movable[index]!, moveUp: movable[index]! && index > 0 && movable[index - 1]! && !stays[index] && !stays[index - 1], moveDown: movable[index]! && index < segments.length - 1 && movable[index + 1]! && !stays[index] && !stays[index + 1], toggle: editable && !pinned, reason })
+    const capabilitiesOf = (reason?: string) => ({ remove: movable[index]! || removable(segment), duplicate: movable[index]!, moveUp: movable[index]! && index > 0 && movable[index - 1]! && !stays[index] && !stays[index - 1], moveDown: movable[index]! && index < segments.length - 1 && movable[index + 1]! && !stays[index] && !stays[index + 1], toggle: editable && !pinned, reason })
     if (segment.off !== undefined) {
       const off = offCall(segment.off)
       const name = !off ? 'unknown' : borderOf(off.call, corners, off.text) ? 'border' : nameOf(off.call)

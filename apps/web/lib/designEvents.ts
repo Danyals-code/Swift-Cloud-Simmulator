@@ -9,11 +9,11 @@ import { VIEW_CATALOG } from './viewCatalog'
  */
 const CONTROL_FAMILIES: ReadonlySet<string> = new Set([
   'add', 'alignment', 'color', 'component', 'content', 'date', 'empty', 'fill', 'gauge', 'grid', 'gridrow',
-  'image', 'layout', 'modifier', 'progress', 'range', 'scroll', 'shape', 'spacer', 'spacing', 'title', 'value',
+  'image', 'layout', 'modifier', 'motion', 'progress', 'range', 'scroll', 'shape', 'spacer', 'spacing', 'title', 'value',
 ])
 
-/** Families whose second word is the studio's as well: what `add:` adds, which side `fill:` sizes. */
-const NAMED_FAMILIES: ReadonlySet<string> = new Set(['add', 'fill'])
+/** Families whose second word is the studio's as well: what `add:` adds, which side `fill:` sizes, which Visibility field `motion:` is (Wave 5a). */
+const NAMED_FAMILIES: ReadonlySet<string> = new Set(['add', 'fill', 'motion'])
 
 /** The views the Add View library offers, by their Swift names. */
 const LIBRARY_VIEWS: ReadonlySet<string> = new Set(VIEW_CATALOG.map(entry => entry.swiftName ?? entry.name))
@@ -79,7 +79,7 @@ function details(operation: DesignEditRequest['operation'], node: AuthoringNode 
 function controlFamily(id: string): string {
   const [family = '', detail = ''] = id.split(':')
   if (!CONTROL_FAMILIES.has(family)) return 'other'
-  return NAMED_FAMILIES.has(family) && /^[A-Za-z]+$/.test(detail) ? `${family}:${detail}` : family
+  return NAMED_FAMILIES.has(family) && /^[A-Za-z-]+$/.test(detail) ? `${family}:${detail}` : family
 }
 
 /** A modifier by name, when it is one the studio offers on this layer. */

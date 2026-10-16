@@ -111,7 +111,8 @@ describe('appear animation', () => {
     const text = source('VStack { if showing { Text("Sometimes") } }')
     const changed = edit(text, 'Text', transition())
     expect(changed).toContain('Text("Sometimes").transition(.opacity) }')
-    expect(changed).toContain('}.animation(.easeInOut(duration: 0.25), value: showing)')
+    // On a line of its own under the stack, as Xcode writes a modifier there (Wave 5a).
+    expect(changed).toContain('} }\n            .animation(.easeInOut(duration: 0.25), value: showing)')
     render(changed)
   })
   it('animates the rows of a collection from the view around it, keyed on the collection', () => {
@@ -119,10 +120,10 @@ describe('appear animation', () => {
     const text = source('VStack { ForEach(items, id: \\.self) { item in Text(item) } }', extra).replace('@State private var showing = false', '@State private var items = ["A", "B"]')
     const changed = edit(text, 'Text', transition(''))
     expect(changed).toContain('Text(item).transition(.opacity) }')
-    expect(changed).toContain('} }.animation(.easeInOut(duration: 0.25), value: items.count)')
+    expect(changed).toContain('} }\n            .animation(.easeInOut(duration: 0.25), value: items.count)')
     render(changed)
     const list = text.replace('VStack { ForEach(items, id: \\.self) { item in Text(item) } }', 'List(items, id: \\.self) { item in Text(item) }')
-    expect(edit(list, 'Text', transition(''))).toContain('Text(item).transition(.opacity) }.animation(.easeInOut(duration: 0.25), value: items.count)')
+    expect(edit(list, 'Text', transition(''))).toContain('Text(item).transition(.opacity) }\n            .animation(.easeInOut(duration: 0.25), value: items.count)')
   })
   it('refuses rows that are fixed in the code, which are never added or removed', () => {
     const text = source('VStack { ForEach(0..<3) { i in Text("Row") } }')

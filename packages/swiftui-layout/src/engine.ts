@@ -18,6 +18,8 @@ import type {
   ShapeOutline,
   Size,
   SourceSpan,
+  ContentTransitionSpec,
+  MatchedGeometry,
 } from '@studio/shared'
 import {
   childEnvironment,
@@ -189,6 +191,8 @@ export interface PlacedNode {
   readonly transform?: TransformSpec
   readonly animation?: AnimationHint
   readonly transition?: TransitionHint
+  readonly contentTransition?: ContentTransitionSpec
+  readonly matched?: MatchedGeometry
   readonly filter?: FilterSpec
   readonly blendMode?: string
   readonly redacted?: boolean
@@ -842,6 +846,7 @@ export class LayoutEngine {
           },
           ...debugInfo(element),
           ...decorations(env, parent),
+          ...(env.contentTransition ? { contentTransition: env.contentTransition } : {}),
           ...(element.origin ? { origin: element.origin } : {}),
         })
         return z + 1
@@ -1875,13 +1880,15 @@ function decorations(
   parent?: string
   animation?: AnimationHint
   transition?: TransitionHint
+  matched?: MatchedGeometry
   blendMode?: string
   redacted?: boolean
 } {
   return {
     ...(parent ? { parent } : {}),
     ...(env.animation ? { animation: env.animation } : {}),
-    ...(env.transition ? { transition: { ...env.transition, duration: env.transitionTiming?.duration ?? env.transition.duration } } : {}),
+    ...(env.transition ? { transition: env.transition } : {}),
+    ...(env.matched ? { matched: env.matched } : {}),
     ...(env.blendMode ? { blendMode: env.blendMode } : {}),
     ...(env.redacted ? { redacted: true } : {}),
   }

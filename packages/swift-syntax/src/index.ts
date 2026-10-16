@@ -23,7 +23,7 @@ export * from './off-markers'
 export { HIDDEN_MARKER } from './studio-markers'
 export {
   viewSiteAt, deleteView, moveView, moveViewTo, insertView, copyView, unwrapView, UNWRAP_REFUSAL,
-  hideView, showView, hiddenViewsIn,
+  hideView, showView, hiddenViewsIn, wrapInIf, unwrapIf,
   type ViewSite, type SourceEdit, type HiddenView, type RefusalReason,
 } from './edits'
 export { DIRECTIVE_LINE } from './conditional-compilation'

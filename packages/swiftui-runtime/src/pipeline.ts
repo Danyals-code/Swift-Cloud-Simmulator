@@ -23,6 +23,7 @@ import {
   type RenderTree,
   type SourceFile,
   type SourceSpan,
+  type TreeAnimation,
   type UIEvent,
   type ViewGeometry,
   type ViewInstance,
@@ -48,7 +49,7 @@ import {
 import { AppRuntime, type EvaluationResult } from './app-runtime'
 import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } from './style'
-import { appendPlaced, placedToRenderTree } from './to-render'
+import { appendPlaced, nodeKeys, placedToRenderTree, type KeyOf } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
 import { reveals, shownView, stoppedFailures, type NestedPage, type NotDrawn, type OverlayKind, type ResolvedUI, type Revealable } from './presentation'
 import { runnableProgram, setAsideRan, type Runnable } from './set-aside'
@@ -293,6 +294,10 @@ interface ScreenInput {
   readonly scheme: 'light' | 'dark'
   /** Every view the conversion met, by path: where the selected view's elements are found. */
   readonly views: ReadonlyMap<string, ConvertedView>
+  /** The nodes' keys, where views have keys that aren't their paths (Wave 5a). */
+  readonly keyOf?: KeyOf
+  /** What animates the change to this frame (Wave 5a). */
+  readonly animated?: TreeAnimation
 }
 
 /**
@@ -361,7 +366,10 @@ function convertScreen(request: CompileRequest, evaluation: EvaluationResult, dr
         hitTargets: new Map<string, string>(),
       }
 
-  return { screen, canvas, safeArea, env, scheme, views }
+  const keys = ui?.keys
+  const all = ui?.animation, under = ui?.armed
+  const animated: TreeAnimation | undefined = all || under ? { ...(all ? { all } : {}), ...(under ? { under } : {}) } : undefined
+  return { screen, canvas, safeArea, env, scheme, views, ...(keys ? { keyOf: nodeKeys(keys) } : {}), ...(animated ? { animated } : {}) }
 }
 
 /**
@@ -385,7 +393,7 @@ function layoutScreen(input: ScreenInput, engine: LayoutEngine, values: LayerDra
     }
   }
   const placements = found.length ? new Placements(watchedIds(found)) : undefined
-  const tree: RenderTree = { ...composeScreen(engine, screen, input.canvas, input.safeArea, input.env, { placements, prefix: '', root: null, reuse }), colorScheme: input.scheme, calibration: APPEARANCE_CALIBRATION.status }
+  const tree: RenderTree = { ...composeScreen(engine, screen, input.canvas, input.safeArea, input.env, { placements, prefix: '', root: null, reuse, keyOf: input.keyOf }), colorScheme: input.scheme, calibration: APPEARANCE_CALIBRATION.status, ...(input.animated ? { animated: input.animated } : {}) }
   return { tree, input, instances: placements ? instancesIn(found, placements, tree) : [] }
 }
 
@@ -393,6 +401,7 @@ function layoutScreen(input: ScreenInput, engine: LayoutEngine, values: LayerDra
 interface LayoutPass extends Pick<PassRoot, 'prefix' | 'root'> {
   readonly placements?: Placements
   readonly reuse?: boolean
+  readonly keyOf?: KeyOf
 }
 
 const PLAIN: LayoutPass = { prefix: '', root: null }
@@ -454,7 +463,7 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
   const owner = screen.overlay?.contextMenu
   const pressed: Pressed = {}
   const placed = engine.layout(content, contentBounds, { ...env, safeArea: { inner: contentBounds, outer: screenRect } }, CENTER, owner === undefined ? options : { ...options, observer: watchPressed(owner, pressed, options.observer) })
-  let tree = placedToRenderTree(placed, canvas, ++revision, screen.background)
+  let tree = placedToRenderTree(placed, canvas, ++revision, screen.background, pass.keyOf)
   // At rest the bar has no colour of its own in iOS 27, so what reaches under it shows
   // through. Where nothing does, it keeps the screen's colour, which looks the same.
   // A collapsing title keeps its surface for when the content scrolls beneath it, in
@@ -468,7 +477,7 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
     const bar = !underBar.length ? laidOut
       : collapseDistance && beneath ? laidOut.map((node) => node.id === 'navbar-bgf' && node.paint.kind === 'fill' ? { ...node, paint: { ...node.paint, fill: beneath } } : node)
       : laidOut.filter((node) => node.id !== 'navbar-bgf')
-    tree = appendPlaced(tree, bar, BAR_Z)
+    tree = appendPlaced(tree, bar, BAR_Z, pass.keyOf)
     tree = { ...tree, nodes: tree.nodes.map(node => {
       if (node.id === 'navbar-title') return { ...node, ...(collapseDistance ? { chromeRole: 'inlineTitle' as const } : {}), opacity: screen.navigationBar!.large ? 0 : node.opacity }
       if (collapseDistance && node.id === 'navbar-large-title') return { ...node, chromeRole: 'largeTitle' as const }
@@ -477,15 +486,15 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
     }) }
   }
   // Under the tab bar, which a tab bar of four tabs draws over it, as iOS 27 does.
-  if (screen.bottomBar) tree = appendPlaced(tree, engine.layout(screen.bottomBar, { x: 0, y: bottomBarsEnd - TAB_BAR_HEIGHT, width: canvas.width, height: TAB_BAR_HEIGHT }, env, CENTER, passOptions(pass)), BAR_Z + 500)
+  if (screen.bottomBar) tree = appendPlaced(tree, engine.layout(screen.bottomBar, { x: 0, y: bottomBarsEnd - TAB_BAR_HEIGHT, width: canvas.width, height: TAB_BAR_HEIGHT }, env, CENTER, passOptions(pass)), BAR_Z + 500, pass.keyOf)
   if (screen.tabBar) {
     const bar = engine.layout(screen.tabBar, { x: 0, y: regular ? safeArea.top : bottomBarsEnd - tabHeight, width: canvas.width, height: tabHeight }, env, CENTER, passOptions(pass))
-    tree = appendPlaced(tree, bar, BAR_Z + 1000)
+    tree = appendPlaced(tree, bar, BAR_Z + 1000, pass.keyOf)
   }
   if (screen.search) {
     // At the bottom it sits where a tab bar would.
     const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? bottomBarsEnd - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER, passOptions(pass))
-    tree = appendPlaced(tree, search, BAR_Z + 2000)
+    tree = appendPlaced(tree, search, BAR_Z + 2000, pass.keyOf)
   }
   if (screen.overlay) {
     const view = pressed.at && onScreen(pressed.at, tree)
@@ -575,7 +584,7 @@ function presentOverlay(
     const radius = sheet ? overlay.cornerRadius ?? SURFACES.sheet.radius : 0
     const surface: RenderNode = { id: 'overlay-surface', kind: 'layer', frame: rect, z: 1, opacity: 1, blocksPointer: true, ...(overlay.background ? { background: overlay.background } : overlay.material ? { material: overlay.material } : sheet ? { material: { opacity: 0.5, blur: 28, light: overlay.light } } : {}), clip: true, border: { width: 0.5, color: { ...env.foregroundColor, a: 0.2 }, cornerRadius: radius }, cornerRadius: radius, cornerStyle: 'continuous',
       ...(nested.chrome ? { chrome: { ...nested.chrome, scrollId: prefix + nested.chrome.scrollId } } : {}) }
-    const content = nested.nodes.map(n => ({ ...n, id: prefix + n.id, parent: n.parent ? prefix + n.parent : surface.id, z: n.z + 2 }))
+    const content = nested.nodes.map(n => ({ ...n, id: prefix + n.id, ...(n.key ? { key: prefix + n.key } : {}), parent: n.parent ? prefix + n.parent : surface.id, z: n.z + 2 }))
     const grabber: RenderNode[] = sheet && overlay.showsDragIndicator !== false ? [{ id: 'overlay-grabber', kind: 'shape', frame: { x: (rect.width - SURFACES.sheet.grabberWidth) / 2, y: 6, width: SURFACES.sheet.grabberWidth, height: SURFACES.sheet.grabberHeight }, z: OVERLAY_Z - 1, opacity: 0.4, parent: surface.id, shape: { shape: 'capsule', fill: { kind: 'solid', color: env.foregroundColor } } }] : []
     return [...dimNodes, surface, ...content, ...grabber]
   }
@@ -594,7 +603,7 @@ function presentOverlay(
   // The dim layer is z 0 here; the surface must sit above it.
   for (const node of surface) nodes.push({ ...node, z: node.z + 1 })
 
-  const painted = placedToRenderTree(nodes, canvas, 0).nodes.slice(interactiveBackground ? 1 : 2)
+  const painted = placedToRenderTree(nodes, canvas, 0, undefined, pass.keyOf).nodes.slice(interactiveBackground ? 1 : 2)
   if (overlay.kind === 'menu' || overlay.kind === 'dialog') {
     // A single local panel can be anchored after browser scroll offsets are known.
     const roots = painted.filter(n => !n.parent)

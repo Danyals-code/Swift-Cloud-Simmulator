@@ -1,9 +1,10 @@
+import { swiftIdentifier } from '@studio/shared'
 import type { AuthoringNode, CopyMatch, CopyValue, SourceFile, SourceSpan } from '@studio/shared'
 import { forEachChild, Lexer, Parser, type CallExpr, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { Checker } from './checker'
 import { viewCallChain } from './design-controls'
-import { allDeclarations, expressionOf, hasComments, identifier, ownerOf, patch, raw, sourceRoot, type FeatureContext, type SourcePatch } from './authoring-context'
+import { allDeclarations, expressionOf, hasComments, ownerOf, patch, raw, sourceRoot, type FeatureContext, type SourcePatch } from './authoring-context'
 
 /**
  * Finding the copies a designer already made.
@@ -236,7 +237,7 @@ export function makeComponent(
   rename: Readonly<Record<string, string>> = {},
   screens: readonly string[] = [],
 ): { patches: SourcePatch[]; files: SourceFile[]; parameters: readonly { name: string; type: string }[] } {
-  if (!identifier(name) || allDeclarations(ctx).some(d => 'name' in d && d.name === name)) throw new Error('Choose an unused component name.')
+  if (!swiftIdentifier(name) || allDeclarations(ctx).some(d => 'name' in d && d.name === name)) throw new Error('Choose an unused component name.')
   const shape = copyShape(ctx, node)
   if (!shape) throw new Error('This view cannot become a component yet. It uses code the studio does not rewrite.')
   if (!ownerOf(ctx, node)) throw new Error('Select a view inside a screen.')
@@ -262,7 +263,7 @@ export function makeComponent(
   for (const [index, suggested] of [...names]) {
     const chosenName = rename[suggested]
     if (!chosenName || chosenName === suggested) continue
-    if (!identifier(chosenName) || [...names.values()].includes(chosenName)) throw new Error(`Choose a unique parameter name instead of “${chosenName}”.`)
+    if (!swiftIdentifier(chosenName) || [...names.values()].includes(chosenName)) throw new Error(`Choose a unique parameter name instead of “${chosenName}”.`)
     names.set(index, chosenName)
   }
   const parameters = differing.map(index => ({ name: names.get(index)!, type: typeOf(shape.values[index]!), kind: shape.values[index]!.kind }))

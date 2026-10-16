@@ -3,14 +3,14 @@ import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
 import type { DesignEditRequest, SourceFile } from '@studio/shared'
 import { reconcileLayerLabel } from './layerLabels'
 
-const files = (body: string): SourceFile[] => [{ id: 'App.swift', text: `import SwiftUI\nstruct ContentView: View {\n    var body: some View {\n${body}\n    }\n}\n` }]
+const files = (body: string, members = ''): SourceFile[] => [{ id: 'App.swift', text: `import SwiftUI\nstruct ContentView: View {\n${members}    var body: some View {\n${body}\n    }\n}\n` }]
 
 /**
  * The layer each `Text` of `body` is after `operation` on the layer called `on`, by the order of
  * the Texts after it: where a name the designer gave it goes, or null where it is let go.
  */
-function followed(body: string, on: string, operation: DesignEditRequest['operation']): (number | null)[] {
-  const before = files(body), model = buildAuthoringModel({ projectId: 'p', revision: 1, files: before })
+function followed(body: string, on: string, operation: DesignEditRequest['operation'], members?: string): (number | null)[] {
+  const before = files(body, members), model = buildAuthoringModel({ projectId: 'p', revision: 1, files: before })
   const target = model.nodes.find(node => node.name === on)!
   const plan = planDesignEdit({ projectId: 'p', baseRevision: 1, files: before, scope: target.owner, target: target.source, fingerprint: target.fingerprint, operation })
   if (!plan.ok) throw new Error(plan.reason)
@@ -26,5 +26,12 @@ describe('a layer’s name, after the change that moved it', () => {
   it('stays on each view Unwrap puts in its container’s place, and on the views beside it (Wave 4c)', () => {
     const body = '        VStack {\n            List {\n                Text("Row")\n                Text("Row")\n            }\n            Text("End")\n        }'
     expect(followed(body, 'List', { kind: 'layer-unwrap' })).toEqual([0, 1, 2])
+  })
+
+  it('stays on a view Shown when wraps in an if or unwraps, and on the same views beside it (Wave 5a)', () => {
+    const body = '        VStack {\n            Text("Row")\n            Text("Row")\n            Text("End")\n        }'
+    expect(followed(body, 'Text', { kind: 'visibility', when: { input: 'isShown', is: true }, create: { name: 'isShown', value: true } })).toEqual([0, 1, 2])
+    const wrapped = '        VStack {\n            if isShown {\n                Text("Row")\n            }\n            Text("Row")\n            Text("End")\n        }'
+    expect(followed(wrapped, 'Text', { kind: 'visibility', when: null }, '    @State private var isShown = true\n')).toEqual([0, 1, 2])
   })
 })

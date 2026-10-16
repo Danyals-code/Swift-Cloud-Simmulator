@@ -80,7 +80,9 @@ test('tabs stay horizontal and related screens stack under their owning tab', as
   await expect(page.getByRole('region', { name: 'Preview', exact: true })).toContainText('5 of 6 screens')
   await page.getByRole('button', { name: 'Edit Library', exact: true }).click()
   await expect(page.getByTestId('logical-layers')).toContainText('Library layers')
-  await expect(page.getByTestId('logical-layers').getByRole('treeitem')).toHaveCount(3)
+  // The list, its row, its button, and the empty shelf's message, hidden while there are books (Wave 5a).
+  await expect(page.getByTestId('logical-layers').getByRole('treeitem')).toHaveCount(4)
+  await expect(page.getByTestId('logical-layers').getByRole('treeitem', { name: /, hidden (while .+|in this state)$/ })).toHaveCount(1)
   // The row is one design that every book uses.
   await expect(layer(page, 'Book row, Component')).toContainText('One design')
   await expect(layer(page, 'Book row, Component')).toHaveAttribute('data-shared-design', 'true')

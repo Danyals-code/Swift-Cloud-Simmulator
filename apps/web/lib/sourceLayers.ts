@@ -166,10 +166,9 @@ export function sourceLayerSlot(node: AuthoringNode | undefined): AuthoringNode 
   return node?.kind === 'branch' && !PAGE_SLOTS.has(node.name) && CONTENT_SLOT_NAMES.has(node.name) ? node : undefined
 }
 
-/** A branch can be absent from the current preview while remaining selectable. */
-export function sourceLayerNotShown(snapshot: AuthoringSnapshot, node: AuthoringNode, visibleRuntimeIds?: ReadonlySet<string>): boolean {
+/** A branch can be absent from the current preview while remaining selectable. `nodes` is the snapshot's, by id, when the caller has it. */
+export function sourceLayerNotShown(snapshot: AuthoringSnapshot, node: AuthoringNode, visibleRuntimeIds?: ReadonlySet<string>, nodes: ReadonlyMap<string, AuthoringNode> = new Map(snapshot.nodes.map(item => [item.id, item]))): boolean {
   if (!Object.keys(snapshot.runtimeToSource).length || sourceLayerOpens(node)) return false
-  const nodes = new Map(snapshot.nodes.map(item => [item.id, item]))
   /** Whether a layer, or the helper it calls, which is drawn in its place, is drawn. */
   const drawn = (item: AuthoringNode, seen: ReadonlySet<string> = new Set()): boolean => item.runtimeIds.some(id => !visibleRuntimeIds || visibleRuntimeIds.has(id))
     || !!item.definitionId && !seen.has(item.definitionId) && isHelperCall(item) && within(nodes.get(item.definitionId), new Set([...seen, item.definitionId]))
@@ -180,7 +179,7 @@ export function sourceLayerNotShown(snapshot: AuthoringSnapshot, node: Authoring
   if (node.kind !== 'branch') {
     const ancestors = sourceLayerAncestors(nodes, node.id)
     const branch = ancestors.map(id => nodes.get(id)).find(item => item?.kind === 'branch')
-    return !!branch && !drawn(node) && sourceLayerNotShown(snapshot, branch, visibleRuntimeIds)
+    return !!branch && !drawn(node) && sourceLayerNotShown(snapshot, branch, visibleRuntimeIds, nodes)
   }
   const shown = (item: AuthoringNode): boolean => drawn(item) || item.children.some(id => {
     const child = nodes.get(id)
@@ -188,6 +187,50 @@ export function sourceLayerNotShown(snapshot: AuthoringSnapshot, node: Authoring
     return !!child && !(item.id === node.id && node.name === 'Condition' && child.name === 'Otherwise') && shown(child)
   })
   return !shown(node)
+}
+
+/**
+ * The view a hidden row shows with (Wave 5a): itself, or the view around it that the branch
+ * hiding it holds, whose `visibility` says when it shows and what Show it switches to.
+ */
+export function sourceLayerHiddenView(nodes: ReadonlyMap<string, AuthoringNode>, node: AuthoringNode, branch: string): AuthoringNode {
+  let view = node
+  while (view.parentId && view.parentId !== branch && nodes.has(view.parentId)) view = nodes.get(view.parentId)!
+  return view.parentId === branch ? view : node
+}
+
+/**
+ * Why a view isn't drawn in this state (Wave 5a), from the view its branch holds: "Hidden while
+ * Details is off", or "Hidden in this state" for a condition with no words. Layers and the
+ * Inspector say it alike, and it is not the "hidden" of a view hidden with Hide.
+ */
+export function sourceLayerHiddenWords(view: AuthoringNode): string {
+  const hiddenWhile = view.visibility?.hiddenWhile
+  return `Hidden ${hiddenWhile ? `while ${hiddenWhile}` : 'in this state'}`
+}
+
+/** The branches of an `if` or a `switch`, whose views come and go with a state (Wave 5a). */
+const CONDITIONAL = /^(?:Condition|Otherwise|Switch|Case )/
+
+/**
+ * The branch of an `if` or a `switch` that hides `node` in this state (Wave 5a): the nearest
+ * one around it, when it isn't drawn on the phone `runtimeLayers` draws. A helper's views are
+ * listed under its call, so with one call the walk goes on from there. Layers marks the row
+ * with it and the Inspector reads it, so the two never disagree.
+ */
+export function sourceLayerHiddenBy(snapshot: AuthoringSnapshot, node: AuthoringNode, runtimeLayers?: readonly ViewLayer[], nodes: ReadonlyMap<string, AuthoringNode> = new Map(snapshot.nodes.map(item => [item.id, item]))): string | undefined {
+  const seen = new Set<string>()
+  let branch = nodes.get(node.parentId ?? '')
+  while (branch && branch.kind !== 'branch' && !seen.has(branch.id)) {
+    seen.add(branch.id)
+    const calls = isHelperDefinition(branch) ? snapshot.nodes.filter(item => item.definitionId === branch!.id) : undefined
+    branch = calls ? calls.length === 1 ? calls[0] : undefined : nodes.get(branch.parentId ?? '')
+  }
+  if (!branch || !CONDITIONAL.test(branch.name)) return undefined
+  const visible = runtimeLayers && new Set<string>()
+  const collect = (layers: readonly ViewLayer[]) => { for (const layer of layers) { visible!.add(layer.id); collect(layer.children) } }
+  if (runtimeLayers) collect(runtimeLayers)
+  return sourceLayerNotShown(snapshot, branch, visible, nodes) ? branch.id : undefined
 }
 
 const STRUCTURAL_VIEWS = new Set(['ForEach', 'Group', 'NavigationStack', 'NavigationView', 'NavigationSplitView', 'WindowGroup', 'Window', ...TOOLBAR_ITEMS, 'ViewThatFits', 'EmptyView'])
@@ -233,6 +276,11 @@ export interface SourceLayerRow {
   readonly unused?: true
   /** For a view bound to data, the words it draws on the phone, which name its row. */
   readonly label?: string
+  /**
+   * For a view an `if` or a `switch` doesn't draw in this state (Wave 5a), or one inside it: the
+   * branch that hides it. It is listed dimmed, where the code has it, so it can be selected and shown.
+   */
+  readonly hiddenBy?: string
 }
 
 /** Hidden comments belong to the current phone's source scope, including empty containers. */
@@ -332,17 +380,23 @@ export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceL
     snapshot.roots.filter(id => !appRoots.includes(id) && !referenced.has(id)).forEach(id => screens.add(id))
   }
   const shared = new Set<string>()
-  const flatten = (ids: readonly string[], seen = new Set<string>()): string[] => ids.flatMap(id => {
+  /** Each view an `if` or a `switch` doesn't draw in this state, by the branch that hides it (Wave 5a). */
+  const hiddenBy = new Map<string, string>()
+  const flatten = (ids: readonly string[], seen = new Set<string>(), hiding?: string): string[] => ids.flatMap(id => {
     const node = nodes.get(id)
     if (!node || seen.has(id) || node.kind === 'branch' && PAGE_SLOTS.has(node.name)) return []
-    if (node.kind === 'branch' && sourceLayerNotShown(snapshot, node, runtimeIds)) return node.name === 'Condition' ? flatten(node.children.filter(child => nodes.get(child)?.name === 'Otherwise'), new Set([...seen, id])) : []
-    if (sourceLayerIsVisual(node)) return [id]
-    const children = flatten(node.children, new Set([...seen, id]))
+    // A view hidden by its condition is still listed where the code has it, to be selected and shown.
+    const notShown = node.kind === 'branch' && sourceLayerNotShown(snapshot, node, runtimeIds, nodes)
+    if (notShown && !CONDITIONAL.test(node.name)) return []
+    if (sourceLayerIsVisual(node)) { if (hiding) hiddenBy.set(id, hiding); return [id] }
+    const by = node.kind === 'branch' ? notShown ? id : undefined : hiding
+    const children = flatten(node.children, new Set([...seen, id]), by)
     if (node.kind === 'template' && children.length) {
       // A ForEach owns one shared design, even when it renders many records.
       // Multiple top-level elements still belong to a single repeated row.
       const rows = children.length === 1 ? children : [id]
       rows.forEach(child => shared.add(child))
+      if (by) rows.forEach(row => hiddenBy.set(row, hiddenBy.get(row) ?? by))
       return rows
     }
     return children
@@ -424,7 +478,7 @@ export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceL
     return node.runtimeIds.length === sites.length ? sites.indexOf(call) : 0
   }
   /** `call` is the place a helper's views are listed under, and the views there read what it draws. */
-  const visit = (id: string, depth: number, parentId?: string, parentKey = '', call?: AuthoringNode) => {
+  const visit = (id: string, depth: number, parentId?: string, parentKey = '', call?: AuthoringNode, hiding?: string) => {
     const node = nodes.get(id)
     if (!node || needle && !match(id)) return
     const children = childIds.get(id) ?? []
@@ -433,8 +487,9 @@ export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceL
     const helper = helperOf(node)
     const label = sourceLayerDrawn(node, names, drawnFor(node, call))
     const key = `${parentKey}/${id}`
-    rows.push({ node, depth, expanded, shared: shared.has(id), parentId: parentId ?? parentIds.get(id), children, key, ...(helper ? { places: helper.places ?? 0 } : {}), ...(notUsed ? { unused: true as const } : {}), ...(label ? { label } : {}) })
-    if (expanded) children.forEach(child => visit(child, depth + 1, id, key, helper ? node : call))
+    const hiddenHere = hiddenBy.get(id) ?? hiding
+    rows.push({ node, depth, expanded, shared: shared.has(id), parentId: parentId ?? parentIds.get(id), children, key, ...(helper ? { places: helper.places ?? 0 } : {}), ...(notUsed ? { unused: true as const } : {}), ...(label ? { label } : {}), ...(hiddenHere ? { hiddenBy: hiddenHere } : {}) })
+    if (expanded) children.forEach(child => visit(child, depth + 1, id, key, helper ? node : call, hiddenHere))
   }
   roots.forEach(id => visit(id, 0))
   unused.forEach(id => visit(id, 0))

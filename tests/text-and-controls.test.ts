@@ -276,7 +276,6 @@ describe('What the preview does not apply, it says; what is cheap, it applies', 
   it.each([
     ['.scrollTransition', 'ScrollView { Text("A").scrollTransition { content, phase in content.opacity(phase.isIdentity ? 1 : 0.3) } }', '', /'\.scrollTransition' is recognized but not applied by the preview/],
     ['pinnedViews', 'ScrollView { LazyVStack(pinnedViews: [.sectionHeaders]) { Section { Text("A") } header: { Text("H") } } }', '', /pinnedViews.*not applied/],
-    ['.asymmetric', 'Text("A").transition(.asymmetric(insertion: .scale, removal: .opacity))', '', /asymmetric.*insertion/],
     ['.toolbar(.hidden, for: .automatic)', 'TabView { Text("A").toolbar(.hidden, for: .automatic).tabItem { Text("One") } }', '', /\.toolbar\(\.hidden, for: \.automatic\).*not applied/],
     ['a custom Layout', 'Flow { Text("A") }', flow, /'Flow' is a custom Layout/],
   ])('warns on %s', (_, body, extra, message) => {
@@ -290,9 +289,10 @@ describe('What the preview does not apply, it says; what is cheap, it applies', 
     expect(warnings(r).join('\n')).not.toMatch(/ProposedViewSize|Subviews/)
   })
 
-  it('plays an asymmetric transition with its insertion transition', () => {
+  it('plays an asymmetric transition with its insertion coming in and its removal going out, and says nothing of it (Wave 5a)', () => {
     const r = run(app('Text("A").transition(.asymmetric(insertion: .scale, removal: .opacity))'))
-    expect(r.renderTree!.nodes.find(n => n.text)?.transition).toMatchObject({ kind: 'scale' })
+    expect(warnings(r)).toEqual([])
+    expect(r.renderTree!.nodes.find(n => n.text)?.transition).toMatchObject({ kind: 'scale', removal: { kind: 'opacity' } })
   })
 
   it('hides the navigation bar for .toolbar(.hidden, for: .navigationBar), keeping toolbar items elsewhere', () => {

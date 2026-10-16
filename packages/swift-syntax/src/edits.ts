@@ -1,7 +1,7 @@
 import { DIRECTIVE_LINE } from './conditional-compilation'
 import type { DropPosition, FileId } from '@studio/shared'
 import { Parser } from './parser'
-import { walk, type Block, type CallExpr, type Expr, type Node, type Stmt } from './ast'
+import { walk, type Block, type CallExpr, type Expr, type IfStmt, type Node, type Stmt } from './ast'
 import { afterOffMarkers } from './off-markers'
 import { HIDDEN_END, HIDDEN_MARKER } from './studio-markers'
 
@@ -532,6 +532,41 @@ export function unwrapView(text: string, file: FileId, offset: number, refuse?: 
   const inside = text.slice(content.span.start + 1, content.span.end - 1).replace(/^[ \t]*\r?\n/, '').replace(/\s+$/, '')
   const views = inside.split('\n').map(line => line.startsWith(cut.indent + unit) ? cut.indent + line.slice(cut.indent.length + unit.length) : line).join('\n').replace(/^[ \t]+/, '')
   return { text: text.slice(0, start) + views + text.slice(end), offset: start }
+}
+
+/**
+ * Puts the view at `offset` in `if condition { … }` (Wave 5a), so it is drawn only while the
+ * condition holds: on lines of its own, one step further in, with every line of it, or on the
+ * line it shares. A view a `return` gives is refused, as `if` around it would not build.
+ */
+export function wrapInIf(text: string, file: FileId, offset: number, condition: string, refuse?: RefusalReason): SourceEdit | null {
+  const found = siteAt(text, file, offset)
+  if (!found) return refused(refuse, partOfCode('shown by a condition'))
+  if (found.stmt.kind === 'returnStmt') return refused(refuse, 'This view is what the code around it returns, so only Code can show it by a condition.')
+  const cut = cutOf(text, found.stmt), { start, end } = extentOf(text, found.stmt), head = `if ${condition} {`
+  if (!cut.ownLine) return { text: `${text.slice(0, start)}${head} ${text.slice(start, end)} }${text.slice(end)}`, offset: start + head.length + 1 }
+  const eol = text.includes('\r\n') ? '\r\n' : '\n', unit = indentUnit(text)
+  const view = text.slice(start, end).split('\n').map((line, i) => i === 0 || !line.trim() ? line : unit + line).join('\n')
+  return { text: `${text.slice(0, start)}${head}${eol}${cut.indent}${unit}${view}${eol}${cut.indent}}${text.slice(end)}`, offset: start + head.length + eol.length + cut.indent.length + unit.length }
+}
+
+/**
+ * Takes the view at `offset` out of the `if` it is the only view of (Wave 5a), one step
+ * further out, so it is always drawn. Refused for an `if` with an `else`, or with a note or
+ * a hidden view beside the view, which only Code keeps.
+ */
+export function unwrapIf(text: string, file: FileId, offset: number, refuse?: RefusalReason): SourceEdit | null {
+  let stmt: IfStmt | undefined
+  walk(Parser.parse(text, file).sourceFile, (node: Node) => {
+    if (node.kind === 'ifStmt' && node.then.statements.length === 1 && viewStartOf(node.then.statements[0]!) === offset) stmt = node
+  })
+  if (!stmt) return refused(refuse, 'This view isn’t the only view of an if. Change it in Code.')
+  if (stmt.else) return refused(refuse, 'This if has an else as well, which shows another view. Change it in Code.')
+  const view = extentOf(text, stmt.then.statements[0]!), inner = cutOf(text, stmt.then.statements[0]!).indent
+  if (/\/\/|\/\*/.test(text.slice(stmt.then.span.start, view.start) + text.slice(view.end, stmt.then.span.end))) return refused(refuse, 'This if holds a note or a hidden view beside the view, which only Code keeps. Change it in Code.')
+  const outer = /^[ \t]*/.exec(text.slice(lineStartAt(text, stmt.span.start)))![0]
+  const lines = text.slice(view.start, view.end).split('\n').map((line, i) => i > 0 && line.startsWith(inner) ? outer + line.slice(inner.length) : line).join('\n')
+  return { text: text.slice(0, stmt.span.start) + lines + text.slice(stmt.span.end), offset: stmt.span.start }
 }
 
 /** The Swift that draws the view at `offset`, for a copy that a paste can place anywhere. */

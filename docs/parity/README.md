@@ -64,6 +64,26 @@ others are white at 0.44, or black at 0.24 on the capsule. A swipe pages by the 
 width; with content margins it moves the content by 378, which the preview doesn't draw.
 `tests/system-ui-pager.test.ts` cites these.
 
+36 frames in [native/iphone18pro-motion](native/iphone18pro-motion/measurements.json),
+paired with `tests/fixtures/ios27-motion.swift`, measure how Wave 5a moves views. Each screen
+changes on its own inside `withAnimation(.linear(duration: 4))`, so a screenshot lands part
+way through, and a bar drawn in the same transaction says how far. They cover:
+- an `if` with no transition, which fades, while the view below it moves;
+- `.move(edge: .top)`, `.push(from: .trailing)`, `.scale`, `.blurReplace`, `.slide`, a move
+  combined with `.opacity`, and `asymmetric(insertion: .scale, removal: .opacity)`, each
+  coming in and going out;
+- a transition with no animation, which doesn't play, and `.animation(_:value:)` on a stack
+  holding only the `if`;
+- `.contentTransition(.numericText())` and `numericText(value:)` counting up and down, read
+  from a screen recording, and a text that changes with `.opacity` or nothing;
+- an if/else with and without `matchedGeometryEffect`.
+
+A `curves` screen logs each of Apple's animations frame by frame. `.default`, `.smooth`,
+`.spring` and `.interpolatingSpring` are one spring of 0.5 s that doesn't overshoot, `.snappy`
+and `.bouncy` bounce 0.15 and 0.3, and the ease curves take 0.35 s. A digit rolls in about half a
+second, whatever the change's own timing. `tests/motion-runtime.test.ts` and the render-dom
+`motion` and `transition-presence` tests cite these.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh

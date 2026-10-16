@@ -76,6 +76,8 @@ import {
   STYLE_TYPE,
   TOKEN_TYPE,
   TRANSITION_TYPE,
+  NUMERIC_TEXT_TYPE,
+  type NumericTextPayload,
   VIEW_TYPE,
   type ShadowStylePayload,
   type ActionValue,
@@ -356,8 +358,15 @@ export class SwiftUIHost implements InterpreterHost {
   }
   builderIdentity: (<T>(slot: string, branch: string, fn: () => T) => T) | null = null
 
+  /**
+   * Builds a branch of an `if` or a `switch`, each view it makes marked with the branch
+   * (Wave 5a). Each is marked on a copy: a branch can draw a view it didn't make, a `let`,
+   * a `static let` or a container's `content`, which is drawn elsewhere and again on the
+   * next pass, and marking it where it is would carry this branch there.
+   */
   withBuilderScope(slot: string, branch: string, build: () => SwiftValue[]): readonly SwiftValue[] {
-    const expand = () => this.toViews(build()).map(value => view(value))
+    const tag = `${slot}/${branch}`
+    const expand = () => this.toViews(build()).map(value => view({ ...value, branch: value.branch ? `${tag}>${value.branch}` : tag }))
     return this.builderIdentity ? this.builderIdentity(slot, branch, expand) : expand()
   }
 
@@ -1157,17 +1166,12 @@ export class SwiftUIHost implements InterpreterHost {
       })
     }
 
-    // `.opacity.combined(with: .slide)`.
+    // `.opacity.combined(with: .slide)`: both play at once (Wave 5a).
     if (target.kind === 'opaque' && target.typeName === TRANSITION_TYPE && member === 'combined') {
       const other = call.args.find((a) => a.label === 'with')?.value
       const payload = target.payload as TransitionPayload
-      const added = other?.kind === 'opaque' && other.typeName === TRANSITION_TYPE
-        ? (other.payload as TransitionPayload).kind
-        : null
-      return opaque(TRANSITION_TYPE, {
-        ...payload,
-        ...(added ? { combinedWith: [...(payload.combinedWith ?? []), added] } : {}),
-      } satisfies TransitionPayload)
+      const added = other?.kind === 'opaque' && other.typeName === TRANSITION_TYPE ? other.payload as TransitionPayload : null
+      return added ? opaque(TRANSITION_TYPE, { ...payload, also: [...(payload.also ?? []), added] } satisfies TransitionPayload) : target
     }
 
     // `.easeInOut.repeatForever(autoreverses: true)`, `.delay(0.2)`, `.speed(2)`. A delay
@@ -1595,9 +1599,9 @@ export class SwiftUIHost implements InterpreterHost {
    * one, because an implicit `Group` behaves identically - its children are laid out
    * by whatever contains it, and a modifier applied to it applies to all of them.
    */
-  groupValues(values: readonly SwiftValue[], span: SourceSpan): SwiftValue | undefined {
+  groupValues(values: readonly SwiftValue[], span: SourceSpan, varies = false): SwiftValue | undefined {
     const children = this.toViews(values)
-    if (children.length === 0) return undefined
+    if (children.length === 0 && !varies) return undefined
 
     return view({
       name: 'Group',
@@ -1619,11 +1623,16 @@ export class SwiftUIHost implements InterpreterHost {
       return this.makeAnimation(member, call)
     }
     if (TRANSITIONS.has(member)) return this.makeTransition(member, call)
-    // `.asymmetric(insertion: .scale, removal: .opacity)`. A view carries one transition
-    // here, so the insertion plays both ways; the checker says so where it is written.
+    // `.contentTransition(.numericText(value: Double(count)))` (Wave 5a).
+    if (member === 'numericText') {
+      const value = numberOf(call.args.find((a) => a.label === 'value')?.value)
+      const down = call.args.find((a) => a.label === 'countsDown')?.value
+      return opaque(NUMERIC_TEXT_TYPE, { ...(value !== null ? { value } : {}), ...(down?.kind === 'bool' && down.value ? { countsDown: true } : {}) } satisfies NumericTextPayload)
+    }
+    // `.asymmetric(insertion: .scale, removal: .opacity)`: one way in, another out (Wave 5a).
     if (member === 'asymmetric') {
-      const insertion = call.args.find((a) => a.label === 'insertion')?.value
-      return insertion?.kind === 'opaque' && insertion.typeName === TRANSITION_TYPE ? insertion : this.transitionToken('opacity')
+      const side = (label: string) => payloadOf<TransitionPayload>(call.args.find((a) => a.label === label)?.value, TRANSITION_TYPE) ?? { kind: 'opacity' as const }
+      return opaque(TRANSITION_TYPE, { ...side('insertion'), removal: side('removal') } satisfies TransitionPayload)
     }
     if (member === 'system') return this.makeSystemFont(call)
     // `.foregroundStyle(.linearGradient(colors:startPoint:endPoint:))`, the ShapeStyle spelling of `LinearGradient(…)`.
@@ -2058,7 +2067,7 @@ export class SwiftUIHost implements InterpreterHost {
       (explicit?.kind === 'opaque' && explicit.typeName === ANIMATION_TYPE
         ? (explicit.payload as AnimationPayload)
         : null) ??
-      (fromToken ? curveFor(fromToken, null) : null) ??
+      (fromToken ? curveFor(fromToken) : null) ??
       DEFAULT_ANIMATION
 
     const body = call.trailingClosure ?? asClosure(call.args[call.args.length - 1]?.value)
@@ -2067,22 +2076,24 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   private makeAnimation(member: string, call: HostCall): SwiftValue {
-    const duration = numberOf(call.args.find((a) => a.label === 'duration')?.value)
-    const payload = curveFor(member, duration) ?? DEFAULT_ANIMATION
+    const payload = curveFor(member, call.args) ?? DEFAULT_ANIMATION
     const delay = numberOf(call.args.find((a) => a.label === 'delay')?.value)
     return opaque(ANIMATION_TYPE, delay === null ? payload : { ...payload, delay })
   }
 
   private animationToken(member: string): SwiftValue {
-    const payload = curveFor(member, null)
+    const payload = curveFor(member)
     return payload ? opaque(ANIMATION_TYPE, payload) : token(member)
   }
 
+  /** `.move(edge: .top)`, `.push(from: .trailing)` (Wave 5a), `.scale(scale: 0.5)`. */
   private makeTransition(member: string, call: HostCall): SwiftValue {
-    const edge = tokenNameOf(call.args.find((a) => a.label === 'edge')?.value)
+    const edge = tokenNameOf(call.args.find((a) => a.label === 'edge' || a.label === 'from')?.value)
+    const scale = numberOf(call.args.find((a) => a.label === 'scale')?.value)
     return opaque(TRANSITION_TYPE, {
       kind: transitionKind(member),
       ...(edge ? { edge } : {}),
+      ...(scale !== null ? { scale } : {}),
     } satisfies TransitionPayload)
   }
 
@@ -2338,7 +2349,7 @@ const ANIMATION_CURVES: Readonly<Record<string, AnimationPayload['curve']>> = {
   easeIn: 'easeIn',
   easeOut: 'easeOut',
   easeInOut: 'easeInOut',
-  default: 'easeInOut',
+  default: 'spring',
   spring: 'spring',
   bouncy: 'spring',
   snappy: 'spring',
@@ -2351,7 +2362,18 @@ const TRANSITIONS: ReadonlySet<string> = new Set([
   'opacity', 'slide', 'scale', 'move', 'identity', 'blurReplace', 'push',
 ])
 
-const DEFAULT_ANIMATION: AnimationPayload = { curve: 'easeInOut', duration: 0.35 }
+/**
+ * Apple's springs as iOS 27 times them (Wave 5a), `[duration, bounce]`, measured frame by
+ * frame (docs/parity/native/iphone18pro-motion, `curves`): `.default`, `.smooth`, `.spring`
+ * and `.interpolatingSpring` are one spring of 0.5 s that doesn't overshoot, `.snappy` and
+ * `.bouncy` bounce 0.15 and 0.3, and `.interactiveSpring` is 0.15 s. The ease curves and
+ * `.linear` take 0.35 s.
+ */
+const SPRINGS: Readonly<Record<string, readonly [number, number]>> = {
+  snappy: [0.5, 0.15], bouncy: [0.5, 0.3], interactiveSpring: [0.15, 0.14],
+}
+
+const DEFAULT_ANIMATION: AnimationPayload = { curve: 'spring', duration: 0.5, bounce: 0 }
 
 function transitionKind(member: string): TransitionPayload['kind'] {
   switch (member) {
@@ -2360,8 +2382,11 @@ function transitionKind(member: string): TransitionPayload['kind'] {
     case 'scale':
       return 'scale'
     case 'move':
-    case 'push':
       return 'move'
+    case 'push':
+      return 'push'
+    case 'blurReplace':
+      return 'blur'
     case 'identity':
       return 'identity'
     default:
@@ -2369,18 +2394,30 @@ function transitionKind(member: string): TransitionPayload['kind'] {
   }
 }
 
-function curveFor(member: string, duration: number | null): AnimationPayload | null {
+/**
+ * A named animation, with what its call gives (Wave 5a): `.spring(duration:bounce:)`,
+ * `.spring(response:dampingFraction:)`, `.interpolatingSpring(stiffness:damping:)`,
+ * `.bouncy(duration:extraBounce:)` and `.easeInOut(duration:)`. A spring is kept as
+ * SwiftUI describes it, a duration and a bounce, which is what `cssEasing` draws.
+ */
+function curveFor(member: string, args: readonly CallArgument[] = []): AnimationPayload | null {
   const curve = ANIMATION_CURVES[member]
   if (!curve) return null
-
-  // Apple's spring presets differ mostly in how much they overshoot; approximating
-  // them with a duration and a bounce keeps the preview's motion recognisable
-  // without pretending to reimplement the solver.
-  if (curve === 'spring') {
-    const bounce = member === 'bouncy' ? 0.4 : member === 'snappy' ? 0.15 : 0.25
-    return { curve, duration: duration ?? (member === 'snappy' ? 0.3 : 0.55), bounce }
+  const given = (label: string) => numberOf(args.find((a) => a.label === label)?.value)
+  if (curve !== 'spring') return { curve, duration: given('duration') ?? 0.35 }
+  const round = (value: number) => Math.round(value * 1000) / 1000
+  const stiffness = given('stiffness')
+  if (stiffness !== null && stiffness > 0) {
+    const mass = given('mass') ?? 1
+    return { curve, duration: round(2 * Math.PI * Math.sqrt(mass / stiffness)), bounce: round(1 - (given('damping') ?? 0) / (2 * Math.sqrt(stiffness * mass))) }
   }
-  return { curve, duration: duration ?? 0.35 }
+  const [duration, bounce] = SPRINGS[member] ?? [0.5, 0]
+  const damping = given('dampingFraction')
+  return {
+    curve,
+    duration: given('duration') ?? given('response') ?? duration,
+    bounce: round(given('bounce') ?? (damping !== null ? 1 - damping : bounce + (given('extraBounce') ?? 0))),
+  }
 }
 
 function rangeElements(lower: number, upper: number, closed: boolean): SwiftValue[] {

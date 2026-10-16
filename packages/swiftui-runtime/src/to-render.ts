@@ -1,4 +1,5 @@
 import {
+  isWithin,
   rgba,
   type RenderNode,
   type RenderTree,
@@ -21,6 +22,7 @@ export function placedToRenderTree(
   canvas: Size,
   revision: number,
   background = rgba(255, 255, 255),
+  keyOf?: KeyOf,
 ): RenderTree {
   const nodes: RenderNode[] = [
     {
@@ -34,7 +36,7 @@ export function placedToRenderTree(
   ]
 
   for (const node of placed) {
-    const converted = toRenderNode(node)
+    const converted = toRenderNode(node, keyOf)
     if (converted) nodes.push(converted)
   }
 
@@ -46,20 +48,63 @@ export function appendPlaced(
   tree: RenderTree,
   placed: readonly PlacedNode[],
   zOffset: number,
+  keyOf?: KeyOf,
 ): RenderTree {
   const nodes = [...tree.nodes]
   for (const node of placed) {
-    const converted = toRenderNode(node)
+    const converted = toRenderNode(node, keyOf)
     if (converted) nodes.push({ ...converted, z: converted.z + zOffset })
   }
   return { ...tree, nodes }
 }
 
-function toRenderNode(node: PlacedNode): RenderNode | null {
+/** A node's key, when it isn't its id (Wave 5a). */
+export type KeyOf = (id: string) => string | undefined
+
+/**
+ * Keys nodes by the paths `keys` gives a key of their own (Wave 5a): a node is under the
+ * longest of them its id is within (`isWithin`), and takes that view's key in place of
+ * its path. The paths are sorted once, so each id is a binary search rather than a scan
+ * of them all.
+ */
+export function nodeKeys(keys: ReadonlyMap<string, string>): KeyOf {
+  const paths = [...keys.keys()].sort()
+  return id => {
+    let at = after(paths, id) - 1
+    while (at >= 0) {
+      const path = paths[at]!
+      if (id.startsWith(path)) {
+        if (isWithin(id, path)) return keys.get(path)! + id.slice(path.length)
+        at--
+        continue
+      }
+      // A path under which the id is must start what the two have in common.
+      let common = 0
+      while (path.charCodeAt(common) === id.charCodeAt(common)) common++
+      at = after(paths, id.slice(0, common)) - 1
+    }
+    return undefined
+  }
+}
+
+/** Where `value` would go in `sorted`, after anything equal to it (Wave 5a). */
+function after(sorted: readonly string[], value: string): number {
+  let low = 0, high = sorted.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (sorted[middle]! <= value) low = middle + 1
+    else high = middle
+  }
+  return low
+}
+
+function toRenderNode(node: PlacedNode, keyOf?: KeyOf): RenderNode | null {
+  const key = keyOf?.(node.id)
   const base = {
     cornerStyle: node.cornerStyle,
     clipShape: node.clipShape,
     id: node.id,
+    ...(key ? { key } : {}),
     frame: node.frame,
     // +1 so nothing collides with the screen backdrop at z 0.
     z: node.z + 1,
@@ -75,6 +120,8 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
     ...(node.transform ? { transform: node.transform } : {}),
     ...(node.animation ? { animation: node.animation } : {}),
     ...(node.transition ? { transition: node.transition } : {}),
+    ...(node.contentTransition ? { contentTransition: node.contentTransition } : {}),
+    ...(node.matched ? { matched: node.matched } : {}),
     ...(node.filter ? { filter: node.filter } : {}),
     ...(node.material ? { material: node.material } : {}),
     ...(node.mask ? { mask: node.mask } : {}),

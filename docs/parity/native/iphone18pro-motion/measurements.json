@@ -1,0 +1,1684 @@
+{
+  "source": "Built from tests/fixtures/ios27-motion.swift with swiftc for arm64-apple-ios27.0-simulator (Xcode 27.0, 27A266a, SDK 27.0, warnings as errors) and run on the iPhone 18 Pro simulator (ECD19CCB-2BD2-4361-804C-7496085499F9, iOS 27.0), light appearance, status bar overridden to 9:41; one launch per screen with -screen <name>, on 2026-10-15. Each screen changes on its own 1.5 s after launch inside withAnimation(.linear(duration: 4)), and changes back 7 s later. Screenshots were taken back to back with simctl io screenshot (each takes 0.4 to 2 s), and each is timed by the screen's own clock: a black bar 300 pt wide at the end of the change, grown or shrunk in the same transaction, so progress is its width over 300. Kept here is the screenshot nearest half way, for showing (in) and for hiding (out). The roll of the numeric screens is over in about half a second whatever the transaction's duration, so those frames come from simctl io recordVideo, read with AVAssetImageGenerator and timed by the same clock. The curves come from the curves screen: an Animatable modifier's body logs the value it is drawn with on each frame (about 60 a second), and withAnimation's completion logs when each animation is logically complete and when it is removed. 1206x2622 pixels / 402x874 points at 3x.",
+  "fixtureSha256": "4cfc51ebae2bb53ff1a7c4294ba435a5879a0c591782c65ee9b54720a4e5f21f",
+  "captures": [
+    {
+      "file": "asymmetric-in.png",
+      "sha256": "deace33a36ca8930ae73e7928e6e226f3a8e192692221071da0467864946626f",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.546
+    },
+    {
+      "file": "asymmetric-out.png",
+      "sha256": "7cbd59cc2360fcad19748a0d38a509d00dbacb406370e873dc3c711f6c65ccfb",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.459
+    },
+    {
+      "file": "blur-in.png",
+      "sha256": "4fa5bad32d13d9c2902f638b732b1614d7b749b620071d74906cd9ca8fc26fa8",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.546
+    },
+    {
+      "file": "blur-out.png",
+      "sha256": "ffc307c939993d74d0fc754eae9f9264499b112452549951aeb55be101aedc51",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.442
+    },
+    {
+      "file": "fade-in.png",
+      "sha256": "37083eae2f9d84d2edd2344862b4145984ad71f29308c04d81c42317e67eef1f",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.417
+    },
+    {
+      "file": "fade-out.png",
+      "sha256": "cc5ab42470dbe449584dba5fb60f5531a2137611973e64ae64d9d6183f00dfb2",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.404
+    },
+    {
+      "file": "matched-in.png",
+      "sha256": "da8500e63cee8824924bf90c33693b5d4890fe6b908fd9abeb83e5d000fa9928",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.559
+    },
+    {
+      "file": "matched-out.png",
+      "sha256": "3de386fac50dfb8db2dc51ac1dc026bf0fd0585f3e54cef5489553ead9e41762",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.517
+    },
+    {
+      "file": "move-fade-in.png",
+      "sha256": "154501d34a14a1bc25cd5f720bf820e64cf5e4f11f0f1abf85f6c8ff2462c064",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.546
+    },
+    {
+      "file": "move-fade-out.png",
+      "sha256": "cd72600459e5b8143aa1dd9c6a7e424d0be5a1e286d4d5d4816c93ae8223b0b1",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.446
+    },
+    {
+      "file": "move-top-in.png",
+      "sha256": "ecaba612cb55a52369b28190fd9c1e4f67f84247de77e956a4bee612eb19d7b3",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.459
+    },
+    {
+      "file": "move-top-out.png",
+      "sha256": "2e96f620cdd30e5d72e3f7e4fff77684e3220e29d017d52b00f2b890a55e67f1",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.529
+    },
+    {
+      "file": "numeric-in-0.1s.png",
+      "sha256": "1a58ae9aca2c722538d67891897fd42e8f9ce9cd9e75e1dd9a109a776915b5e3",
+      "size": [
+        1206,
+        2622
+      ],
+      "secondsAfterChange": 0.1,
+      "from": "video"
+    },
+    {
+      "file": "numeric-in-0.2s.png",
+      "sha256": "50b5c0278f36b556d0d547fe477fedd439a663d79a85eeca5f807dc3ce0def44",
+      "size": [
+        1206,
+        2622
+      ],
+      "secondsAfterChange": 0.2,
+      "from": "video"
+    },
+    {
+      "file": "numeric-out-0.1s.png",
+      "sha256": "2fd869d1cbe441e64ca7d79a163d693bdec933011d8a433b904f9cdd070b5872",
+      "size": [
+        1206,
+        2622
+      ],
+      "secondsAfterChange": 0.1,
+      "from": "video"
+    },
+    {
+      "file": "numeric-out-0.2s.png",
+      "sha256": "75d8621b8e98112e3ed52585f015dc8f998569fc49c544354b7765c9b9964795",
+      "size": [
+        1206,
+        2622
+      ],
+      "secondsAfterChange": 0.2,
+      "from": "video"
+    },
+    {
+      "file": "numeric-value-in-0.1s.png",
+      "sha256": "db4c78aab430ce2c08ff7566b439ad156499aeb95d0c8ae8e3368df4ea44f98d",
+      "size": [
+        1206,
+        2622
+      ],
+      "secondsAfterChange": 0.1,
+      "from": "video"
+    },
+    {
+      "file": "numeric-value-in-0.2s.png",
+      "sha256": "b7dabf033386808f4afc2f12291636dca6809d1a08d5e8599056bf7ec8569561",
+      "size": [
+        1206,
+        2622
+      ],
+      "secondsAfterChange": 0.2,
+      "from": "video"
+    },
+    {
+      "file": "numeric-value-out-0.1s.png",
+      "sha256": "36c18125db1f346abc3fd727c9ca0d41ff25d73f9bd2d18f2eec09bf0f27fa81",
+      "size": [
+        1206,
+        2622
+      ],
+      "secondsAfterChange": 0.1,
+      "from": "video"
+    },
+    {
+      "file": "numeric-value-out-0.2s.png",
+      "sha256": "8699d4e489f3c0f075938307f8a966cf4eb1d9de45f3bf8621fbb465fda99bd5",
+      "size": [
+        1206,
+        2622
+      ],
+      "secondsAfterChange": 0.2,
+      "from": "video"
+    },
+    {
+      "file": "push-trailing-in.png",
+      "sha256": "fe4d5406126ce8bf645e201362bf04a9a690904ac46979eab5bc63dba0a05e5f",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.562
+    },
+    {
+      "file": "push-trailing-out.png",
+      "sha256": "97b032a146996ad68b5cd75424d049094ef70a3c8cdbbfa3ca9d59103c00809b",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.45
+    },
+    {
+      "file": "scale-in.png",
+      "sha256": "67e375a5b8c280815c03f3f7b455aa619496b7e0fc5ab64363a271d8b796e9d7",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.546
+    },
+    {
+      "file": "scale-out.png",
+      "sha256": "68964e171b2f84c7023a8532bd277199adfb0b6119bb9456cd5a76c3a4596e5f",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.454
+    },
+    {
+      "file": "slide-in.png",
+      "sha256": "90fa5fe4841d6efaaa736b3188f7fec4372cfff55c28cf4ce473acc0dfc31cb2",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.55
+    },
+    {
+      "file": "slide-out.png",
+      "sha256": "6da721ceac8eaa12864ca408f9856bbe552eb13c9c10e43e22cedecea99671c7",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.45
+    },
+    {
+      "file": "text-default-in.png",
+      "sha256": "5eb18f95e8a6c590747d061363314ca86f8a77388a29977443ea8457963af089",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.542
+    },
+    {
+      "file": "text-default-out.png",
+      "sha256": "4252d98c9c6b483e4b9598d2e1c5ab9407034e0cff8f3312a3591fec3f592fbf",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.459
+    },
+    {
+      "file": "text-opacity-in.png",
+      "sha256": "ee650cbc38c4a897bb4a0a47500413b986af077cf98025a867cd26dbe40005a1",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.446
+    },
+    {
+      "file": "text-opacity-out.png",
+      "sha256": "d7fbc19c28cac56a57f7cd5ed2dea74ca11b6b1eb897097eadc7e9703185bb34",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.459
+    },
+    {
+      "file": "unanimated-in.png",
+      "sha256": "cc806ddff6ac5ebd09f47e0f2db676c99b62ee30c139f2e8214b6bb865d45851",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 1
+    },
+    {
+      "file": "unanimated-out.png",
+      "sha256": "09f3bbfddc6c0742fc1b8a049c5e42b6945ae247c6953d740ea56ec8a97773d7",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0
+    },
+    {
+      "file": "unmatched-in.png",
+      "sha256": "03ba48783f8e45c839178d99379440fa111f47d70f03f37393e0ec14b403a9eb",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.546
+    },
+    {
+      "file": "unmatched-out.png",
+      "sha256": "383c3ec947b9d971b8c8b0f89d2dfcd00ab2e867d429ed8e80989b1edda193b9",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.45
+    },
+    {
+      "file": "value-only-child-in.png",
+      "sha256": "fa03ceb2a67306083f6adc065b1045950c95bfea1a21523a2689fe0edc9d6e20",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.554
+    },
+    {
+      "file": "value-only-child-out.png",
+      "sha256": "032150bc7b8c85ec57d8a19f193bb8cafdd2ae3d28618dcb82df98465f854038",
+      "size": [
+        1206,
+        2622
+      ],
+      "progress": 0.459
+    }
+  ],
+  "measured": {
+    "geometry": "Points. Red bar 300 x 60 at (51, 192.33); the blue box 300 x 120 at (51, 268.33) when shown; the green bar at y 268.33 when the box is hidden and 404.33 when it is shown. Progress p goes from 0 to 1 while the box comes in, and from 1 to 0 while it goes.",
+    "defaultFade": {
+      "note": "An if with no transition inside withAnimation: the box fades in at its final frame, opacity p, and fades out where it was, opacity p, while the green bar moves between 268.33 and 404.33 with the same timing.",
+      "samples": [
+        [
+          0.638,
+          0.639
+        ],
+        [
+          0.826,
+          0.824
+        ],
+        [
+          0.75,
+          0.749
+        ],
+        [
+          0.404,
+          0.404
+        ],
+        [
+          0.146,
+          0.145
+        ]
+      ],
+      "samplesAre": "[p, opacity]"
+    },
+    "moveTop": {
+      "note": ".move(edge: .top): moved up by its own height (120), no fade, both ways; not clipped. A box coming in is drawn in source order, over the red bar; a box going is drawn under its siblings.",
+      "samples": [
+        [
+          0.092,
+          158.67
+        ],
+        [
+          0.459,
+          203.33
+        ],
+        [
+          0.838,
+          249
+        ]
+      ],
+      "samplesAre": "[p, y] coming in",
+      "offset": -120
+    },
+    "pushTrailing": {
+      "note": ".push(from: .trailing): comes in from its own width to the trailing side, fading in (opacity p); goes out its own width to the leading side, fading out.",
+      "samples": [
+        [
+          0.562,
+          182,
+          0.561
+        ],
+        [
+          0.912,
+          77,
+          0.914
+        ]
+      ],
+      "samplesAre": "[p, x, opacity] coming in",
+      "offsetIn": 300,
+      "offsetOut": -300
+    },
+    "scale": {
+      "note": ".scale: from scale 0 about its centre, no fade, both ways.",
+      "samples": [
+        [
+          0.429,
+          129.33
+        ],
+        [
+          0.783,
+          235.33
+        ]
+      ],
+      "samplesAre": "[p, width]",
+      "scale": 0
+    },
+    "blurReplace": {
+      "note": "blurReplace (downUp): opacity p, scale from 0.9, and a Gaussian blur of about 6.5 pt standard deviation at the hidden end, all with the transaction's timing, both ways.",
+      "samples": [
+        [
+          0.312,
+          0.931,
+          4.3
+        ],
+        [
+          0.546,
+          0.956,
+          3.0
+        ],
+        [
+          0.779,
+          0.978,
+          1.6
+        ],
+        [
+          0.896,
+          0.989,
+          0.7
+        ]
+      ],
+      "samplesAre": "[p, scale, blur standard deviation in points, the 10 to 90% width of the left edge / 2.563]",
+      "scale": 0.9,
+      "blur": 6.5
+    },
+    "slide": {
+      "note": ".slide: comes in from the leading side by its own width, goes out to the trailing side by its own width, no fade.",
+      "samples": [
+        [
+          0.55,
+          -84
+        ],
+        [
+          0.45,
+          214.67
+        ]
+      ],
+      "samplesAre": "[p, x] (in, out)"
+    },
+    "moveFade": {
+      "note": ".move(edge: .top).combined(with: .opacity): the move as above, with opacity p, both at once.",
+      "samples": [
+        [
+          0.312,
+          185.67,
+          0.314
+        ],
+        [
+          0.212,
+          174,
+          0.212
+        ]
+      ],
+      "samplesAre": "[p, y, opacity] (in, out)"
+    },
+    "asymmetric": {
+      "note": ".asymmetric(insertion: .scale, removal: .opacity): scales in from 0 exactly as .scale, and fades out (opacity p) without scaling."
+    },
+    "unanimated": {
+      "note": "A .transition(.scale) with no animation: the box is there, whole, in the first screenshot after the change, and gone in the first after it is hidden. Nothing plays."
+    },
+    "valueOnlyChild": {
+      "note": ".animation(.linear(duration: 4), value: shown) on a VStack holding only the if: the box fades in and out (opacity p) although nothing else is in what the modifier wraps, and the green bar, outside it, jumps at once (to 404.33, and back to 284.33, because the empty VStack keeps its slot and the spacing beside it)."
+    },
+    "numericText": {
+      "note": ".contentTransition(.numericText()): each digit that changes rolls, in about half a second whatever the duration of the transaction (here 4 s linear): the old digit moves up about a third of the font size, blurring and fading, and the new one comes up from as far below, sharpening, with a slight overshoot; the first digit starts a frame or two before the next. Counting down from 10 to 9 rolls up too. numericText(value:) rolls up when the value grows and down when it shrinks.",
+      "rollSeconds": 0.5,
+      "travelOfFontSize": 0.35,
+      "blurAtStart": 10
+    },
+    "textCrossFade": {
+      "note": "Text whose string changes inside withAnimation, with .contentTransition(.opacity) or with no content transition at all: the old string fades out where it was and the new one fades in where it is, with the transaction's timing. The two look the same."
+    },
+    "matchedGeometry": {
+      "note": "matchedGeometryEffect(id:in:) on both branches of an if/else: both views are drawn at the same frame, moved and sized linearly from one frame to the other with the transaction's timing; each keeps its own corner radius (40 and 12), the old fading out (1 - p) and the new fading in (p). Opacity where both are drawn is 1 - p(1 - p).",
+      "samples": [
+        [
+          0.438,
+          159,
+          367.33,
+          203.67,
+          0.753
+        ],
+        [
+          0.792,
+          246.67,
+          509,
+          125.67,
+          0.835
+        ]
+      ],
+      "samplesAre": "[p, x, y, side, opacity]",
+      "from": {
+        "x": 51,
+        "y": 192.33,
+        "side": 300
+      },
+      "to": {
+        "x": 298,
+        "y": 592.33,
+        "side": 80
+      }
+    },
+    "unmatched": {
+      "note": "The same if/else without the effect: the large card fades out where it is and the small one fades in where it is."
+    },
+    "curves": {
+      "note": "Samples are [seconds from the start of the animation, value from 0 to 1], every other logged frame; logicallyComplete and removed are withAnimation completion times. .default, .smooth, .spring and .interpolatingSpring are the same curve, a critically damped spring of duration (response) 0.5 s: logically complete at 0.5 s, removed at about 0.85 s. .snappy and .bouncy are springs of 0.5 s with bounce 0.15 and 0.3. .interactiveSpring is 0.15 s. The ease curves and .linear take 0.35 s.",
+      "springs": {
+        "smooth": {
+          "duration": 0.5,
+          "bounce": 0.0,
+          "response": 0.5,
+          "dampingRatio": 1.0,
+          "settlingDuration": 0.8
+        },
+        "snappy": {
+          "duration": 0.5,
+          "bounce": 0.15,
+          "response": 0.5,
+          "dampingRatio": 0.85,
+          "settlingDuration": 0.877
+        },
+        "bouncy": {
+          "duration": 0.5,
+          "bounce": 0.3,
+          "response": 0.5,
+          "dampingRatio": 0.7,
+          "settlingDuration": 1.045
+        }
+      },
+      "byAnimation": {
+        "default": {
+          "spring": {
+            "duration": 0.5,
+            "bounce": 0,
+            "rmsError": 0.0025,
+            "note": "1 - e^(-dwt)(cos + ...) with w = 2 pi / duration and damping d = 1 - bounce, fitted to every logged frame; start is fitted too"
+          },
+          "samples": [
+            [
+              0.015,
+              0.01609
+            ],
+            [
+              0.049,
+              0.1277
+            ],
+            [
+              0.083,
+              0.27918
+            ],
+            [
+              0.116,
+              0.42905
+            ],
+            [
+              0.15,
+              0.56023
+            ],
+            [
+              0.183,
+              0.66782
+            ],
+            [
+              0.216,
+              0.75998
+            ],
+            [
+              0.249,
+              0.82334
+            ],
+            [
+              0.281,
+              0.86684
+            ],
+            [
+              0.316,
+              0.90332
+            ],
+            [
+              0.349,
+              0.93016
+            ],
+            [
+              0.383,
+              0.94975
+            ],
+            [
+              0.415,
+              0.96396
+            ],
+            [
+              0.449,
+              0.97508
+            ],
+            [
+              0.483,
+              0.98222
+            ],
+            [
+              0.516,
+              0.98689
+            ],
+            [
+              0.549,
+              0.99068
+            ],
+            [
+              0.583,
+              0.99337
+            ],
+            [
+              0.616,
+              0.9953
+            ],
+            [
+              0.649,
+              0.99666
+            ],
+            [
+              0.683,
+              0.99763
+            ],
+            [
+              0.716,
+              0.99838
+            ],
+            [
+              0.749,
+              0.99885
+            ],
+            [
+              0.783,
+              0.99916
+            ],
+            [
+              0.815,
+              0.99941
+            ]
+          ],
+          "peak": 1.0,
+          "logicallyComplete": 0.522,
+          "removed": 0.85
+        },
+        "smooth": {
+          "spring": {
+            "duration": 0.5,
+            "bounce": 0,
+            "rmsError": 0.0029,
+            "note": "1 - e^(-dwt)(cos + ...) with w = 2 pi / duration and damping d = 1 - bounce, fitted to every logged frame; start is fitted too"
+          },
+          "samples": [
+            [
+              0.017,
+              0.01609
+            ],
+            [
+              0.049,
+              0.1277
+            ],
+            [
+              0.084,
+              0.27918
+            ],
+            [
+              0.116,
+              0.42905
+            ],
+            [
+              0.15,
+              0.56023
+            ],
+            [
+              0.184,
+              0.67729
+            ],
+            [
+              0.217,
+              0.75998
+            ],
+            [
+              0.249,
+              0.82334
+            ],
+            [
+              0.284,
+              0.86684
+            ],
+            [
+              0.317,
+              0.90332
+            ],
+            [
+              0.35,
+              0.93016
+            ],
+            [
+              0.384,
+              0.94975
+            ],
+            [
+              0.417,
+              0.96515
+            ],
+            [
+              0.449,
+              0.97508
+            ],
+            [
+              0.484,
+              0.98222
+            ],
+            [
+              0.517,
+              0.98689
+            ],
+            [
+              0.55,
+              0.99068
+            ],
+            [
+              0.584,
+              0.99337
+            ],
+            [
+              0.615,
+              0.9953
+            ],
+            [
+              0.65,
+              0.99666
+            ],
+            [
+              0.682,
+              0.99771
+            ],
+            [
+              0.717,
+              0.99838
+            ],
+            [
+              0.75,
+              0.99885
+            ],
+            [
+              0.782,
+              0.99916
+            ],
+            [
+              0.817,
+              0.99941
+            ]
+          ],
+          "peak": 1.0,
+          "logicallyComplete": 0.52,
+          "removed": 0.842
+        },
+        "snappy": {
+          "spring": {
+            "duration": 0.5,
+            "bounce": 0.15,
+            "rmsError": 0.0032,
+            "note": "1 - e^(-dwt)(cos + ...) with w = 2 pi / duration and damping d = 1 - bounce, fitted to every logged frame; start is fitted too"
+          },
+          "samples": [
+            [
+              0.015,
+              0.0163
+            ],
+            [
+              0.049,
+              0.13386
+            ],
+            [
+              0.083,
+              0.29984
+            ],
+            [
+              0.116,
+              0.4679
+            ],
+            [
+              0.149,
+              0.61565
+            ],
+            [
+              0.183,
+              0.73496
+            ],
+            [
+              0.216,
+              0.83316
+            ],
+            [
+              0.249,
+              0.8963
+            ],
+            [
+              0.283,
+              0.93603
+            ],
+            [
+              0.316,
+              0.96567
+            ],
+            [
+              0.35,
+              0.98418
+            ],
+            [
+              0.381,
+              0.99503
+            ],
+            [
+              0.416,
+              1.00084
+            ],
+            [
+              0.448,
+              1.00366
+            ],
+            [
+              0.483,
+              1.00436
+            ],
+            [
+              0.516,
+              1.00419
+            ],
+            [
+              0.548,
+              1.00358
+            ]
+          ],
+          "peak": 1.0044,
+          "logicallyComplete": 0.513,
+          "removed": 0.579
+        },
+        "bouncy": {
+          "spring": {
+            "duration": 0.5,
+            "bounce": 0.3,
+            "rmsError": 0.0028,
+            "note": "1 - e^(-dwt)(cos + ...) with w = 2 pi / duration and damping d = 1 - bounce, fitted to every logged frame; start is fitted too"
+          },
+          "samples": [
+            [
+              0.017,
+              0.0165
+            ],
+            [
+              0.05,
+              0.14048
+            ],
+            [
+              0.083,
+              0.32315
+            ],
+            [
+              0.117,
+              0.51347
+            ],
+            [
+              0.15,
+              0.68251
+            ],
+            [
+              0.183,
+              0.81734
+            ],
+            [
+              0.217,
+              0.92333
+            ],
+            [
+              0.249,
+              0.98524
+            ],
+            [
+              0.282,
+              1.01844
+            ],
+            [
+              0.317,
+              1.03679
+            ],
+            [
+              0.35,
+              1.0419
+            ],
+            [
+              0.384,
+              1.03909
+            ],
+            [
+              0.417,
+              1.03233
+            ],
+            [
+              0.45,
+              1.02431
+            ],
+            [
+              0.482,
+              1.01598
+            ],
+            [
+              0.516,
+              1.01028
+            ],
+            [
+              0.55,
+              1.00541
+            ],
+            [
+              0.582,
+              1.00202
+            ],
+            [
+              0.616,
+              0.9999
+            ],
+            [
+              0.65,
+              0.99876
+            ],
+            [
+              0.682,
+              0.9983
+            ],
+            [
+              0.717,
+              0.99829
+            ],
+            [
+              0.75,
+              0.99852
+            ]
+          ],
+          "peak": 1.0419,
+          "logicallyComplete": 0.505,
+          "removed": 0.785
+        },
+        "spring": {
+          "spring": {
+            "duration": 0.5,
+            "bounce": 0,
+            "rmsError": 0.0024,
+            "note": "1 - e^(-dwt)(cos + ...) with w = 2 pi / duration and damping d = 1 - bounce, fitted to every logged frame; start is fitted too"
+          },
+          "samples": [
+            [
+              0.016,
+              0.01609
+            ],
+            [
+              0.05,
+              0.1277
+            ],
+            [
+              0.082,
+              0.27918
+            ],
+            [
+              0.115,
+              0.42905
+            ],
+            [
+              0.15,
+              0.56023
+            ],
+            [
+              0.183,
+              0.66782
+            ],
+            [
+              0.216,
+              0.75264
+            ],
+            [
+              0.249,
+              0.82334
+            ],
+            [
+              0.283,
+              0.86684
+            ],
+            [
+              0.316,
+              0.90332
+            ],
+            [
+              0.349,
+              0.93016
+            ],
+            [
+              0.383,
+              0.94975
+            ],
+            [
+              0.416,
+              0.96396
+            ],
+            [
+              0.45,
+              0.97423
+            ],
+            [
+              0.483,
+              0.9816
+            ],
+            [
+              0.516,
+              0.98689
+            ],
+            [
+              0.55,
+              0.99068
+            ],
+            [
+              0.583,
+              0.99337
+            ],
+            [
+              0.616,
+              0.9953
+            ],
+            [
+              0.65,
+              0.99666
+            ],
+            [
+              0.683,
+              0.99763
+            ],
+            [
+              0.717,
+              0.99832
+            ],
+            [
+              0.75,
+              0.99885
+            ],
+            [
+              0.782,
+              0.99916
+            ],
+            [
+              0.816,
+              0.99941
+            ]
+          ],
+          "peak": 1.0,
+          "logicallyComplete": 0.519,
+          "removed": 0.852
+        },
+        "interactiveSpring": {
+          "spring": {
+            "duration": 0.15,
+            "bounce": 0.14,
+            "rmsError": 0.0036,
+            "note": "1 - e^(-dwt)(cos + ...) with w = 2 pi / duration and damping d = 1 - bounce, fitted to every logged frame; start is fitted too"
+          },
+          "samples": [
+            [
+              0.016,
+              0.14927
+            ],
+            [
+              0.049,
+              0.67453
+            ],
+            [
+              0.082,
+              0.9207
+            ],
+            [
+              0.116,
+              0.99106
+            ],
+            [
+              0.15,
+              1.00074
+            ],
+            [
+              0.182,
+              1.00091
+            ],
+            [
+              0.216,
+              1.00033
+            ],
+            [
+              0.25,
+              1.00008
+            ],
+            [
+              0.283,
+              1.0
+            ]
+          ],
+          "peak": 1.0011,
+          "logicallyComplete": 0.159,
+          "removed": 0.287
+        },
+        "interpolatingSpring": {
+          "spring": {
+            "duration": 0.5,
+            "bounce": 0,
+            "rmsError": 0.0011,
+            "note": "1 - e^(-dwt)(cos + ...) with w = 2 pi / duration and damping d = 1 - bounce, fitted to every logged frame; start is fitted too"
+          },
+          "samples": [
+            [
+              0.017,
+              0.0191
+            ],
+            [
+              0.051,
+              0.13131
+            ],
+            [
+              0.083,
+              0.2816
+            ],
+            [
+              0.116,
+              0.43076
+            ],
+            [
+              0.151,
+              0.56196
+            ],
+            [
+              0.184,
+              0.67003
+            ],
+            [
+              0.217,
+              0.75543
+            ],
+            [
+              0.251,
+              0.82103
+            ],
+            [
+              0.283,
+              0.87037
+            ],
+            [
+              0.317,
+              0.9069
+            ],
+            [
+              0.349,
+              0.93361
+            ],
+            [
+              0.383,
+              0.95294
+            ],
+            [
+              0.417,
+              0.96681
+            ],
+            [
+              0.451,
+              0.97671
+            ],
+            [
+              0.483,
+              0.98371
+            ],
+            [
+              0.517,
+              0.98865
+            ],
+            [
+              0.551,
+              0.99212
+            ],
+            [
+              0.584,
+              0.99454
+            ],
+            [
+              0.617,
+              0.99623
+            ],
+            [
+              0.649,
+              0.9974
+            ],
+            [
+              0.684,
+              0.99821
+            ],
+            [
+              0.716,
+              0.99877
+            ],
+            [
+              0.75,
+              0.99916
+            ],
+            [
+              0.782,
+              0.99942
+            ]
+          ],
+          "peak": 1.0,
+          "logicallyComplete": 0.507,
+          "removed": 0.826
+        },
+        "spring-0.8-0.2": {
+          "spring": {
+            "duration": 0.8,
+            "bounce": 0.2,
+            "rmsError": 0.004,
+            "note": "1 - e^(-dwt)(cos + ...) with w = 2 pi / duration and damping d = 1 - bounce, fitted to every logged frame; start is fitted too"
+          },
+          "samples": [
+            [
+              0.019,
+              0.00657
+            ],
+            [
+              0.052,
+              0.05971
+            ],
+            [
+              0.086,
+              0.1476
+            ],
+            [
+              0.119,
+              0.26419
+            ],
+            [
+              0.152,
+              0.37536
+            ],
+            [
+              0.184,
+              0.4832
+            ],
+            [
+              0.219,
+              0.58276
+            ],
+            [
+              0.251,
+              0.6713
+            ],
+            [
+              0.284,
+              0.74055
+            ],
+            [
+              0.319,
+              0.80581
+            ],
+            [
+              0.352,
+              0.8641
+            ],
+            [
+              0.385,
+              0.90596
+            ],
+            [
+              0.417,
+              0.93858
+            ],
+            [
+              0.451,
+              0.96332
+            ],
+            [
+              0.486,
+              0.98153
+            ],
+            [
+              0.519,
+              0.99336
+            ],
+            [
+              0.552,
+              1.00246
+            ],
+            [
+              0.584,
+              1.00826
+            ],
+            [
+              0.619,
+              1.01179
+            ],
+            [
+              0.651,
+              1.01314
+            ],
+            [
+              0.684,
+              1.01328
+            ],
+            [
+              0.718,
+              1.01262
+            ],
+            [
+              0.752,
+              1.01147
+            ],
+            [
+              0.786,
+              1.01022
+            ]
+          ],
+          "peak": 1.0133,
+          "logicallyComplete": 0.807,
+          "removed": 0.812
+        },
+        "easeInOut": {
+          "note": "start taken as one frame (1/60 s) before the first frame that moved",
+          "samples": [
+            [
+              0.017,
+              0.00438
+            ],
+            [
+              0.048,
+              0.0409
+            ],
+            [
+              0.082,
+              0.11686
+            ],
+            [
+              0.117,
+              0.23178
+            ],
+            [
+              0.15,
+              0.37843
+            ],
+            [
+              0.183,
+              0.54099
+            ],
+            [
+              0.215,
+              0.69807
+            ],
+            [
+              0.25,
+              0.8303
+            ],
+            [
+              0.283,
+              0.92614
+            ],
+            [
+              0.317,
+              0.98215
+            ],
+            [
+              0.35,
+              1.0
+            ]
+          ],
+          "peak": 1.0,
+          "logicallyComplete": 0.375,
+          "removed": 0.379
+        },
+        "easeIn": {
+          "note": "start taken as one frame (1/60 s) before the first frame that moved",
+          "samples": [
+            [
+              0.017,
+              0.00407
+            ],
+            [
+              0.05,
+              0.03339
+            ],
+            [
+              0.083,
+              0.08557
+            ],
+            [
+              0.116,
+              0.15616
+            ],
+            [
+              0.15,
+              0.24212
+            ],
+            [
+              0.183,
+              0.3413
+            ],
+            [
+              0.215,
+              0.45217
+            ],
+            [
+              0.248,
+              0.57369
+            ],
+            [
+              0.282,
+              0.70523
+            ],
+            [
+              0.315,
+              0.84675
+            ],
+            [
+              0.35,
+              1.0
+            ]
+          ],
+          "peak": 1.0,
+          "logicallyComplete": 0.367,
+          "removed": 0.382
+        },
+        "easeOut": {
+          "note": "start taken as one frame (1/60 s) before the first frame that moved",
+          "samples": [
+            [
+              0.017,
+              0.07843
+            ],
+            [
+              0.05,
+              0.22529
+            ],
+            [
+              0.083,
+              0.36177
+            ],
+            [
+              0.116,
+              0.48835
+            ],
+            [
+              0.15,
+              0.60465
+            ],
+            [
+              0.182,
+              0.70984
+            ],
+            [
+              0.217,
+              0.80263
+            ],
+            [
+              0.25,
+              0.88122
+            ],
+            [
+              0.282,
+              0.94306
+            ],
+            [
+              0.317,
+              0.98449
+            ],
+            [
+              0.35,
+              1.0
+            ]
+          ],
+          "peak": 1.0,
+          "logicallyComplete": 0.386,
+          "removed": 0.358
+        },
+        "linear": {
+          "note": "start taken as one frame (1/60 s) before the first frame that moved",
+          "samples": [
+            [
+              0.017,
+              0.04762
+            ],
+            [
+              0.05,
+              0.14286
+            ],
+            [
+              0.083,
+              0.2381
+            ],
+            [
+              0.117,
+              0.33333
+            ],
+            [
+              0.15,
+              0.42857
+            ],
+            [
+              0.183,
+              0.52381
+            ],
+            [
+              0.217,
+              0.61905
+            ],
+            [
+              0.25,
+              0.71429
+            ],
+            [
+              0.283,
+              0.80952
+            ],
+            [
+              0.315,
+              0.90476
+            ],
+            [
+              0.35,
+              1.0
+            ]
+          ],
+          "peak": 1.0,
+          "logicallyComplete": 0.38,
+          "removed": 0.385
+        },
+        "easeInOut-1": {
+          "note": "start taken as one frame (1/60 s) before the first frame that moved",
+          "samples": [
+            [
+              0.017,
+              0.00053
+            ],
+            [
+              0.05,
+              0.00483
+            ],
+            [
+              0.083,
+              0.01361
+            ],
+            [
+              0.117,
+              0.02702
+            ],
+            [
+              0.15,
+              0.04521
+            ],
+            [
+              0.183,
+              0.06828
+            ],
+            [
+              0.216,
+              0.09627
+            ],
+            [
+              0.249,
+              0.12916
+            ],
+            [
+              0.283,
+              0.16683
+            ],
+            [
+              0.315,
+              0.20906
+            ],
+            [
+              0.35,
+              0.25549
+            ],
+            [
+              0.383,
+              0.30562
+            ],
+            [
+              0.416,
+              0.35883
+            ],
+            [
+              0.45,
+              0.41434
+            ],
+            [
+              0.483,
+              0.47128
+            ],
+            [
+              0.516,
+              0.52872
+            ],
+            [
+              0.55,
+              0.58566
+            ],
+            [
+              0.583,
+              0.64117
+            ],
+            [
+              0.615,
+              0.69438
+            ],
+            [
+              0.65,
+              0.74451
+            ],
+            [
+              0.683,
+              0.79094
+            ],
+            [
+              0.717,
+              0.83317
+            ],
+            [
+              0.75,
+              0.87084
+            ],
+            [
+              0.783,
+              0.90373
+            ],
+            [
+              0.817,
+              0.93172
+            ],
+            [
+              0.85,
+              0.95479
+            ],
+            [
+              0.883,
+              0.97298
+            ],
+            [
+              0.917,
+              0.98639
+            ],
+            [
+              0.95,
+              0.99517
+            ],
+            [
+              0.982,
+              0.99947
+            ]
+          ],
+          "peak": 1.0,
+          "logicallyComplete": 1.028,
+          "removed": 1.035
+        }
+      }
+    }
+  }
+}

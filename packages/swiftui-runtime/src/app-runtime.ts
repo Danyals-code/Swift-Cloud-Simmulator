@@ -43,6 +43,7 @@ import {
   BUTTON_CONFIGURATION_TYPE,
   DIMENSIONS_TYPE,
   handlerIdFor,
+  NAMESPACE_TYPE,
   sourcedViews,
   stoppedView,
   type ActionValue,
@@ -882,7 +883,7 @@ export class AppRuntime {
       const env = this.interpreter.globals.child(instance)
       const produced = this.interpreter.runViewBuilderBlock(body.accessor, env)
 
-      return componentViews(this.viewsFrom(produced), instance)
+      return componentViews(ownBranches(this.viewsFrom(produced), identity), instance)
     } catch (error) {
       // A view whose body stops is drawn as a placeholder saying why, and the rest of
       // the screen goes on: a trap in one row must not blank the screen, and the Design
@@ -1114,6 +1115,11 @@ export class AppRuntime {
         fingerprint(property.initializer),
       )
       instance.fields.set(property.name, stored)
+    }
+
+    // `@Namespace private var hero`: an id of this copy of the view's own (Wave 5a).
+    for (const member of this.interpreter.membersOf(decl.name)) {
+      if (member.kind === 'varDecl' && member.attributes.some((a) => a.name === 'Namespace')) instance.fields.set(member.name, opaque(NAMESPACE_TYPE, `${identity}.${member.name}`))
     }
 
     this.seedDefaults(instance, decl, identity)
@@ -1441,6 +1447,19 @@ function findPreviewsProperty(files: readonly SourceFileNode[]): Block | null {
 
 /** `@Previewable @State var count = 0` in a `#Preview`'s body: a variable the preview keeps, as a view keeps its `@State`. */
 const previewable = (statement: Stmt) => statement.kind === 'declStmt' && statement.declaration.kind === 'varDecl' && statement.declaration.attributes.some(attribute => attribute.name === 'Previewable')
+
+/**
+ * The views a body's own `if` or `switch` made, marked as this copy's (Wave 5a). They are
+ * counted where the view is placed, beside the branches of the list around it, which can
+ * write the same tags, as two copies of one view do; the copy's identity tells them apart
+ * and stays put when an `if` beside it opens, as its `@State` does. A view with a branch at
+ * the top of the body is one the body's `if` made just now, as `withBuilderScope` copies
+ * each view it tags, so it is marked where it is.
+ */
+function ownBranches(views: ViewValue[], identity: string): ViewValue[] {
+  for (const view of views) if (view.branch) (view as { branch: string }).branch = `${identity}>${view.branch}`
+  return views
+}
 
 /** Tag all painted descendants because navigation/tabs can unwrap a component root. */
 function componentViews(views: readonly ViewValue[], instance: StructValue): ViewValue[] {

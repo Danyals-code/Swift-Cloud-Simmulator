@@ -37,6 +37,8 @@ export interface FeatureProps {
   /** True once the same view has been pasted a third time. */
   pasteNudge?: boolean
   onDismissNudge?: () => void
+  /** Show it (Wave 5a): switches to a state that draws a view its condition hides now. */
+  onShowIt?: (node: AuthoringNode) => void
 }
 export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onSelect, onPreview, onDescribe, onFindCopies, screens = [], pasteNudge, onDismissNudge, descriptions, variants, onSaveVariant, onDeleteVariant, previewInputs, assets, section = 'basics' }: FeatureProps & { section?: 'basics' | 'interaction' | 'field' | 'data' | 'advanced' }) {
   const [error, setError] = useState<string | null>(null), [busy, setBusy] = useState(false)
@@ -47,7 +49,8 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
   const [records, setRecords] = useState<readonly DesignRecord[]>(() => { const preview = previewInputs?.find(i => i.owner === node.collection?.owner && i.name === node.collection?.name && i.signature === node.collection?.signature)?.value; return Array.isArray(preview) ? preview as readonly DesignRecord[] : node.collection?.records ?? [] })
   const [newField, setNewField] = useState('price'), [fieldType, setFieldType] = useState<RecordField['type']>('Double'), [fieldDefault, setFieldDefault] = useState('0'), [optional, setOptional] = useState(false)
   const [recordScope, setRecordScope] = useState<'preview' | 'app'>('preview')
-  const command = async (operation: Parameters<FeatureChange>[0]) => { if (!onCommand || busy) return; setBusy(true); try { setError(await onCommand(operation)) } finally { setBusy(false) } }
+  // The problem is returned too, so a control that shows a choice at once can put it back (Wave 5a).
+  const command = async (operation: Parameters<FeatureChange>[0]) => { if (!onCommand || busy) return 'Wait for the last change to finish.'; setBusy(true); try { const problem = await onCommand(operation); setError(problem); return problem } finally { setBusy(false) } }
   if (!onCommand) return null
   const children = node.children.map(id => snapshot?.nodes.find(n => n.id === id)).filter((n): n is AuthoringNode => !!n)
   const template = children.find(n => n.kind === 'template')
@@ -78,7 +81,7 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
       {shared && <div><p>Editing the Main changes all {node.component.callSites.length} copies, including repeated rows:</p><ul>{snapshot?.nodes.filter(n => n.definitionId === node.component!.definitionId).map((site, index) => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · copy {index + 1}</button></li>)}</ul><button type="button" onClick={() => { const definition = snapshot?.nodes.find(n => n.id === node.component!.definitionId); if (definition) onSelect?.(definition); else setError('The Main for this copy is not in the project any more. Open it in Code.') }}>Open the Main</button></div>}
     </section>}
     {section === 'advanced' && node.component && <section><h3>Saved inputs</h3>
-      {onSaveVariant && onDeleteVariant && <ComponentVariants node={node} variants={variants ?? []} onSave={onSaveVariant} onDelete={onDeleteVariant} onApply={variant => command({ kind: 'component-variant', variant })} busy={busy} />}
+      {onSaveVariant && onDeleteVariant && <ComponentVariants node={node} variants={variants ?? []} onSave={onSaveVariant} onDelete={onDeleteVariant} onApply={async variant => { await command({ kind: 'component-variant', variant }) }} busy={busy} />}
       {onDescribe && <ComponentDescriptionEditor node={node} descriptions={descriptions} onSave={onDescribe} />}
     </section>}
     {section === 'basics' && reusableOwner && textInput && <details><summary>Changeable per copy</summary><p>Let each copy set its own text. Copies that exist now keep “{textInput.value}”.</p><label>Field name<input aria-label="Component input name" value={inputName} onChange={e => setInputName(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'component-expose', control: textInput.id, name: inputName })}>Make text changeable per copy</button></details>}
@@ -119,7 +122,7 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
   </div>
 }
 
-function BehaviorEditor({ node, snapshot, onSelect, onCommand, busy, part }: { snapshot?: AuthoringSnapshot; onSelect?: (node: AuthoringNode) => void; node: AuthoringNode; onCommand: (op: Parameters<FeatureChange>[0]) => Promise<void>; busy: boolean; part: 'basic' | 'advanced' }) {
+function BehaviorEditor({ node, snapshot, onSelect, onCommand, busy, part }: { snapshot?: AuthoringSnapshot; onSelect?: (node: AuthoringNode) => void; node: AuthoringNode; onCommand: (op: Parameters<FeatureChange>[0]) => Promise<string | null>; busy: boolean; part: 'basic' | 'advanced' }) {
   const info = node.behavior!
   const [recordError, setRecordError] = useState<string | null>(null)
   const [kind, setKind] = useState<BehaviorAction['type']>('toggle'), [state, setState] = useState(info.states[0]?.name ?? '')
@@ -129,7 +132,6 @@ function BehaviorEditor({ node, snapshot, onSelect, onCommand, busy, part }: { s
   const [value, setValue] = useState(defaults?.value ?? ''), [replace, setReplace] = useState(false), [newState, setNewState] = useState(defaults?.name ?? 'value')
   const [collectionName, setCollectionName] = useState(info.collections[0]?.name ?? ''), [item, setItem] = useState<readonly DesignRecord[]>([])
   const [deleteId, setDeleteId] = useState('')
-  const [transition, setTransition] = useState<'opacity' | 'slide' | 'scale'>('opacity'), [duration, setDuration] = useState('0.25')
   const selected = info.states.find(s => s.name === state), collection = info.collections.find(c => c.name === collectionName)
   const parse = (type: string): DesignValue => type === 'Date' ? (value ? Date.parse(value) / 1000 : null) : type === 'Color' ? value || '#6D28D9' : type === 'Bool' ? value === 'true' : ['Int', 'Double'].includes(type) ? (value === '' ? null : Number(value)) : value
   const configure = () => {
@@ -148,7 +150,6 @@ function BehaviorEditor({ node, snapshot, onSelect, onCommand, busy, part }: { s
     setRecordError(null)
     void onCommand({ kind: 'behavior', action, replace })
   }
-  const appears = info.appear && 'by' in info.appear ? info.appear.by : undefined
   const stateSelect = <label>Local state<select aria-label="Behavior state" value={state} onChange={e => setState(e.target.value)}><option value="" disabled>Select state</option>{info.states.map(s => <option key={s.name} value={s.name}>{s.name} · {s.type}</option>)}</select></label>
   if (part === 'advanced') return <section>
     {info.canConfigureAction && <details><summary>Other actions</summary><details><summary>Current action source</summary><pre>{info.currentAction}</pre></details><label>Action<select aria-label="Action type" value={kind} onChange={e => setKind(e.target.value as BehaviorAction['type'])}><option value="toggle">Toggle state</option><option value="set">Set / select a value</option><option value="call">Call developer action</option><option value="navigate">Navigate to screen</option><option value="sheet">Present sheet</option><option value="dismiss">Dismiss sheet</option><option value="append">Add local item</option><option value="delete">Delete local item</option></select></label>
@@ -160,8 +161,6 @@ function BehaviorEditor({ node, snapshot, onSelect, onCommand, busy, part }: { s
       {['append', 'delete'].includes(kind) && <><label>Local collection<select aria-label="Action collection" value={collectionName} onChange={e => { setCollectionName(e.target.value); setItem([]) }}><option value="" disabled>Select collection</option>{info.collections.filter(c => c.mutable).map(c => <option key={c.name}>{c.name}</option>)}</select></label>{collection && (kind === 'append' ? <RecordEditor info={collection} value={item.length ? item : [defaultRecord(collection, collection.records)]} onChange={setItem} /> : <label>Item to delete<select aria-label="Delete item id" value={deleteId} onChange={e => setDeleteId(e.target.value)}><option value="" disabled>Select id</option>{collection.records.map(r => <option key={String(r.id)}>{String(r.id)}</option>)}</select></label>)}</>}
       <label><input type="checkbox" checked={replace} onChange={e => setReplace(e.target.checked)} />Replace the displayed action</label><button type="button" disabled={busy} onClick={configure}>Apply action</button>{recordError && <p role="alert" className={styles.error}>{recordError}</p>}
     </details>}
-    <details><summary>Appear animation</summary>{appears ? <>{appears === 'branch' && stateSelect}<label>Style<select value={transition} onChange={e => setTransition(e.target.value as typeof transition)}><option>opacity</option><option>slide</option><option>scale</option></select></label><label>Duration in seconds<input value={duration} onChange={e => setDuration(e.target.value)} /></label><button type="button" disabled={busy || appears === 'branch' && !state} onClick={() => void onCommand({ kind: 'transition', state: appears === 'row' ? '' : state, style: transition, duration: Number(duration) })}>Add transition</button></>
-      : <p>{info.appear && 'problem' in info.appear ? info.appear.problem : 'It plays as a view is added or removed: inside an if or a switch, or as a row of a collection.'}</p>}</details>
   </section>
   // A view that takes no tap yet keeps it folded away, one click from making it tappable (D16).
   if (!info.canConfigureAction && info.canMakeTappable) return <details data-testid="when-tapped"><summary>When tapped</summary><GuidedInteraction node={node} snapshot={snapshot} onSelect={onSelect} onCommand={onCommand} busy={busy} /></details>
