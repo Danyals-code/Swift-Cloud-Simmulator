@@ -697,3 +697,20 @@ describe('nameAt', () => {
     expect(nameAt('let value = 12', 14)).toBeNull()
   })
 })
+
+describe("a chart's drawn marks (Wave 6e)", () => {
+  const body = 'struct ContentView: View {\n    var body: some View {\n        Chart {\n            Bar|\n        }\n    }\n}\n'
+  it('offers each where a view is written, as drawn, the same list every time', () => {
+    const first = completeDetailed(body).items.find(item => item.name === 'BarMark')
+    expect(first).toMatchObject({ kind: 'view', insert: 'BarMark(' })
+    expect(first?.doc).toBeUndefined()
+    expect(completeDetailed(body).items.find(item => item.name === 'BarMark')).toBe(first)
+    // A mark the chart leaves out still says it isn't drawn.
+    expect(completeDetailed(body).items.find(item => item.name === 'RectangleMark')?.doc).toMatch(/does not draw/)
+  })
+
+  it('hovers a drawn mark as drawn', () => {
+    expect(hover(body.replace('Bar|', 'BarMa|rk(x: .value("A", "a"), y: .value("B", 1))'))).toMatchObject({ name: 'BarMark', kind: 'view' })
+    expect(hover(body.replace('Bar|', 'BarMa|rk(x: .value("A", "a"), y: .value("B", 1))'))?.doc).toBeUndefined()
+  })
+})

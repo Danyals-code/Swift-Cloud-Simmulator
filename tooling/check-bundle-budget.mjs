@@ -153,8 +153,13 @@ const BUDGET_KB = 950
  *   Wave 6   - 166.8 KB after Wave 5: the chunk is swift-sema with the parser,
  *              which the studio page and the worker both load. Wave 6 adds about
  *              4 KB of sema. Raised to 176 KB by decision.
+ *   Wave 6e  - 175.7 KB with Charts: the sema chunk grows with each wave's checker
+ *              and Design controls. Loading edit-only writers on demand to make room
+ *              made Turbopack keep the page's and worker's shared chunk twice (+25 KB
+ *              in total), so the writers stay eager. 6f adds about 0.8 KB more.
+ *              Raised to 180 KB by decision, for 6e and 6f.
  */
-const LARGEST_CHUNK_KB = 176
+const LARGEST_CHUNK_KB = 180
 
 function walkJs(dir) {
   const out = []

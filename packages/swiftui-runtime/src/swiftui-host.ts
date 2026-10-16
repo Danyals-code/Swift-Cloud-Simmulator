@@ -26,7 +26,7 @@ import {
   type InterpreterHost,
   type SwiftValue,
 } from '@studio/swift-runtime'
-import { LEGACY_STYLE_TOKENS, SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS, isKnownGlobal } from '@studio/swift-sema'
+import { DRAWN_VIEW_NAMES, LEGACY_STYLE_TOKENS, UNIMPLEMENTED_VIEWS, isKnownGlobal } from '@studio/swift-sema'
 import { ZERO_INSETS } from '@studio/swiftui-layout'
 import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
 import { isSymbolEffectOption, isSymbolVariant } from './sf-symbols'
@@ -100,7 +100,8 @@ import {
 
 /** Every name the host will build a view for - implemented or not. */
 const VIEW_NAMES: ReadonlySet<string> = new Set([
-  ...SUPPORTED_VIEWS,
+  // With a chart's drawn marks, which are no views but are built as views are, for the chart to read (Wave 6e).
+  ...DRAWN_VIEW_NAMES,
   ...UNIMPLEMENTED_VIEWS,
   'Spacer',
   'Divider',
@@ -219,8 +220,9 @@ const TASK_TYPE = 'Task'
  *
  * `List(items) { item in … }` is sugar for `List { ForEach(items) { … } }`, and
  * expanding it here means the rest of the pipeline only ever sees the explicit form.
+ * `Chart(data) { item in … }` builds its marks the same way (Wave 6e).
  */
-const DATA_DRIVEN_VIEWS: ReadonlySet<string> = new Set(['ForEach', 'List', 'Picker'])
+const DATA_DRIVEN_VIEWS: ReadonlySet<string> = new Set(['ForEach', 'List', 'Picker', 'Chart'])
 
 function view(v: ViewValue): SwiftValue {
   return opaque(VIEW_TYPE, v)
@@ -1625,7 +1627,8 @@ export class SwiftUIHost implements InterpreterHost {
       const content = call.trailingClosure ?? asClosure(call.args.find((arg) => arg.label === 'mask')?.value)
       return content ? this.toViews(call.invokeBuilder(content)).map((value) => ({ label: 'content', value: view(value) })) : []
     }
-    if (!['safeAreaInset', 'background', 'overlay'].includes(member)) return []
+    // A chart mark's `.annotation { … }` is built where it is written, with the element it is for (Wave 6e).
+    if (!['safeAreaInset', 'background', 'overlay', 'annotation'].includes(member)) return []
     const content = call.trailingClosure ?? asClosure(call.args.find((arg) => arg.label === 'content')?.value)
     // `.overlay(Badge())`: a custom view given as the argument is a struct until it is
     // expanded, and nothing after this point can expand it.

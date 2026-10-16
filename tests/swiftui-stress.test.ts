@@ -38,7 +38,6 @@ const gaps: Record<string, string> = {
   'scroll-reader': 'ScrollViewReader', 'custom-environment': '@Environment(featureEnabled)',
   'dateformatter': 'DateFormatter', 'timeline-context': 'timeline runs only once',
   'async-phase': 'remote loading and image phases', 'map-placeholder': 'Map',
-  'chart-placeholder': 'Chart',
 }
 const rejected: Record<string, string> = {
   'negative-array': "Can't construct Array", 'negative-string': "Can't construct String",

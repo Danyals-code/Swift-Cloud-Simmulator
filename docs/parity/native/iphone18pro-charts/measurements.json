@@ -1,0 +1,752 @@
+{
+ "source": "Built from tests/fixtures/ios27-charts-6e.swift with swiftc -parse-as-library -warnings-as-errors for arm64-apple-ios27.0-simulator (Xcode 27.0, 27A266a, SDK 27.0) and run on a scratch iPhone 18 Pro simulator named 6e capture (iOS 27.0, 24A434), Large text, status bar overridden to 9:41; one launch per screen with -screen <name>, on 2026-10-17, light, and dark for the files ending -dark. Frames are printed by the fixture (MEASURE lines, onGeometryChange in the global space, points; '<name>-plot' is ChartProxy.plotFrame, '<name>-y v pos' and '<name>-x v pos' are ChartProxy.position(forY:) and position(forX:) in window points) and read with simctl launch --console-pty. Widths, radii, dashes, ink and colours were read from the 3x screenshots. 1206x2622 pixels / 402x874 points at 3x. The screens added for the review (hourly-line, monthly-bars, daily-bars, sector-top, rule-annotation, xscale-category, xscale-date, stack-order, gradient and empty) were captured on a second scratch device, 6e capture, on the same day; their stdout didn't reach the host, so they have no frames, and every value for them in 'edges' is read from the screenshot.",
+ "fixtureSha256": "d7ed3071f957a00839c097285afe093ee45111db34cf999488614505e20e0ebd",
+ "captures": [
+  {
+   "file": "annotation.png",
+   "sha256": "73d4adb8e807f19733c76031504b0892523e03489b40a81966c81c70b54ff3e2",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "area.png",
+   "sha256": "fce014faed3c452f4175136a23efff2147f9a62e3b512928baaf86446918c3ea",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "bar-dark.png",
+   "sha256": "ce823511caa83cfcbf2e94315bb18d2648d47208d24cd12eab7346c04229668c",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "bar-dates.png",
+   "sha256": "66fa605b422cb14d3935715f5a54b2964a9634e937f3e744955b98670f8aee3c",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "bar-grouped.png",
+   "sha256": "f2d4a3927949ba7e2534aa31324bc09352a3b737b3dd06bfd62036d29060960a",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "bar-horizontal.png",
+   "sha256": "bc6751c612e4b6a4d9089a6ba8536056fc14abd2be32f711e172d43ad638adc4",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "bar-small.png",
+   "sha256": "09ac734f0c36868f65891ee99e2acc202647a5a1a3b510cf03d8ef385004d768",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "bar-stacked-dark.png",
+   "sha256": "13732ff0577aaf16ce5d5c7d3ac6d34e5107d63b629267baabd71ce96272adad",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "bar-stacked.png",
+   "sha256": "dfff740f29bee42e35a0e997b6965607d345b85e00d8a6ec11656365a86c8c26",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "bar.png",
+   "sha256": "ecb0f5edf1ad4196cc8557cd91b44a826aca41690b6839e5fa90c37d27d0f908",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "daily-bars.png",
+   "sha256": "e2ef95a6b4c877c07e3ea9758312b2d2fb122073d7964bc38271b2ce82c7c334",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "dates-14.png",
+   "sha256": "7f6ce914bb93766e6ad3483514016c3df20fabfef7d41799d4e3edbba10d7e5d",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "dates-3.png",
+   "sha256": "59d2d258811953c39b81b38498f4faed366c6ecbcc89404a1907815e163ed124",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "dates-30.png",
+   "sha256": "43a4f4dfcf6bf512d50434cacd795686a616e53f12385de5d0e1e3cc537284a8",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "domain.png",
+   "sha256": "3d7e1ca0e231aa7bae082db6911965627bc424a9e6a114fad289935023203700",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "donut-dark.png",
+   "sha256": "636174e2167f881d8c510a95f90e476c3994b081719802b13ff604a05cd84d1d",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "donut.png",
+   "sha256": "e0ee06d455e7487fcdd02720c0e80708af0e8594189bbfaf34987d7dd0317408",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "empty.png",
+   "sha256": "569df6bbd109bcb7373b72a1663f8229dd359112fcf12b9dea231fb447e6c6ca",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "fonts.png",
+   "sha256": "58634782443827e0d25a794677e4dc58112be91f1538c85bc139916c75a72826",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "gradient.png",
+   "sha256": "5962e8d59bb82015c728aca806ccba9f12878edbc6e5a75370d3578b7806015b",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "hidden.png",
+   "sha256": "58bc2b76c3054735b1fba8709288a5b837c9bbf06fdc235204748b28c7811863",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "hourly-line.png",
+   "sha256": "5dc64fbfe5c6ae205ab2cb17cf5bf8d0d61fc0b3a0c9b34eecc5ef154b70e041",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "legend-hidden.png",
+   "sha256": "412f9a8f155fe11080d722ec989d9ca1c0d254836552caeed75a2bf68e0ab820",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "line-dark.png",
+   "sha256": "f50c97ac0e17c49495079e6d52e21e9e2f180bdfe143d318fcc93798502ea20f",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "line-numeric.png",
+   "sha256": "66918167cdd207e2e1b36cadf22d4e0e1ee0d126c25f1bc545c1aa9444b112f1",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "line-series.png",
+   "sha256": "7e0eb0aa8c6922a91f6e192eefc0bc84878f050a3d9b73e6b4d3c49c44595dcd",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "line.png",
+   "sha256": "6d314b248787e8656d2b8e76dd3043d5496e10d8ca5b73c805a649ec4fe2a956",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "monthly-bars.png",
+   "sha256": "dff91d06bec2d7eecce32f998aad0308fae5277b04f85dae1e7260089a824c38",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "palette-dark.png",
+   "sha256": "003bc6c70bc0308629b4d0fe067965927cf6e7c5303a0ef4293a7aba5d79435b",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "palette.png",
+   "sha256": "7440958e9165dcbe23faf5ff4a32ba8a7d0f819a0e389c7bcfba17cc47186770",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "plain.png",
+   "sha256": "08e52cd1e6cd9dd70b2d705e34ecbec3b413daba047340d603522302387ad4d6",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "rule-annotation.png",
+   "sha256": "8889b978607cae8c97fe53bf83a243c27913d824f01e7e5c8a2f679c1c7b87d7",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "rule.png",
+   "sha256": "483804952874714646e6a3daa664f8904679e4c05d5942b34d2f697b1f108052",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "scroll.png",
+   "sha256": "58c758e577e7d70f347659c1f02a8cefdc1a9f62ff03a156d998b261bd4a7359",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "sector-top.png",
+   "sha256": "f9a21c4ab066979dacc175a888b6ee5d3c53b19f00ca6c59c8f81bd88e2c4ec2",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "sector.png",
+   "sha256": "985fba3e5f94fae4bcd1419053011eb90a20db1c02cfa0c5efae111a02176e89",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "stack-order.png",
+   "sha256": "1a577f339f68c5eaa6382fb212fafd76ec5384fb350d3120c12baf69c4cb5a0d",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "ticks-more.png",
+   "sha256": "deebd73c74b1f9d4a8f48acd272441eb6471dde519b143377175d3b4128c1488",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "ticks.png",
+   "sha256": "9a07f752a2b86591cd242e7c59faaf8ca417f8f28935423e425832dc6a11fe33",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "xscale-category.png",
+   "sha256": "d2ea4a3e3db5d27e3670373acc4afe18329a58420a82acf914d57e7e0a4d2cd8",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "xscale-date.png",
+   "sha256": "de15a8d0d22953be3b697bda69274104dda893e7ca8c8c9cf70894f87ca000c1",
+   "size": [
+    1206,
+    2622
+   ]
+  }
+ ],
+ "frames": {
+  "annotation": [
+   "annotation-plot 16.0 110.33333333333333 330.0 222.0",
+   "annotation-x Fri 313.0 0 0",
+   "annotation-x Mon 49.0 0 0",
+   "annotation-y 0.0 332.3333333333333 0 0",
+   "annotation-y 10000.0 110.33333333333333 0 0",
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "title 16.0 78.0 87.66666666666666 20.33333333333333",
+   "top-Fri 0.0 0.0 31.666666666666664 14.333333333333332",
+   "top-Mon 0.0 0.0 33.0 14.333333333333332",
+   "top-Thu 0.0 0.0 33.0 14.333333333333332",
+   "top-Tue 0.0 0.0 31.333333333333332 14.333333333333332",
+   "top-Wed 0.0 0.0 33.33333333333333 14.333333333333332"
+  ],
+  "area": [
+   "area-plot 16.0 110.33333333333333 330.0 222.0",
+   "area-x Fri 313.0 0 0",
+   "area-x Mon 49.0 0 0",
+   "area-y 0.0 332.3333333333333 0 0",
+   "area-y 10000.0 110.33333333333333 0 0",
+   "area-y 2000.0 287.93333333333334 0 0",
+   "area-y 4000.0 243.5333333333333 0 0",
+   "area-y 6000.0 199.13333333333333 0 0",
+   "area-y 8000.0 154.7333333333333 0 0",
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "title 16.0 78.0 37.33333333333333 20.33333333333333"
+  ],
+  "bar-dates": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "dates-plot 16.0 110.33333333333333 358.0 222.0",
+   "dates-y 0.0 332.3333333333333 0 0",
+   "dates-y 2.0 276.8333333333333 0 0",
+   "dates-y 4.0 221.33333333333331 0 0",
+   "dates-y 6.0 165.83333333333331 0 0",
+   "dates-y 8.0 110.33333333333333 0 0",
+   "title 16.0 78.0 53.66666666666666 20.33333333333333"
+  ],
+  "bar-grouped": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "grouped-plot 16.0 110.33333333333333 351.0 204.66666666666669",
+   "grouped-x Jan 74.5 0 0",
+   "grouped-x Mar 308.5 0 0",
+   "grouped-y 0.0 315.01334635416663 0 0",
+   "grouped-y 10.0 263.8433430989583 0 0",
+   "grouped-y 20.0 212.67333984375 0 0",
+   "grouped-y 30.0 161.50333658854163 0 0",
+   "grouped-y 40.0 110.33333333333333 0 0",
+   "title 16.0 78.0 69.33333333333333 20.33333333333333"
+  ],
+  "bar-horizontal": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "horizontal-plot 16.0 110.33333333333333 370.0 222.0",
+   "horizontal-x 0.0 16.0 0 0",
+   "horizontal-x 10000.0 386.0 0 0",
+   "horizontal-x 2000.0 90.0 0 0",
+   "horizontal-x 4000.0 164.0 0 0",
+   "horizontal-x 6000.0 238.0 0 0",
+   "horizontal-x 8000.0 312.0 0 0",
+   "horizontal-y Fri 310.1333333333333 0 0",
+   "horizontal-y Mon 132.53333333333333 0 0",
+   "title 16.0 78.0 82.33333333333333 20.33333333333333"
+  ],
+  "bar-small": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "small-plot 16.0 110.33333333333333 358.0 222.0",
+   "small-x A 75.66666666666666 0 0",
+   "small-x C 314.3333333333333 0 0",
+   "small-y 0.0 332.3333333333333 0 0",
+   "small-y 1.0 295.3333333333333 0 0",
+   "small-y 2.0 258.3333333333333 0 0",
+   "small-y 3.0 221.33333333333331 0 0",
+   "small-y 4.0 184.33333333333331 0 0",
+   "small-y 5.0 147.33333333333337 0 0",
+   "small-y 6.0 110.33333333333333 0 0",
+   "title 16.0 78.0 44.0 20.33333333333333"
+  ],
+  "bar-stacked": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "stacked-plot 16.0 110.33333333333333 351.0 204.66666666666669",
+   "stacked-x Jan 74.5 0 0",
+   "stacked-x Mar 308.5 0 0",
+   "stacked-y 0.0 315.01334635416663 0 0",
+   "stacked-y 20.0 263.8433430989583 0 0",
+   "stacked-y 40.0 212.67333984375 0 0",
+   "stacked-y 60.0 161.50333658854163 0 0",
+   "stacked-y 80.0 110.33333333333333 0 0",
+   "title 16.0 78.0 65.0 20.33333333333333"
+  ],
+  "bar": [
+   "bar-plot 16.0 110.33333333333333 330.0 222.0",
+   "bar-x Fri 313.0 0 0",
+   "bar-x Mon 49.0 0 0",
+   "bar-y 0.0 332.3333333333333 0 0",
+   "bar-y 10000.0 110.33333333333333 0 0",
+   "bar-y 2000.0 287.93333333333334 0 0",
+   "bar-y 4000.0 243.5333333333333 0 0",
+   "bar-y 6000.0 199.13333333333333 0 0",
+   "bar-y 8000.0 154.7333333333333 0 0",
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "title 16.0 78.0 46.0 20.33333333333333"
+  ],
+  "dates-14": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "days-plot 16.0 110.33333333333333 358.0 222.0",
+   "title 16.0 78.0 60.66666666666666 20.33333333333333"
+  ],
+  "dates-3": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "days-plot 16.0 110.33333333333333 358.0 222.0",
+   "title 16.0 78.0 52.33333333333333 20.33333333333333"
+  ],
+  "dates-30": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "days-plot 16.0 110.33333333333333 358.0 222.0",
+   "title 16.0 78.0 63.33333333333333 20.33333333333333"
+  ],
+  "domain": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "domain-plot 16.0 110.33333333333333 328.0 222.0",
+   "domain-x Fri 311.2 0 0",
+   "domain-x Mon 48.8 0 0",
+   "domain-y 0.0 332.3333333333333 0 0",
+   "domain-y 10000.0 221.33333333333331 0 0",
+   "domain-y 15000.0 165.83333333333331 0 0",
+   "domain-y 20000.0 110.33333333333333 0 0",
+   "domain-y 5000.0 276.8333333333333 0 0",
+   "title 16.0 78.0 60.66666666666666 20.33333333333333"
+  ],
+  "donut": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "donut-plot 16.0 110.33333333333333 370.0 222.66666666666669",
+   "label-Food 0.0 0.0 14.666666666666666 14.333333333333332",
+   "label-Other 0.0 0.0 13.0 14.333333333333332",
+   "label-Rent 0.0 0.0 15.333333333333332 14.333333333333332",
+   "label-Travel 0.0 0.0 13.0 14.333333333333332",
+   "title 16.0 78.0 48.33333333333333 20.33333333333333"
+  ],
+  "fonts": [
+   "caption 10,000 176.33333333333334 335.50000000000006 38.66666666666666 14.333333333333314",
+   "caption 20,000 178.0 357.16666666666674 40.333333333333314 14.333333333333314",
+   "caption 30 154.66666666666669 422.1666666666668 15.333333333333343 14.333333333333314",
+   "caption 40 155.0 443.8333333333335 15.333333333333343 14.333333333333314",
+   "caption 6 148.0 487.16666666666686 7.666666666666657 14.333333333333314",
+   "caption 7,500 169.66666666666669 378.8333333333334 31.333333333333343 14.333333333333314",
+   "caption 8 148.0 465.50000000000017 7.666666666666657 14.333333333333314",
+   "caption 80 155.0 400.5000000000001 15.333333333333343 14.333333333333314",
+   "caption Coffee 176.0 552.1666666666667 38.0 14.333333333333371",
+   "caption Jun 15 175.0 530.5000000000001 37.0 14.333333333333371",
+   "caption Mon 163.66666666666669 508.83333333333354 24.666666666666657 14.333333333333314",
+   "caption2 10,000 120.66666666666667 336.00000000000006 35.66666666666667 13.333333333333314",
+   "caption2 20,000 120.66666666666667 357.66666666666674 37.33333333333333 13.333333333333314",
+   "caption2 30 120.66666666666667 422.6666666666668 14.000000000000014 13.333333333333314",
+   "caption2 40 120.66666666666667 444.3333333333335 14.333333333333329 13.333333333333314",
+   "caption2 6 120.66666666666667 487.66666666666686 7.333333333333329 13.333333333333314",
+   "caption2 7,500 120.66666666666667 379.3333333333334 29.000000000000014 13.333333333333314",
+   "caption2 8 120.66666666666667 466.00000000000017 7.333333333333329 13.333333333333314",
+   "caption2 80 120.66666666666667 401.0000000000001 14.333333333333329 13.333333333333314",
+   "caption2 Coffee 120.66666666666667 552.6666666666667 35.33333333333333 13.333333333333371",
+   "caption2 Jun 15 120.66666666666667 531.0000000000001 34.33333333333333 13.333333333333371",
+   "caption2 Mon 120.66666666666667 509.33333333333354 23.000000000000014 13.333333333333314",
+   "footnote 10,000 235.0 334.83333333333337 41.333333333333314 15.666666666666686",
+   "footnote 20,000 238.33333333333331 356.50000000000006 43.0 15.666666666666686",
+   "footnote 30 190.00000000000003 421.5000000000001 16.333333333333343 15.666666666666686",
+   "footnote 40 190.33333333333334 443.1666666666668 16.666666666666657 15.666666666666686",
+   "footnote 6 175.66666666666666 486.50000000000017 8.333333333333343 15.666666666666686",
+   "footnote 7,500 221.00000000000003 378.16666666666674 33.66666666666666 15.666666666666686",
+   "footnote 8 175.66666666666666 464.8333333333335 8.333333333333343 15.666666666666686",
+   "footnote 80 190.33333333333334 399.8333333333334 16.666666666666657 15.666666666666686",
+   "footnote Coffee 234.0 551.5000000000001 40.666666666666686 15.666666666666629",
+   "footnote Jun 15 232.0 529.8333333333335 39.666666666666686 15.666666666666629",
+   "footnote Mon 208.33333333333334 508.16666666666686 26.666666666666657 15.666666666666629"
+  ],
+  "hidden": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "hidden-plot 16.0 110.33333333333333 370.0 240.0",
+   "hidden-x Fri 349.0 0 0",
+   "hidden-x Mon 53.0 0 0",
+   "hidden-y 0.0 350.3333333333333 0 0",
+   "hidden-y 8800.0 110.33333333333333 0 0",
+   "title 16.0 78.0 57.33333333333333 20.33333333333333"
+  ],
+  "legend-hidden": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "stacked-plot 16.0 110.33333333333333 351.0 222.0",
+   "stacked-x Jan 74.5 0 0",
+   "stacked-x Mar 308.5 0 0",
+   "stacked-y 0.0 332.3333333333333 0 0",
+   "stacked-y 20.0 276.8333333333333 0 0",
+   "stacked-y 40.0 221.33333333333331 0 0",
+   "stacked-y 60.0 165.83333333333331 0 0",
+   "stacked-y 80.0 110.33333333333333 0 0",
+   "title 16.0 78.0 65.0 20.33333333333333"
+  ],
+  "line-numeric": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "numeric-plot 16.0 110.33333333333333 352.0 222.0",
+   "numeric-x 0.0 16.0 0 0",
+   "numeric-x 10.0 133.33333333333331 0 0",
+   "numeric-x 15.0 192.0 0 0",
+   "numeric-x 20.0 250.66666666666666 0 0",
+   "numeric-x 21.0 262.4 0 0",
+   "numeric-x 5.0 74.66666666666666 0 0",
+   "numeric-y 0.0 332.3333333333333 0 0",
+   "numeric-y 10.0 258.3333333333333 0 0",
+   "numeric-y 15.0 221.33333333333331 0 0",
+   "numeric-y 20.0 184.33333333333331 0 0",
+   "numeric-y 25.0 147.33333333333331 0 0",
+   "numeric-y 5.0 295.3333333333333 0 0",
+   "title 16.0 78.0 67.33333333333333 20.33333333333333"
+  ],
+  "line-series": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "series-plot 16.0 110.33333333333333 351.0 204.66666666666669",
+   "series-x Jan 74.5 0 0",
+   "series-x Mar 308.5 0 0",
+   "series-y 0.0 315.01334635416663 0 0",
+   "series-y 10.0 263.8433430989583 0 0",
+   "series-y 20.0 212.67333984375 0 0",
+   "series-y 30.0 161.50333658854163 0 0",
+   "series-y 40.0 110.33333333333333 0 0",
+   "title 16.0 78.0 50.0 20.33333333333333"
+  ],
+  "line": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "line-plot 16.0 110.33333333333333 330.0 222.0",
+   "line-x Fri 313.0 0 0",
+   "line-x Mon 49.0 0 0",
+   "line-x Wed 181.0 0 0",
+   "line-y 0.0 332.3333333333333 0 0",
+   "line-y 10000.0 110.33333333333333 0 0",
+   "line-y 2000.0 287.93333333333334 0 0",
+   "line-y 4000.0 243.5333333333333 0 0",
+   "line-y 6000.0 199.13333333333333 0 0",
+   "line-y 8000.0 154.7333333333333 0 0",
+   "title 16.0 78.0 33.33333333333333 20.33333333333333"
+  ],
+  "palette": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "palette-plot 16.0 110.33333333333333 358.0 204.66666666666669",
+   "palette-x A 33.9 0 0",
+   "palette-x J 356.1 0 0",
+   "palette-y 0.0 315.01334635416663 0 0",
+   "palette-y 5.0 144.44666883680554 0 0",
+   "title 16.0 78.0 56.0 20.33333333333333"
+  ],
+  "plain": [
+   "chart 16.0 78.0 370.0 746.0",
+   "plain-plot 16.0 78.0 330.0 728.0",
+   "plain-x Fri 313.0 0 0",
+   "plain-x Mon 49.0 0 0",
+   "plain-y 0.0 806.0 0 0",
+   "plain-y 10000.0 78.0 0 0"
+  ],
+  "rule": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "rule-plot 16.0 110.33333333333333 330.0 222.0",
+   "rule-x Fri 313.0 0 0",
+   "rule-x Mon 49.0 0 0",
+   "rule-y 0.0 332.3333333333333 0 0",
+   "rule-y 10000.0 110.33333333333333 0 0",
+   "rule-y 6000.0 199.13333333333333 0 0",
+   "title 16.0 78.0 35.0 20.33333333333333"
+  ],
+  "scroll": [
+   "chart 16.0 78.0 370.0 100.0"
+  ],
+  "sector": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "label-Food 0.0 0.0 14.666666666666666 14.333333333333332",
+   "label-Other 0.0 0.0 13.0 14.333333333333332",
+   "label-Rent 0.0 0.0 15.333333333333332 14.333333333333332",
+   "label-Travel 0.0 0.0 13.0 14.333333333333332",
+   "sector-plot 16.0 110.33333333333333 370.0 222.66666666666669",
+   "title 16.0 78.0 52.66666666666666 20.33333333333333"
+  ],
+  "ticks-more": [],
+  "ticks": [],
+  "bar-stacked-dark": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "stacked-plot 16.0 110.33333333333333 351.0 204.66666666666669",
+   "stacked-x Jan 74.5 0 0",
+   "stacked-x Mar 308.5 0 0",
+   "stacked-y 0.0 315.01334635416663 0 0",
+   "stacked-y 20.0 263.8433430989583 0 0",
+   "stacked-y 40.0 212.67333984375 0 0",
+   "stacked-y 60.0 161.50333658854163 0 0",
+   "stacked-y 80.0 110.33333333333333 0 0",
+   "title 16.0 78.0 65.0 20.33333333333333"
+  ],
+  "bar-dark": [
+   "bar-plot 16.0 110.33333333333333 330.0 222.0",
+   "bar-x Fri 313.0 0 0",
+   "bar-x Mon 49.0 0 0",
+   "bar-y 0.0 332.3333333333333 0 0",
+   "bar-y 10000.0 110.33333333333333 0 0",
+   "bar-y 2000.0 287.93333333333334 0 0",
+   "bar-y 4000.0 243.5333333333333 0 0",
+   "bar-y 6000.0 199.13333333333333 0 0",
+   "bar-y 8000.0 154.7333333333333 0 0",
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "title 16.0 78.0 46.0 20.33333333333333"
+  ],
+  "donut-dark": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "donut-plot 16.0 110.33333333333333 370.0 222.66666666666669",
+   "label-Food 0.0 0.0 14.666666666666666 14.333333333333332",
+   "label-Other 0.0 0.0 13.0 14.333333333333332",
+   "label-Rent 0.0 0.0 15.333333333333332 14.333333333333332",
+   "label-Travel 0.0 0.0 13.0 14.333333333333332",
+   "title 16.0 78.0 48.33333333333333 20.33333333333333"
+  ],
+  "line-dark": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "line-plot 16.0 110.33333333333333 330.0 222.0",
+   "line-x Fri 313.0 0 0",
+   "line-x Mon 49.0 0 0",
+   "line-x Wed 181.0 0 0",
+   "line-y 0.0 332.3333333333333 0 0",
+   "line-y 10000.0 110.33333333333333 0 0",
+   "line-y 2000.0 287.93333333333334 0 0",
+   "line-y 4000.0 243.5333333333333 0 0",
+   "line-y 6000.0 199.13333333333333 0 0",
+   "line-y 8000.0 154.7333333333333 0 0",
+   "title 16.0 78.0 33.33333333333333 20.33333333333333"
+  ],
+  "palette-dark": [
+   "chart 16.0 110.33333333333333 370.0 240.0",
+   "palette-plot 16.0 110.33333333333333 358.0 204.66666666666669",
+   "palette-x A 33.9 0 0",
+   "palette-x J 356.1 0 0",
+   "palette-y 0.0 315.01334635416663 0 0",
+   "palette-y 5.0 144.44666883680554 0 0",
+   "title 16.0 78.0 56.0 20.33333333333333"
+  ]
+ },
+ "measured": {
+  "chart": {
+   "ideal": "Greedy in both axes. With no height proposed (in a ScrollView) a Chart is 100 tall; with no frame in a padded VStack it takes all the height (746).",
+   "plotFrame": "Chart frame less the trailing y axis column and the bottom x axis row, and less the legend row when there is one. Hidden axes give the whole frame to the plot.",
+   "yAxisColumn": "ceil(widest label width) + 4: '10,000' (35.67 wide) gives 40, '20,000' (37.33) 42, '80' and '40' (14.33) 19, '30' (14.0) 18, '8' and '6' (7.33) 12. Labels are leading aligned 4 after the plot's trailing edge, each centred vertically on its tick (the top one reaches 6.67 above the chart's frame).",
+   "xAxisRow": "18 = ceil(4 + 13.33): label boxes 4 below the plot. Categorical labels are centred in their band; numeric and date labels start 4 after their grid line, and the label at the domain's upper end is left out ('30' at 0...30, '10,000' on the horizontal chart).",
+   "labelFont": ".caption2 (11 pt, line 13.33), secondaryLabel: rgb(138,138,142) on white, rgb(141,141,147) on black.",
+   "gridLines": "0.5 pt in tertiaryLabel (60,60,67 at 0.3; core pixel 197,197,199 on white, about 61 on black). Lines across (horizontal) are solid, from the plot's leading to trailing edge; lines down (vertical) are dashed 2 on 2 starting at the plot top, and run on through the x axis row. Vertical bars: horizontal lines at each y tick, dashed lines at every band edge including both ends. Horizontal bars: solid lines at band edges, dashed at x ticks. Numeric x: dashed at each tick. Dates: dashed at the plot's edges and each labelled day.",
+   "ticks": "Steps from 1, 2, 5 x 10^k, plus 2.5 x 10^k for k >= 1, the smallest giving at most 4 intervals from floor(min/step) to ceil(max/step), the domain always holding 0 and widened to those multiples. Tops seen: 0.3->0.3 (0.1), 0.8->0.8 (0.2), 1->1 (0.5), 3->3 (1), 4.5->6 (2), 5->6 (2), 8->8 (2), 9->10 (5), 12->15 (5), 17->20 (5), 21->30 (10), 23->30 (10), 33->40 (10), 40->40 (10), 47->60 (20), 80->80 (20), 95->100 (25), 130->150 (50), 250->300 (100), 1800->2000 (500), 8800->10000 (2500); -3..7 -> -5..10 (5), -40..15 -> -40..20 (20). The number of ticks doesn't change with the plot's height (222 or 728). chartYScale(domain: 0...20000) keeps that domain and ticks it by 5000.",
+   "tickLabels": "Grouped thousands: 10,000, 7,500, 2,500; fractions as written: 0.5, 0.2.",
+   "dates": "unit: .day: a band per day from the first to the last, labels 'MMM d' starting 4 after the band's leading edge: every day for 3 days, every second day from the first for 7, and on Sundays (the week's first day in en_US) for 14 and 30. With no unit: dates are plotted on a continuous time axis, not in bands: hourly points from 9:00 to 14:00 run edge to edge of the plot with ticks each hour labelled '9 AM'; bars over seven days at noon are narrow (about 8 pt) and centred on the instant, with ticks at every second midnight ('Jun 17'); bars on the first of six months are as narrow, with ticks every second month ('Jan', 'Mar', 'May'). The first and last bars reach past the plot's edges.",
+   "palette": "foregroundStyle(by:) series in first-seen order take blue, green, orange, purple, red, teal, yellow, then repeat. Light: (0,136,255) (52,199,89) (255,141,40) (203,48,224) (255,56,60) (0,195,208) (255,204,0). Dark: (0,145,255) (48,209,88) (255,146,48) (219,52,242) (255,66,69) (0,210,224) (255,214,0). An unstyled mark is the accent, the palette's first.",
+   "legend": "Below the chart, leading: 4 below the x axis row, a row 13.33 tall. Each entry an 8 pt circle, the series name 5 after it in .caption2 secondaryLabel, entries 8 apart, in first-seen order. The legend takes 17.33 from the plot. chartLegend(.hidden) gives it back.",
+   "bars": "0.7 of the band, centred. Rounded 2 pt at the end away from zero only (a stack's outer end; a negative bar's bottom). Stacks from zero in the order the data gives at each x, not by series: with Feb written Juice, Tea, Coffee, Juice is at the bottom and Coffee on top (stack-order). position(by:) splits the 0.7 band into one sub-band per series and draws each bar 0.7 of its sub-band, centred. Horizontal bars (numeric x, categorical y): the band's label sits inside the plot, 4 from the leading edge and 4 below the band's top, and the bar takes 0.7 of the band below it (band less 17.33), centred there; no y axis column.",
+   "line": "LineMark 2 pt, round joins, accent; PointMark an 8 pt disc; both at the band's centre for categorical x.",
+   "area": "AreaMark filled solid in the accent from zero to the values, band centre to band centre.",
+   "rule": "RuleMark(y:) or (x:) a 2 pt line in the accent across the whole plot.",
+   "sector": "SectorMark: a pie centred in the plot, radius half the plot's shorter side (111.33 in a 370 x 222.67 plot), starting at 12 o'clock and going clockwise in data order. innerRadius .ratio(0.6) leaves a hole of 0.6 of the radius. angularInset 1.5 leaves a gap 3 pt wide with parallel sides between sectors. Charts with only sectors have no axes or grid. Overlay annotations sit at the sector's middle angle, 0.618 of the way from the inner to the outer radius.",
+   "annotation": "position .top: the content's bottom 4 above the bar's top, centred on the band; .overlay: centred on the mark. Content is drawn as written (black .caption here). A RuleMark's .top annotation: for RuleMark(y:) the content's bottom 4 above the line, centred on the plot; for RuleMark(x:) 4 above the plot's top, centred on the rule (rule-annotation). A SectorMark's .top annotation draws nothing (sector-top).",
+   "hidden": "chartXAxis(.hidden) and chartYAxis(.hidden) remove the labels, ticks and grid lines; the plot takes the frame.",
+   "domain": "chartXScale(domain:) with an array of categories on a category x axis gives one band per category in the domain's order, the ones with no data left empty (Mon to Sun over Mon to Fri data: 7 bands of 47.14). With a closed range of dates on a day axis, the bands run over the domain's days, labelled every second day from its first (xscale-date: Jun 13 to Jun 23, 11 days).",
+   "gradient": "A gradient foregroundStyle on a LineMark runs across the line itself, its first stop at the first point and its last at the last (gradient: (255,57,62), the red itself, at Mon's point, not a blend); on a RuleMark across the rule, which is the whole plot.",
+   "empty": "A Chart over empty data draws nothing at all: no axes, grid or frame, only the space it takes (empty)."
+  }
+ },
+ "edges": {
+  "source": "Points, read from the 3x screenshots: an edge pixel's coverage places the edge inside it.",
+  "bar Mon": {
+   "left": 25.7,
+   "right": 71.97
+  },
+  "bar-grouped Jan": {
+   "width": 19.05,
+   "centres": [
+    47.19,
+    74.5,
+    101.81
+   ]
+  },
+  "donut at y 221.67": {
+   "outer": 111.32,
+   "hole": 66.76,
+   "centre": 201.17
+  },
+  "rule-annotation": {
+   "rule y 6000": 199.13,
+   "Goal ink": [
+    168.33,
+    183.67,
+    192.33,
+    192.67
+   ],
+   "Mid ink": [
+    171.33,
+    94.33,
+    190.0,
+    103.33
+   ]
+  },
+  "xscale-category": {
+   "bands": 7,
+   "band": 47.14,
+   "Mon bar": [
+    23.0,
+    56.0
+   ]
+  },
+  "stack-order Feb": {
+   "Juice": [
+    315.0,
+    251.06
+   ],
+   "Tea": [
+    251.06,
+    212.67
+   ],
+   "Coffee": [
+    212.67,
+    110.33
+   ]
+  }
+ }
+}

@@ -1,4 +1,5 @@
 import { stackGaps } from './spacing'
+import { fitFill, plotLinePath, plotPlace, wedgePath } from './plot'
 import { stopsOf, symbolMetrics, textLineHeight } from '@studio/shared'
 import type {
   PlaceholderPayload,
@@ -36,6 +37,8 @@ import {
   type LayoutEnvironment,
   type LayoutModifier,
   type ModifiedElement,
+  type PathElement,
+  type PlotElement,
   type SafeAreaEdges,
   type ScrollElement,
   type StackElement,
@@ -224,6 +227,8 @@ export interface PlacedNode {
  * downstream. Large-but-finite keeps the arithmetic total.
  */
 const UNBOUNDED = 100_000
+/** Nothing proposed on either axis: a view's own size. */
+const UNPROPOSED: ProposedSize = { width: null, height: null }
 
 /**
  * What a `GeometryReader`'s `safeAreaInsets` reports, measured in the iOS 27 simulator:
@@ -291,6 +296,8 @@ export class LayoutEngine {
    * measurements places every text it did not change at the width it had last time.
    */
   private texts = new Map<TextElement, Map<string, TextMeasurement>>()
+  /** The sizes of plots' `at` items, cleared with the sizes above (Wave 6e). */
+  private plotSizes = new Map<LayoutElement, Size>()
   /** Where the views of the view-aligned scroll view being placed start, along its axis (Wave 6d). */
   private snaps: number[] | null = null
 
@@ -314,6 +321,7 @@ export class LayoutEngine {
     if (!options.reuseMeasurements) {
       this.cache = new Map()
       this.texts = new Map()
+      this.plotSizes = new Map()
     }
     this.observer = options.observer
 
@@ -336,6 +344,7 @@ export class LayoutEngine {
   measureElement(element: LayoutElement, proposal: ProposedSize, env: LayoutEnvironment): Size {
     this.cache = new Map()
     this.texts = new Map()
+    this.plotSizes = new Map()
     return this.measure(element, proposal, { ...env, containerSize: env.containerSize ?? finiteContainer(proposal) })
   }
 
@@ -453,6 +462,15 @@ export class LayoutEngine {
       case 'placeholder':
         return { width: resolve(proposal.width, 200, UNBOUNDED), height: 64 }
 
+      case 'plot': {
+        const height = resolve(proposal.height, element.ideal, UNBOUNDED)
+        if (element.hugsWidth === undefined) return { width: resolve(proposal.width, element.ideal, UNBOUNDED), height }
+        // A y axis is as wide as its widest label and the gap before it, in whole points.
+        let widest = 0
+        for (const item of element.items) if (item.kind === 'at') widest = Math.max(widest, this.plotItemSize(item.element, env).width)
+        return { width: Math.ceil(widest + element.hugsWidth - 1e-6), height }
+      }
+
       case 'stack':
         return this.measureStack(element, proposal, env)
 
@@ -470,6 +488,51 @@ export class LayoutEngine {
       case 'modified':
         return this.measureModified(element, proposal, env)
     }
+  }
+
+  /**
+   * A plot's `at` item at its own size. Nothing is proposed, so the size doesn't depend on
+   * where the plot is; it is kept for the layout, as a y axis asks for it to find its width
+   * before the axis places the same labels.
+   */
+  private plotItemSize(element: LayoutElement, env: LayoutEnvironment): Size {
+    let size = this.plotSizes.get(element)
+    if (!size) {
+      size = this.measure(element, UNPROPOSED, env)
+      this.plotSizes.set(element, size)
+    }
+    return size
+  }
+
+  /**
+   * A plot's items, each where its fractions of the plot and its points put it (Wave 6e). Lines
+   * and wedges are paths over the whole plot, so their outlines are in its own coordinates.
+   */
+  private placePlot(element: PlotElement, bounds: Rect, env: LayoutEnvironment, out: PlacedNode[], z: number, parent: string | null): number {
+    let next = z
+    for (const item of element.items) {
+      if (item.kind === 'box') {
+        const a = plotPlace(item.from, bounds), b = plotPlace(item.to, bounds)
+        const rect = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y) }
+        next = this.place(item.element, rect, env, out, next, parent)
+      } else if (item.kind === 'at') {
+        const size = this.plotItemSize(item.element, env)
+        const at = plotPlace(item.at, bounds, item.square)
+        next = this.place(item.element, { x: at.x - item.anchor.x * size.width, y: at.y - item.anchor.y * size.height, width: size.width, height: size.height }, env, out, next, parent)
+      } else {
+        let path: PathElement
+        if (item.kind === 'line') {
+          const points = item.points.map(point => plotPlace(point, bounds))
+          const stroke = item.stroke?.fill ? { ...item.stroke, fill: fitFill(item.stroke.fill, points, bounds) } : item.stroke ?? null
+          path = { kind: 'path', id: item.id, d: plotLinePath(points, bounds, !!item.fill), fill: item.fill ? fitFill(item.fill, points, bounds) : null, stroke, fillRule: 'nonzero' }
+        } else {
+          path = { kind: 'path', id: item.id, d: wedgePath(bounds, item.start, item.end, item.inner, item.inset), fill: item.fill, stroke: null, fillRule: 'nonzero' }
+        }
+        if (!path.d) continue
+        next = this.place(path, bounds, env, out, next, parent)
+      }
+    }
+    return next
   }
 
   /**
@@ -1004,6 +1067,9 @@ export class LayoutEngine {
 
       case 'stack':
         return this.placeStack(element, bounds, env, out, z, parent)
+
+      case 'plot':
+        return this.placePlot(element, bounds, env, out, z, parent)
 
       case 'zstack': {
         let next = z

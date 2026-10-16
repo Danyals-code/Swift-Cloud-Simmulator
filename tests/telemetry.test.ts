@@ -121,9 +121,9 @@ describe('coverage telemetry', () => {
     // The ranking's job is to surface what people reached for. A name already in the
     // coverage tables is a gap someone chose not to build; a name that is not in them
     // at all is the discovery, and the two must not read the same.
-    recordCoverage(result([{ name: 'Chart', kind: 'view' }]))
+    recordCoverage(result([{ name: 'Map', kind: 'view' }]))
     expect(coverageRanking()[0]!.recognised).toBe(true)
-    expect(isRecognised('Chart', 'view')).toBe(true)
+    expect(isRecognised('Map', 'view')).toBe(true)
     expect(isRecognised('SomeoneElsesView', 'view')).toBe(false)
   })
 

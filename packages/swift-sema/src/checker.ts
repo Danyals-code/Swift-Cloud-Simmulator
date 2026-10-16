@@ -41,6 +41,8 @@ import {
   STYLE_TOKENS,
   UNIMPLEMENTED_MODIFIERS,
   CHART_MARKS,
+  DRAWN_CHART_MARKS,
+  DRAWN_VIEW_NAMES,
   CHART_MARK_MODIFIERS,
   APPLE_VIEW_MODIFIERS,
   UNIMPLEMENTED_VIEWS,
@@ -48,6 +50,7 @@ import {
 import { Scope, type PropertyInfo, type SemanticModel, type TypeInfo } from './model'
 import { literalText, memberChain } from './design-controls'
 import { isMesh, meshWarnings, modifierPaintWarning } from './paint-scroll-checks'
+import { chartPartWarning, drawnOnChart, drawnOnMark, markWarnings } from './chart-checks'
 
 /**
  * Semantic analysis for the supported subset.
@@ -845,11 +848,12 @@ export class Checker {
         if (expr.callee.kind === 'memberAccess') {
           // Called on a view's type itself, it is a static member making that view,
           // `ContentUnavailableView.search(text:)`, not a modifier (Wave 4b).
-          const onAView = expr.callee.base?.kind !== 'identifier' && rootsInAView(expr.callee.base)
-          this.checkModifierCoverage(expr.callee.member, expr.callee.memberSpan, onAView, expr.callee.base)
+          // The view the chain starts at, found in one walk, which a chart's own modifiers are judged by too (Wave 6e).
+          const root = expr.callee.base?.kind !== 'identifier' ? viewRoot(expr.callee.base) : undefined, onAView = root !== undefined
+          this.checkModifierCoverage(expr.callee.member, expr.callee.memberSpan, root, expr)
           if (onAView) {
             // A mark's own `.position(by:)` is not a view's `.position(x:y:)` (Wave 6a).
-            if (!onAMark(expr.callee.base)) this.checkArgumentLabels(expr.callee.member, expr.args)
+            if (!CHART_MARKS.has(root)) this.checkArgumentLabels(expr.callee.member, expr.args)
             this.checkBlendMode(expr.callee.member, expr.args)
             this.checkCompactAdaptation(expr.callee.member, expr)
             this.checkStyleToken(expr.callee.member, expr.args)
@@ -866,6 +870,8 @@ export class Checker {
           // A colour is a view too, `Color.blue.mask(Circle())`, though its chain starts at no view's name.
           if (expr.callee.member === 'mask' && expr.callee.base) this.checkMask(expr.callee.base, expr.args, expr.trailingClosure)
         }
+        // A drawn chart mark's forms the preview leaves out (Wave 6e).
+        if (expr.callee.kind === 'identifier' && DRAWN_CHART_MARKS.has(expr.callee.name) && !scope.has(expr.callee.name) && !this.types.has(expr.callee.name)) for (const warning of markWarnings(expr)) this.report(warning.span, 'warning', 'unsupported_swiftui_view', warning.message, warning.feature)
         // A mesh's forms the preview draws nothing for, or leaves part of out (Wave 6d).
         if (isMesh(expr) && !scope.has('MeshGradient') && !this.types.has('MeshGradient')) for (const warning of meshWarnings(expr)) this.report(warning.span, 'warning', 'unsupported_swiftui_view', warning.message, warning.feature)
         // `Color(.systemGray6)` and `Color(uiColor: .systemGray6)`, UIKit's colour by name.
@@ -1079,7 +1085,8 @@ export class Checker {
           callee.span,
           'warning',
           'unsupported_swiftui_view',
-          `'${callee.name}' isn't drawn in the preview yet, so it shows as a labelled box. Xcode draws it as written.`,
+          // A chart's part is no box: the chart leaves it out, or keeps its default axis (Wave 6e).
+          chartPartWarning(callee.name) ?? `'${callee.name}' isn't drawn in the preview yet, so it shows as a labelled box. Xcode draws it as written.`,
           callee.name,
         )
         return
@@ -1166,12 +1173,12 @@ export class Checker {
 
   /** The nearest name that is actually in scope, or null. */
   private nearestInScope(name: string, scope: Scope): string | null {
-    return nearestName(name, [...scope.allNames(), ...this.types.keys(), ...this.enums.keys(), ...SUPPORTED_VIEWS])
+    return nearestName(name, [...scope.allNames(), ...this.types.keys(), ...this.enums.keys(), ...DRAWN_VIEW_NAMES])
   }
 
   /** The nearest type or view name, or null. Not a variable's: `Timer` is no typo of a `timer`. */
   private nearestTypeName(name: string): string | null {
-    return nearestName(name, [...this.types.keys(), ...this.enums.keys(), ...this.typeAliases, ...SUPPORTED_VIEWS, ...UNIMPLEMENTED_VIEWS, ...KNOWN_TYPES])
+    return nearestName(name, [...this.types.keys(), ...this.enums.keys(), ...this.typeAliases, ...DRAWN_VIEW_NAMES, ...UNIMPLEMENTED_VIEWS, ...KNOWN_TYPES])
   }
 
   /**
@@ -1187,7 +1194,7 @@ export class Checker {
    * the code is fine and the preview quietly ignores it, which is exactly what the
    * coverage contract exists to prevent.
    */
-  private checkModifierCoverage(member: string, span: SourceSpan, onAView: boolean, base: Expr | null = null): void {
+  private checkModifierCoverage(member: string, span: SourceSpan, root: string | undefined, call: Extract<Expr, { kind: 'call' }>): void {
     if ((member === 'repeatForever' || member === 'repeatCount') && !this.declaredMethods.has(member)) {
       this.report(span, 'warning', 'unsupported_swiftui_modifier', `'.${member}' repeats the animation on iOS. The preview plays it once.`, `.${member}`)
       return
@@ -1197,7 +1204,15 @@ export class Checker {
       return
     }
 
-    if (!onAView) return
+    if (root === undefined) return
+    // A chart and its marks draw the forms Wave 6e draws; anything else on a mark, a view's
+    // modifier included, is the mark's and isn't drawn.
+    const mark = CHART_MARKS.has(root)
+    if (!this.types.has(root) && (mark ? DRAWN_CHART_MARKS.has(root) && drawnOnMark(member, call) : root === 'Chart' && drawnOnChart(member, call))) return
+    if (mark && (APPLE_VIEW_MODIFIERS.has(member) || CHART_MARK_MODIFIERS.has(member))) {
+      this.report(span, 'warning', 'unsupported_swiftui_modifier', notApplied(member), `.${member}`)
+      return
+    }
     if (SUPPORTED_MODIFIERS.has(member)) return
     if (this.declaredModifiers.has(member)) return
     if (member === 'placeholder') {
@@ -1209,8 +1224,8 @@ export class Checker {
     // on the chain, so they never reach here.
     if (NON_MODIFIER_MEMBERS.has(member)) return
     // A real SwiftUI modifier on a view, which the preview does not draw: one Xcode builds. A
-    // mark's own is real only on a mark (Wave 6a).
-    if (APPLE_VIEW_MODIFIERS.has(member) || CHART_MARK_MODIFIERS.has(member) && onAMark(base)) {
+    // mark's own is real only on a mark, which is said above (Wave 6a).
+    if (APPLE_VIEW_MODIFIERS.has(member)) {
       this.report(span, 'warning', 'unsupported_swiftui_modifier', notApplied(member), `.${member}`)
       return
     }
@@ -1633,12 +1648,6 @@ function rootCall(expr: Expr): Extract<Expr, { kind: 'call' }> | undefined {
   return current.kind === 'call' ? current : undefined
 }
 
-/** Whether a chain starts at a chart's mark, `BarMark(…)`, whose modifiers are the mark's own. */
-function onAMark(expr: Expr | null): boolean {
-  const callee = expr && rootCall(expr)?.callee
-  return callee?.kind === 'identifier' && CHART_MARKS.has(callee.name)
-}
-
 /**
  * The candidate nearest to a misspelt name, or null.
  *
@@ -1718,6 +1727,11 @@ function isFontExpression(expr: Expr | null): boolean {
  * method would be exactly the false positive this checker must not produce.
  */
 function rootsInAView(expr: Expr | null): boolean {
+  return viewRoot(expr) !== undefined
+}
+
+/** The name of the view a chain starts at, `Text` for `Text("a").bold()`, when it is one `rootsInAView` takes. */
+function viewRoot(expr: Expr | null): string | undefined {
   let current = expr
 
   while (current) {
@@ -1729,10 +1743,10 @@ function rootsInAView(expr: Expr | null): boolean {
       current = current.base
       continue
     }
-    return current.kind === 'identifier' && isViewRoot(current.name)
+    return current.kind === 'identifier' && isViewRoot(current.name) ? current.name : undefined
   }
 
-  return false
+  return undefined
 }
 
 function propertyWrapperOf(decl: VarDecl): string | null {

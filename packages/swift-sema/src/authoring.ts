@@ -386,11 +386,13 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }
-    if (!title) Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', { deploymentTarget: input.deploymentTarget, allowEdits: !!node.controls, row: isRow(node, layerOf), tab: isTab(node, layerOf, pages), presented: shownAs }))
+    const modelled = title ? undefined : modifierModel(node, expr, texts.get(node.source.file) ?? '', { deploymentTarget: input.deploymentTarget, allowEdits: !!node.controls, row: isRow(node, layerOf), tab: isTab(node, layerOf, pages), presented: shownAs })
+    if (modelled) Object.assign(node, { modifiers: modelled.modifiers, modifierCatalog: modelled.modifierCatalog })
     // The same chain read as a layer: one value per Figma property (Wave 2).
     if (node.controls && !title && !isNonView(node)) {
       const layer = readLayer(expr, layerContext(layers, node, parent, texts.get(node.source.file) ?? ''))
-      if (layer) Object.assign(node, { layer })
+      // A Chart below iOS 16 is read and not written (Wave 6e).
+      if (layer) Object.assign(node, { layer: modelled?.chartTooNew ? { ...layer, locked: modelled.chartTooNew } : layer })
     }
     const explicitLabel = builtin && ['NavigationLink', 'Button'].includes(name) ? chain.base.args.find(argument => argument.label === 'label' && argument.value.kind === 'closure')?.value : undefined
     const closure = explicitLabel?.kind === 'closure' ? explicitLabel : chain.base.trailingClosure

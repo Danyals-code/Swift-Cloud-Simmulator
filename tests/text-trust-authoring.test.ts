@@ -214,9 +214,10 @@ describe("Apple's own names", () => {
   it.each(APPLE_NAMES)('knows %s, and says whether the preview draws it', (name, body) => {
     const lines = said(body, ITEMS)
     expect(falseAlarms(lines)).toEqual([])
-    // Charts aren't drawn yet; the glass container and the toolbar's own items are since Wave 6c.
-    if (name.startsWith('the Charts')) expect(lines.join('\n')).toMatch(/isn't drawn in the preview yet/)
-    else expect(lines.join('\n')).not.toMatch(/isn't drawn in the preview yet/)
+    // A chart's plots, RectangleMark and axis marks aren't drawn: the chart leaves them out or keeps its
+    // default axis (Wave 6e). The glass container and the toolbar's own items are drawn since Wave 6c.
+    if (name.startsWith('the Charts')) expect(lines.join('\n')).toMatch(/: the preview leaves it out of the chart\.[^]*: the preview keeps the chart’s default axis\./)
+    else expect(lines.join('\n')).not.toMatch(/isn't drawn in the preview yet|: the preview (?:leaves|keeps)/)
   })
 })
 
@@ -227,18 +228,18 @@ describe('searchToolbarBehavior', () => {
 })
 
 describe("Charts' modifiers", () => {
-  it('names each as recognized but not applied, on the chart and on its marks', () => {
+  it('names each it does not draw as recognized but not applied, on the chart and on its marks', () => {
     const lines = said(CHART_MODIFIERS)
     expect(falseAlarms(lines)).toEqual([])
-    for (const name of ['annotation', 'interpolationMethod', 'symbol', 'symbolSize', 'lineStyle', 'alignsMarkStylesWithPlotArea', 'chartXAxis', 'chartYScale', 'chartLegend', 'chartForegroundStyleScale', 'chartPlotStyle', 'chartXSelection', 'chartAngleSelection']) {
+    for (const name of ['interpolationMethod', 'symbol', 'symbolSize', 'lineStyle', 'alignsMarkStylesWithPlotArea', 'chartLegend', 'chartForegroundStyleScale', 'chartPlotStyle', 'chartXSelection', 'chartAngleSelection']) {
       expect(lines.join('\n')).toContain(`'.${name}' is recognized but not applied by the preview`)
     }
+    // Drawn since Wave 6e: a top annotation, a hidden axis and a y domain.
+    for (const name of ['annotation', 'chartXAxis', 'chartYScale']) expect(lines.join('\n')).not.toContain(`'.${name}'`)
   })
 
   it.each([
-    ['.chartXAxis(.hidden)', 'appearance'],
-    ['.chartYScale(domain: 0...10)', 'appearance'],
-    ['.chartLegend(.hidden)', 'appearance'],
+    ['.chartLegend(position: .bottom)', 'appearance'],
     ['.chartXSelection(value: .constant(Optional<String>.none))', 'behavior'],
   ])('lists %s in Design as not drawn, in its own category', (modifier, category) => {
     const chart = viewWritten(screen(`        Chart {\n            BarMark(x: .value("Day", "Mon"), y: .value("Steps", 3))\n        }\n        ${modifier}`), `Chart {\n            BarMark(x: .value("Day", "Mon"), y: .value("Steps", 3))\n        }\n        ${modifier}`)

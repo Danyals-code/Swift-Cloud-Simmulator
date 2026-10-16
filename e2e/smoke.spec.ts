@@ -174,15 +174,15 @@ test('gate 2 - a real parse error reaches the editor and the problems panel', as
 })
 
 test('reports unimplemented SwiftUI by name rather than calling it unresolved', async ({ page }) => {
-  // `Chart` is perfectly valid Swift. Saying "cannot find in scope" would be both
+  // `EditButton` is perfectly valid Swift. Saying "cannot find in scope" would be both
   // wrong and unhelpful - it is this preview that cannot draw it, not Swift that
   // does not have it. The name checked here moves as coverage grows; what must not
   // change is that a real SwiftUI name is never reported as unresolved.
   await openStudio(page)
-  await typeAtTop(page, 'let placeholder = Chart { }\n')
+  await typeAtTop(page, 'let placeholder = EditButton()\n')
 
   const console_ = page.getByTestId('console')
-  await expect(console_).toContainText('Chart', { timeout: 5_000 })
+  await expect(console_).toContainText('EditButton', { timeout: 5_000 })
   await expect(console_).toContainText("isn't drawn in the preview yet")
 })
 
@@ -340,12 +340,13 @@ test('gate 3b - unimplemented views render a labelled placeholder (FR-4.11)', as
     page,
     'import SwiftUI; ' +
       '@main struct ChartApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
-      'struct Root: View { var body: some View { VStack { Chart { } } } }',
+      'struct Root: View { var body: some View { VStack { EditButton() } } }',
   )
 
   const placeholder = preview(page).locator('[data-kind="placeholder"]')
   await expect(placeholder).toBeVisible({ timeout: 5_000 })
-  await expect(placeholder).toContainText('Chart')
+  // The box names the view in words, as Layers does.
+  await expect(placeholder).toContainText('Edit button')
   await expect(placeholder).toContainText('Not drawn in the preview yet. Xcode draws it as written.')
 })
 
@@ -577,7 +578,7 @@ test('Phase 6 - the coverage panel ranks what the preview could not draw', async
     page,
     'import SwiftUI; ' +
       '@main struct GapApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
-      'struct Root: View { var body: some View { VStack { Chart { } } } }',
+      'struct Root: View { var body: some View { VStack { EditButton() } } }',
   )
 
   await expect(preview(page).locator('[data-kind="placeholder"]')).toBeVisible({ timeout: 5_000 })
@@ -585,7 +586,7 @@ test('Phase 6 - the coverage panel ranks what the preview could not draw', async
   await page.getByRole('button', { name: 'Coverage' }).click()
   const panel = page.getByTestId('coverage-panel')
   await expect(panel).toBeVisible()
-  await expect(panel).toContainText('Chart')
+  await expect(panel).toContainText('EditButton')
   await expect(panel).toContainText('never sent anywhere')
 })
 
