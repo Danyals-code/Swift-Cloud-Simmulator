@@ -1,4 +1,5 @@
 import type { SourceSpan } from './source'
+import { symbolMetrics } from './symbol-map'
 
 /**
  * The worker -> main-thread contract.
@@ -109,6 +110,18 @@ export interface TextRun {
    * painter asks for the same thing from the font.
    */
   readonly tabularNumbers?: boolean
+  /**
+   * An SF Symbol drawn in the text in place of `text`, `Text("\(Image(systemName: "star"))")`
+   * (Wave 6a): in the box `inlineSymbolBox` gives it at the run's font, in the run's colour.
+   */
+  readonly symbol?: string
+  /** A project image drawn in the text in place of `text` (Wave 6a): at its own size, its bottom on the baseline. */
+  readonly bitmap?: { readonly url: string; readonly name: string; readonly width: number; readonly height: number }
+  /**
+   * The box `foregroundFill` spans, relative to the text's frame, when it isn't the frame:
+   * a gradient masked by text is spread across the gradient's view (Wave 6a).
+   */
+  readonly fillFrame?: Rect
 }
 
 export interface TextPayload {
@@ -774,4 +787,17 @@ export function screenOrigin(node: RenderNode, byId: ReadonlyMap<string, RenderN
     parent = parent.parent ? byId.get(parent.parent) : undefined
   }
   return { x, y }
+}
+
+/** How far a symbol in text advances, in ems of its font, as iOS 27 draws it between two H's. */
+const INLINE_ADVANCE: Readonly<Record<string, number>> = { 'star.fill': 1.294, 'heart.fill': 1.22, person: 1.098 }
+
+/**
+ * Where a symbol in text is drawn (Wave 6a): how far it advances the line, and the box its
+ * ink fills, from `bottom` below the baseline up, as the iOS 27 simulator draws star.fill at
+ * body and at large title (docs/parity/native/iphone18pro-text, textImage). A symbol not
+ * measured there advances as star.fill does for its width.
+ */
+export function inlineSymbolBox(symbol: string, size: number): { readonly advance: number; readonly height: number; readonly bottom: number } {
+  return { advance: size * (INLINE_ADVANCE[symbol] ?? symbolMetrics(symbol).widthEm * 1.097), height: size * 1.025, bottom: size * 0.122 }
 }

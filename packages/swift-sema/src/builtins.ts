@@ -75,6 +75,8 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'scaleEffect', 'rotationEffect', 'rotation3DEffect', 'animation', 'transition',
   // numbers that roll and views that move between states (Wave 5a)
   'contentTransition', 'matchedGeometryEffect',
+  // a symbol's filled, enclosed or slashed variant, and the order siblings overlap in (Wave 6a)
+  'symbolVariant', 'zIndex',
   'blur', 'saturation', 'brightness', 'contrast', 'grayscale',
   'hueRotation', 'colorMultiply', 'blendMode', 'redacted', 'unredacted',
   // drawing styles
@@ -171,6 +173,20 @@ export function isViewRoot(name: string): boolean {
   return (SUPPORTED_VIEWS.has(name) || UNIMPLEMENTED_VIEWS.has(name)) && !GESTURE_TYPES.has(name)
 }
 
+/** What a `Chart` is drawn with: its marks, and the plots of a whole collection (iOS 18). */
+export const CHART_MARKS: ReadonlySet<string> = new Set([
+  'BarMark', 'LineMark', 'PointMark', 'AreaMark', 'RuleMark', 'RectangleMark', 'SectorMark',
+  'Plot', 'BarPlot', 'LinePlot', 'PointPlot', 'AreaPlot', 'RulePlot', 'RectanglePlot', 'SectorPlot',
+])
+
+/**
+ * What only a chart's mark takes, each giving back the mark: real Swift Charts on a mark,
+ * and not a view modifier, so Xcode refuses one written on a view.
+ */
+export const CHART_MARK_MODIFIERS: ReadonlySet<string> = new Set([
+  'annotation', 'interpolationMethod', 'symbol', 'symbolSize', 'lineStyle', 'alignsMarkStylesWithPlotArea',
+])
+
 /**
  * Real SwiftUI views the preview does not draw.
  *
@@ -188,8 +204,10 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   'EquatableView',
   // data-driven
   'Table', 'TableColumn', 'OutlineGroup', 'MultiDatePicker',
-  // charts
-  'Chart', 'BarMark', 'LineMark', 'PointMark', 'AreaMark', 'RuleMark',
+  // charts, and what an axis is drawn with
+  'Chart', ...CHART_MARKS, 'AxisMarks', 'AxisGridLine', 'AxisTick', 'AxisValueLabel',
+  // Liquid Glass and the iOS 26 toolbar
+  'GlassEffectContainer', 'ToolbarSpacer', 'DefaultToolbarItem',
   // platform surfaces a browser has no analogue for
   'Map', 'Marker', 'Annotation', 'VideoPlayer', 'SceneView', 'PhotosPicker',
   // scenes other than the one WindowGroup the preview shows
@@ -218,15 +236,15 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
  * preview does apply warned on every compile. Anything added here must not be there.
  */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
-  // layout, and the order views overlap in
-  'safeAreaPadding', 'gridCellColumns', 'coordinateSpace', 'zIndex',
+  // layout
+  'safeAreaPadding', 'gridCellColumns', 'coordinateSpace',
   // painting and effects
   'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect',
   // a width of the system font, which the preview's text measurement cannot stretch
   'fontWidth',
 
   // symbols and images
-  'symbolRenderingMode', 'symbolVariant', 'symbolEffect', 'interpolation',
+  'symbolRenderingMode', 'symbolEffect', 'interpolation',
   // motion
   'phaseAnimator', 'keyframeAnimator',
   // scrolling and lists
@@ -280,6 +298,9 @@ export const MODIFIER_CATEGORIES: Readonly<Record<'behavior' | 'layout' | 'text'
     'accessibilityFocused', 'accessibilityHeading', 'accessibilityAdjustableAction', 'accessibilityScrollAction',
     'accessibilityIgnoresInvertColors', 'accessibilityTextContentType', 'accessibilityLinkedGroup', 'accessibilityCustomContent',
     'accessibilityZoomAction', 'speechAlwaysIncludesPunctuation', 'speechSpellsOutCharacters', 'speechAdjustedPitch', 'speechAnnouncementsQueued',
+    // what a chart does when it is scrolled, dragged or tapped
+    'chartXSelection', 'chartYSelection', 'chartAngleSelection', 'chartScrollableAxes', 'chartScrollPosition', 'chartScrollTargetBehavior',
+    'chartXVisibleDomain', 'chartYVisibleDomain', 'chartGesture',
   ]),
   layout: new Set([
     'offset', 'position', 'fixedSize', 'alignmentGuide', 'safeAreaInset', 'containerRelativeFrame', 'layoutPriority', 'aspectRatio',
@@ -311,10 +332,13 @@ export const OTHER_APPLE_MODIFIERS: ReadonlySet<string> = new Set([
   'glassEffectUnion', 'glassEffectTransition', 'buttonSizing', 'labelsHidden', 'scrollIndicatorsFlash', 'scrollEdgeEffectStyle',
   'scrollEdgeEffectHidden', 'navigationViewStyle', 'navigationSubtitle', 'toolbarColorScheme', 'toolbarBackgroundVisibility',
   'toolbarVisibility', 'toolbarTitleDisplayMode', 'toolbarRole', 'persistentSystemOverlays', 'statusBar', 'tabViewBottomAccessory',
-  'tabBarMinimizeBehavior', 'presentationCompactAdaptation', 'presentationContentInteraction', 'presentationSizing', 'tableStyle',
+  'tabBarMinimizeBehavior', 'searchToolbarBehavior', 'presentationCompactAdaptation', 'presentationContentInteraction', 'presentationSizing', 'tableStyle',
   'formStyle', 'groupBoxStyle', 'disclosureGroupStyle', 'controlGroupStyle', 'navigationSplitViewStyle',
   'labeledContentStyle', 'textEditorStyle', 'menuIndicator', 'menuOrder', 'tipBackground', 'tipViewStyle', 'widgetAccentable',
   'backgroundPreferenceValue', 'overlayPreferenceValue',
+  // how a chart draws its axes, scales, legend and plot area
+  'chartXAxis', 'chartYAxis', 'chartXAxisLabel', 'chartYAxisLabel', 'chartXScale', 'chartYScale', 'chartLegend',
+  'chartForegroundStyleScale', 'chartSymbolScale', 'chartLineStyleScale', 'chartPlotStyle', 'chartBackground', 'chartOverlay',
 ])
 
 /**
@@ -504,6 +528,8 @@ export const UIKIT_COLOR_NAMES: ReadonlySet<string> = new Set([
 /** Types nameable in the preview - as a value (`Color.red`) or an annotation (`: Int`). */
 export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Int', 'Double', 'Float', 'String', 'Bool', 'Character',
+  // Words with their own fonts and colours, which `Text` draws, and a symbol's variants (Wave 6a).
+  'AttributedString', 'AttributeContainer', 'SymbolVariants',
   'Int8', 'Int16', 'Int32', 'Int64', 'UInt', 'UInt8', 'UInt16', 'UInt32', 'UInt64',
   'Array', 'Dictionary', 'Set', 'Optional', 'Range', 'ClosedRange',
   'Color', 'UIColor', 'Font', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment',

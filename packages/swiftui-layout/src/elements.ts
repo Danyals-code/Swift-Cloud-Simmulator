@@ -117,6 +117,10 @@ export interface TextRunSpec {
   readonly strikethroughColor?: RGBA | null
   readonly tracking?: number
   readonly baselineOffset?: number
+  /** An SF Symbol drawn in place of `text`, at the run's font (Wave 6a). */
+  readonly symbol?: string
+  /** A project image drawn in place of `text`, at its own size (Wave 6a). */
+  readonly bitmap?: { readonly url: string; readonly name: string; readonly width: number; readonly height: number }
 }
 
 export interface TextElement extends ElementBase {
@@ -395,6 +399,11 @@ export type LayoutModifier =
        * the row's text.
        */
       readonly underFirstText?: { readonly otherwise: number }
+      /**
+       * A mask of text or a symbol over a colour or gradient (Wave 6a): the content is drawn
+       * in this fill, which spans the view it is over, and the view itself isn't drawn.
+       */
+      readonly paints?: Fill
     }
   | {
       readonly kind: 'border'
@@ -444,7 +453,11 @@ export type LayoutModifier =
   | { readonly kind: 'geometry'; readonly key: string }
   /** `.fixedSize()` - take the ideal size and ignore the proposal on that axis. */
   | { readonly kind: 'fixedSize'; readonly horizontal: boolean; readonly vertical: boolean }
-  | ({ readonly kind: 'clip'; readonly shape: ShapeKind } & Omit<ShapeOutline, 'kind'>)
+  /**
+   * `.clipShape`, and `.mask` with a shape (Wave 6a), which may be framed smaller than the
+   * view and placed in it by `alignment`, `.mask(alignment: .topLeading) { Circle().frame(width: 50, height: 50) }`.
+   */
+  | ({ readonly kind: 'clip'; readonly shape: ShapeKind; readonly size?: { readonly width?: number; readonly height?: number }; readonly alignment?: Alignment } & Omit<ShapeOutline, 'kind'>)
   | { readonly kind: 'scale'; readonly x: number; readonly y: number; readonly anchor?: Point }
   | { readonly kind: 'rotate'; readonly degrees: number; readonly anchor?: Point }
   /** `.rotation3DEffect(_:axis:)` - the same paint-time transform, about an axis. */
@@ -639,6 +652,8 @@ export interface LayoutEnvironment {
   readonly displayScale?: number
   readonly font: ResolvedFont
   readonly foregroundFill?: Fill
+  /** The box `foregroundFill` spans when it isn't the text's own: a mask's view (Wave 6a). */
+  readonly fillBox?: Rect
   readonly foregroundColor: RGBA
   readonly opacity: number
   /**

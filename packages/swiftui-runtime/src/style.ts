@@ -1,4 +1,5 @@
-import { dynamicTypeForScale, textLineHeight, type DynamicTypeSize } from '@studio/shared'
+import { dynamicTypeForScale, type DynamicTypeSize } from '@studio/shared'
+import { glyphHeight } from '@studio/swiftui-layout'
 import { scaledSize, typographyAt } from './appearance/typography'
 import { parseFontToken, type FontSpec } from './font-token'
 import { IOS_27 } from './appearance/ios27'
@@ -455,7 +456,7 @@ export function resolveFontArg(value: SwiftValue | undefined, scale: number | Dy
   return {
     ...base,
     family: font.design === 'rounded' ? ROUNDED_FAMILY : font.design === 'monospaced' ? MONO_FAMILY : font.design === 'serif' ? SERIF_FAMILY : base.family,
-    weight: FONT_WEIGHTS[font.weight] ?? base.weight,
+    weight: FONT_WEIGHTS[font.weight] ?? font.faceWeight ?? base.weight,
     italic: font.italic,
     lineHeight: base.lineHeight + leadingChange(font),
     ...(font.smallCaps ? { smallCaps: true } : {}),
@@ -470,7 +471,19 @@ export function resolveFontArg(value: SwiftValue | undefined, scale: number | Dy
 function sizedFont(font: FontSpec, scale: number | DynamicTypeSize): ResolvedFont {
   const given = font.size ?? 17
   const size = font.relativeTo ? scaledSize(font.relativeTo, typeof scale === 'number' ? dynamicTypeForScale(scale) : scale, given) : given
-  return { family: UI_FONT_FAMILY, size, weight: 400, italic: false, lineHeight: textLineHeight(size) }
+  const family = font.family ? familyStack(font.family) : UI_FONT_FAMILY
+  return { family, size, weight: 400, italic: false, lineHeight: glyphHeight({ family, size }) }
+}
+
+const SERIF_FAMILIES = /Baskerville|Bodoni|Charter|Cochin|Didot|Georgia|Hoefler|Mincho|Palatino|STIX|Times|Rockwell|Academy|Copperplate|Papyrus|Serif/
+const SCRIPT_FAMILIES = /Snell|Zapfino|Savoye|Bradley|Noteworthy|Marker|Chalk|Party/
+
+/**
+ * The CSS stack for a family iOS ships (Wave 6a): the family itself, which a Mac has and
+ * draws as iOS does, then the nearest kind of face a browser has.
+ */
+function familyStack(family: string): string {
+  return `"${family}", ${/Menlo|Courier/.test(family) ? MONO_FAMILY : SERIF_FAMILIES.test(family) ? 'Georgia, "Times New Roman", serif' : SCRIPT_FAMILIES.test(family) ? 'cursive' : UI_FONT_FAMILY}`
 }
 
 /**

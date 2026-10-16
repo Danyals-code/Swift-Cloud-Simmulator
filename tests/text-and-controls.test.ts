@@ -127,10 +127,10 @@ describe('Font modifiers return a font rather than stopping the screen', () => {
 })
 
 describe('A custom font says it is drawn in the system face, and scales as iOS scales it', () => {
-  it('names the font it cannot draw', () => {
-    const r = run(app('Text("Hello").font(.custom("Georgia", size: 20))'))
+  it('names the font it cannot draw, one iOS does not ship (Wave 6a)', () => {
+    const r = run(app('Text("Hello").font(.custom("Lobster", size: 20))'))
     expect(errors(r)).toEqual([])
-    expect(warnings(r)).toContain("Custom font 'Georgia' is not in this project; the preview draws the system font at the same size.")
+    expect(warnings(r)).toContain("Custom font 'Lobster' is not in this project; the preview draws the system font at the same size.")
     expect(runs(r)[0]!.font).toMatchObject({ size: 20 })
   })
 

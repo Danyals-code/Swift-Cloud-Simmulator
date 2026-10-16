@@ -68,6 +68,10 @@ export interface PaintedRun {
   readonly tracking?: number
   readonly baselineOffset?: number
   readonly tabularNumbers?: boolean
+  readonly symbol?: string
+  readonly bitmap?: { readonly url: string; readonly name: string; readonly width: number; readonly height: number }
+  /** The box `foregroundFill` spans, relative to the text's frame, when not the frame itself. */
+  readonly fillFrame?: Rect
 }
 
 export type PaintSpec =
@@ -691,6 +695,7 @@ export class LayoutEngine {
       case 'blendMode':
       case 'redacted':
       case 'unredacted':
+      case 'zIndex':
       case 'ignoresSafeArea':
         // Paint-time: layout still reserves the untransformed size, which is why a
         // scaled view overlaps its neighbours and a redacted one keeps its shape.
@@ -826,6 +831,8 @@ export class LayoutEngine {
         let painted = measured.scale === 1 ? runs : runs.map((run) => scaleRun(run, measured.scale))
         if (measured.tightening) painted = painted.map((run) => ({ ...run, tracking: (run.tracking ?? 0) - measured.tightening! }))
         const lineFont = measured.scale === 1 ? env.font : scaleFont(env.font, measured.scale)
+        const box = env.fillBox
+        if (box) painted = painted.map((run) => run.foregroundFill ? { ...run, fillFrame: { x: box.x - bounds.x, y: box.y - bounds.y, width: box.width, height: box.height } } : run)
 
         out.push({
           id: element.id,
@@ -994,7 +1001,9 @@ export class LayoutEngine {
 
       case 'zstack': {
         let next = z
-        for (const child of element.children) {
+        const order = paintOrder(element.children)
+        for (let k = 0; k < element.children.length; k++) {
+          const child = element.children[order ? order[k]! : k]!
           const size = this.measure(child, { width: bounds.width, height: bounds.height }, env)
           next = this.place(child, alignedRect(bounds, size, element.alignment), env, out, next, parent)
         }
@@ -1289,9 +1298,11 @@ export class LayoutEngine {
 
     let offset = 0
     let next = z
+    // Raised children are placed once every frame is known, in the order they paint.
+    const order = paintOrder(element.children)
+    const placed: Rect[] | null = order && []
 
     for (let i = 0; i < element.children.length; i++) {
-      const child = element.children[i]!
       const size = sizes[i]!
 
       const crossAvailable = vertical ? bounds.width : bounds.height
@@ -1305,9 +1316,11 @@ export class LayoutEngine {
         ? { x: bounds.x + crossOffset, y: bounds.y + offset, width: size.width, height: size.height }
         : { x: bounds.x + offset, y: bounds.y + crossOffset, width: size.width, height: size.height }
 
-      next = this.place(child, childBounds, env, out, next, parent)
+      if (placed) placed.push(childBounds)
+      else next = this.place(element.children[i]!, childBounds, env, out, next, parent)
       offset += (vertical ? size.height : size.width) + (gaps[i] ?? 0)
     }
+    if (order) for (const i of order) next = this.place(element.children[i]!, placed![i]!, env, out, next, parent)
 
     return next
   }
@@ -1409,6 +1422,13 @@ export class LayoutEngine {
       case 'overlay': {
         // The mirror image of a background: the same frame, painted afterwards.
         const drawn = out.length
+        if (modifier.paints) {
+          // A mask's content in the view's fill, across the view, which isn't drawn itself.
+          const fill = modifier.paints
+          const painted = { ...inner, fillBox: bounds, ...fill.kind === 'solid' ? { foregroundColor: fill.color, foregroundFill: undefined } : { foregroundFill: fill } }
+          const size = this.measure(modifier.content, { width: bounds.width, height: bounds.height }, painted)
+          return this.place(modifier.content, alignedRect(bounds, size, modifier.alignment), painted, out, z, parent)
+        }
         const next = this.place(element.child, bounds, inner, out, z, parent)
         const area = modifier.underFirstText ? underFirstText(bounds, out.slice(drawn), parent, modifier.underFirstText.otherwise) : bounds
         const size = this.measure(
@@ -1531,21 +1551,23 @@ export class LayoutEngine {
 
       case 'cornerRadius':
       case 'clip': {
-        // Real clipping needs a container, for the same reason scrolling does.
+        // Real clipping needs a container, for the same reason scrolling does. A framed
+        // shape mask cuts a box of its own size, placed in the view by its alignment.
         const clipId = `${element.id}-clip`
+        const cut = modifier.kind === 'clip' && modifier.size ? alignedRect(bounds, { width: modifier.size.width ?? bounds.width, height: modifier.size.height ?? bounds.height }, modifier.alignment ?? CENTRE) : bounds
         out.push({
           id: clipId,
-          frame: bounds,
+          frame: cut,
           z,
           opacity: env.opacity,
-          ...cutTo(modifier.kind === 'cornerRadius' ? { kind: 'roundedRectangle', cornerRadius: modifier.radius, style: modifier.style } : { ...modifier, kind: modifier.shape }, bounds),
+          ...cutTo(modifier.kind === 'cornerRadius' ? { kind: 'roundedRectangle', cornerRadius: modifier.radius, style: modifier.style } : { ...modifier, kind: modifier.shape }, cut),
           clip: true,
           paint: { kind: 'hit' },
           ...(parent ? { parent } : {}),
         })
         return this.place(
           element.child,
-          { x: 0, y: 0, width: bounds.width, height: bounds.height },
+          { x: bounds.x - cut.x, y: bounds.y - cut.y, width: bounds.width, height: bounds.height },
           inner,
           out,
           z + 1,
@@ -1747,6 +1769,7 @@ export class LayoutEngine {
       case 'blendMode':
       case 'redacted':
       case 'unredacted':
+      case 'zIndex':
         // These are inherited paint facts rather than boxes of their own, so they
         // travel in the environment and every node below carries them out.
         return this.place(element.child, bounds, inner, out, z, parent)
@@ -2116,6 +2139,8 @@ function applyRunAttributes(base: PaintedRun, run: TextRunSpec): PaintedRun {
     ...(run.strikethrough !== undefined ? { strikethrough: run.strikethrough } : {}),
     ...(run.tracking !== undefined ? { tracking: run.tracking } : {}),
     ...(run.baselineOffset !== undefined ? { baselineOffset: run.baselineOffset } : {}),
+    ...(run.symbol ? { symbol: run.symbol } : {}),
+    ...(run.bitmap ? { bitmap: run.bitmap } : {}),
   }
 }
 
@@ -2149,7 +2174,23 @@ function measuredRuns(runs: readonly PaintedRun[]): readonly MeasuredRun[] {
     ...(run.tracking !== undefined ? { tracking: run.tracking } : {}),
     ...(run.tabularNumbers ? { tabularNumbers: true } : {}),
     ...(run.baselineOffset !== undefined ? { baselineOffset: run.baselineOffset } : {}),
+    ...(run.symbol ? { symbol: run.symbol } : {}),
+    ...(run.bitmap ? { bitmap: run.bitmap } : {}),
   }))
+}
+
+/**
+ * The order siblings paint in: as written, unless one has a `.zIndex`, when the lower
+ * values paint first and equal ones keep their order, as SwiftUI stacks them (Wave 6a).
+ */
+function paintOrder(children: readonly LayoutElement[]): readonly number[] | null {
+  let raised: number[] | null = null
+  for (let i = 0; i < children.length; i++) {
+    for (let child = children[i]; child?.kind === 'modified'; child = child.child) {
+      if (child.modifier.kind === 'zIndex') { (raised ??= new Array<number>(children.length).fill(0))[i] = child.modifier.value; break }
+    }
+  }
+  return raised && children.map((_, i) => i).sort((a, b) => raised[a]! - raised[b]! || a - b)
 }
 
 function displayText(text: string, env: LayoutEnvironment): string {

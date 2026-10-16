@@ -129,8 +129,13 @@ const KB = 1024
  *              text, matched geometry, and component props, variants, swap
  *              and detach, estimated at 15 to 24 KB over two PRs. Raised to
  *              900 KB by decision, for Wave 5.
+ *   Rendering fidelity - 892.4 KB actual after Wave 5. Wave 6 adds Markdown,
+ *              images in text, SF Symbols toward the most-used 600, iOS 27
+ *              chrome, date pickers, MeshGradient, basic Charts and custom
+ *              font files, estimated at 42 to 58 KB over six PRs. Raised to
+ *              950 KB by decision, for all of Wave 6.
  */
-const BUDGET_KB = 900
+const BUDGET_KB = 950
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.
@@ -145,8 +150,11 @@ const BUDGET_KB = 900
  * History:
  *   Phase 11 - 183 KB before, 162 KB after `@studio/project-model/templates` became a
  *              separate entry point imported only where a template is created.
+ *   Wave 6   - 166.8 KB after Wave 5: the chunk is swift-sema with the parser,
+ *              which the studio page and the worker both load. Wave 6 adds about
+ *              4 KB of sema. Raised to 176 KB by decision.
  */
-const LARGEST_CHUNK_KB = 172
+const LARGEST_CHUNK_KB = 176
 
 function walkJs(dir) {
   const out = []

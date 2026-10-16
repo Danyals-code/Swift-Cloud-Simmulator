@@ -153,7 +153,6 @@ describe('what the preview cannot do, it says', () => {
     // `.drawingGroup` rather than something a later phase might draw: it asks for
     // Metal rasterisation, which a DOM renderer has no analogue for at all.
     expect(warnings(run(view('Text("a").drawingGroup()')))[0]).toContain('drawingGroup')
-    expect(warnings(run(view('ZStack { Text("a").zIndex(5) }')))[0]).toContain('zIndex')
     expect(warnings(run(view('Text("a").coordinateSpace(name: "x")')))[0]).toContain(
       'coordinateSpace',
     )

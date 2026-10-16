@@ -232,6 +232,19 @@ const EXERCISES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     reduce: 'r.reduce(0, +)',
     forEach: 'r.forEach { _ = $0 }',
   },
+  AttributedString: {
+    characters: 'r.characters.count',
+    font: 'r.font',
+    foregroundColor: 'r.foregroundColor',
+    backgroundColor: 'r.backgroundColor',
+    underlineStyle: 'r.underlineStyle',
+    strikethroughStyle: 'r.strikethroughStyle',
+    kern: 'r.kern',
+    link: 'r.link',
+    inlinePresentationIntent: 'r.inlinePresentationIntent',
+    swiftUI: 'r.swiftUI.foregroundColor',
+    range: 'r.range(of: "b")',
+  },
 }
 
 /** A receiver of each type, as a `var` so the mutating members are legal. */
@@ -248,6 +261,7 @@ const RECEIVERS: Readonly<Record<string, string>> = {
   UUID: 'var r = UUID()',
   Range: 'var r = 0..<3',
   ClosedRange: 'var r = 0...3',
+  AttributedString: 'var r = AttributedString("abc")',
 }
 
 /** The types the editor describes but whose members are the same list as another's. */

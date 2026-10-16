@@ -231,6 +231,21 @@ const RANGE_MEMBERS: readonly StdlibMember[] = [
   method('forEach', '((Int) -> Void) -> Void', 'Runs a closure for each value.'),
 ]
 
+/** Words with their own attributes (Wave 6a): each set on the whole string, or on `words[range]`. */
+const ATTRIBUTED_MEMBERS: readonly StdlibMember[] = [
+  property('characters', 'AttributedString.CharacterView', 'The characters, as `characters.count` counts them.'),
+  property('font', 'Font?', 'The font of the words.'),
+  property('foregroundColor', 'Color?', 'The color of the words.'),
+  property('backgroundColor', 'Color?', 'The color behind the words.'),
+  property('underlineStyle', 'Text.LineStyle?', 'A line under the words, as `.single`.'),
+  property('strikethroughStyle', 'Text.LineStyle?', 'A line through the words, as `.single`.'),
+  property('kern', 'CGFloat?', 'Extra space between the letters, in points.'),
+  property('link', 'URL?', 'Where tapping the words goes, drawn in the accent color.'),
+  property('inlinePresentationIntent', 'InlinePresentationIntent?', 'Bold, italic, code or struck-through words: `.stronglyEmphasized`, as Markdown writes them.'),
+  property('swiftUI', 'AttributeScopes.SwiftUIAttributes', "SwiftUI's own attributes: `words.swiftUI.foregroundColor = .red`."),
+  method('range', '(of: String) -> Range?', 'Where some words are, or nil: `words[range].font = .headline`.'),
+]
+
 /**
  * Members by the type that has them, keyed by the name an annotation would use.
  *
@@ -253,6 +268,7 @@ export const STDLIB_MEMBERS: ReadonlyMap<string, readonly StdlibMember[]> = new 
   ['UUID', UUID_MEMBERS],
   ['Range', RANGE_MEMBERS],
   ['ClosedRange', RANGE_MEMBERS],
+  ['AttributedString', ATTRIBUTED_MEMBERS],
 ])
 
 /** Free functions, for hover. The names are `KNOWN_FUNCTIONS`, described. */

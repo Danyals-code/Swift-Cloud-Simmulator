@@ -38,6 +38,8 @@ export interface Symbol {
   readonly name: string
   readonly kind: 'local' | 'parameter' | 'property' | 'type' | 'function' | 'closureShorthand'
   readonly span: SourceSpan
+  /** Declared as an `AttributedString` or `AttributeContainer`, or made by one's initialiser (Wave 6a). */
+  readonly words?: boolean
 }
 
 /**

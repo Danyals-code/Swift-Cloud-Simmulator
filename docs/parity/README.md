@@ -84,6 +84,35 @@ and `.bouncy` bounce 0.15 and 0.3, and the ease curves take 0.35 s. A digit roll
 second, whatever the change's own timing. `tests/motion-runtime.test.ts` and the render-dom
 `motion` and `transition-presence` tests cite these.
 
+8 light images in [native/iphone18pro-text](native/iphone18pro-text/measurements.json),
+paired with `tests/fixtures/ios27-text-6a.swift`, measure what Wave 6a draws. Each screen
+prints the frames of what it measures, kept by launching through `simctl launch --console-pty`.
+They cover:
+- Markdown in literal Text, Button and Label titles: `**` is `.bold()`, `*` is `.italic()`,
+  `` ` `` is `.monospaced()`, and a link is drawn in the tint, rgb(0, 136, 255), even under a
+  `.foregroundStyle`; asterisks that don't flank a word stay;
+- a String put into a literal, which keeps its asterisks while the literal around it is read;
+- `AttributedString` joined, with its own fonts and colours, and from Markdown;
+- an image in text, which adds 22 pt to a body line and 44 to a large title one for a star,
+  its ink about centred on the capitals;
+- symbol variant chains, composed in SF Symbols' order, and the base where none exists;
+- built-in font families by family and PostScript name, and their line heights at 22 pt;
+- a gradient masked by text, spread across the gradient's frame, shape and symbol masks,
+  a mask placed by alignment, and `zIndex`.
+
+6 more, from the fixture's parser, attributed-more, titles-more and tab screens (built with an
+asset catalog holding a 40 x 30 pt "photo"), measure what the Wave 6a fixes draw:
+- Apple's parser in Text: bare URLs, emails, `www.` and `<url>` are links, a single `~` strikes,
+  entities are read, a link URL keeps balanced parentheses, and a value put into a literal counts
+  as punctuation, while Markdown still reads across a Text or an image put in;
+- an AttributedString put into a literal, the `.swiftUI` scope, `AttributedString(localized:)`,
+  `AttributeContainer` with `mergeAttributes` and `setAttributes`, and each inline presentation intent;
+- Markdown in Toggle, Link and NavigationLink titles, `\.symbolVariants` in the environment, a
+  gradient across a symbol in text, an asset image in text at its own size, and a mask painted at 30%;
+- a TabView's symbols, which stay filled under `.symbolVariant(.none)`.
+
+`tests/text-trust-runtime.test.ts` cites these.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh

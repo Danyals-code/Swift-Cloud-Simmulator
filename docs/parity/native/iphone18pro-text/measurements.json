@@ -1,0 +1,825 @@
+{
+  "source": "Built from tests/fixtures/ios27-text-6a.swift with swiftc -parse-as-library for arm64-apple-ios27.0-simulator (Xcode 27.0, 27A266a, SDK 27.0; the one Text + Text warns that + is deprecated since iOS 26, so this build is without warnings as errors) and run on a scratch iPhone 18 Pro simulator (iOS 27.0, 24A434), light appearance, Large text, status bar overridden to 9:41; one launch per screen with -screen <name>, on 2026-10-16. Frames are printed by the fixture (MEASURE lines, onGeometryChange in the global space, points) and read with simctl launch --console-pty. Ink and colours were read from the 3x screenshots. 1206x2622 pixels / 402x874 points at 3x. The parser, attributed-more, titles-more and three tab screens were added on the same day on a fresh scratch iPhone 18 Pro, the app built with an asset catalog holding \"photo\", a 40 x 30 pt green PNG (120 x 90 px at 3x), compiled with actool.",
+  "fixtureSha256": "cdd81bd5bb6f6e376c9f59598a7da69b1a97799bd0cef31d4a119054f0e1ab8b",
+  "captures": [
+    {
+      "file": "markdown.png",
+      "sha256": "79da56dd97af3187a97bc98437563d5f032efb5ae55fe747a66bf3a7e533b1d9",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "markdown-weights.png",
+      "sha256": "82c91e259c408f2c2d4d3e41b7ff426f53f808a9028419796671fb71306097b6",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "interpolated.png",
+      "sha256": "4737ad66e891aad29224d37d6e3302ad4a0641e6080b4d6488ee980a671d9c12",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "attributed.png",
+      "sha256": "48f9d5d6673febac99f6bf6566b842f7b77125755218a2e78b59b9a936f5f5e5",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "text-image.png",
+      "sha256": "31ca5df946ac038b6a66eb888a9dcde924ee0351353c0b18f08e2901456dbd23",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "symbol-variant.png",
+      "sha256": "6d6d1b0064233267238af383cc2d757a917b3256f8c6b1835d99db5d0a71dae8",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "fonts.png",
+      "sha256": "642339dde619c7101484d2b4fcfdb0cde8224da67742ece3af13306a56e2a41b",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "masks.png",
+      "sha256": "7fe25a18b0184b7eb143cb5da29662d65bf2687c2cec39ae7b196cf1ee854ea4",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "parser.png",
+      "sha256": "995430ee7bdbaf9fc590e84131acec95b4a0a24fca1181bdac4d16f0ae2fc8b6",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "attributed-more.png",
+      "sha256": "b42d7f7c6e9cd5ef98d7777c7904f751e6bd788160f8c051c62cdf0a9d9aac90",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "titles-more.png",
+      "sha256": "82deb4ae662418340cd433400fbfe65ce3d07af6fb08fe86f0d25c7bd1195909",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "tab-default.png",
+      "sha256": "faee66a66a15882dd0762331a00775731dd31cb206a36780d00d915ebfdc2a77",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "tab-none.png",
+      "sha256": "faee66a66a15882dd0762331a00775731dd31cb206a36780d00d915ebfdc2a77",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "tab-label-none.png",
+      "sha256": "faee66a66a15882dd0762331a00775731dd31cb206a36780d00d915ebfdc2a77",
+      "size": [
+        1206,
+        2622
+      ]
+    }
+  ],
+  "frames": {
+    "markdown": {
+      "md-link-tint": [
+        80.83,
+        595.66,
+        89.67,
+        20.33
+      ],
+      "md-link-foreground": [
+        80.83,
+        561.33,
+        88.67,
+        20.33
+      ],
+      "md-label": [
+        80.83,
+        526.34,
+        132.33,
+        20.99
+      ],
+      "md-button": [
+        80.83,
+        492.01,
+        74.33,
+        20.33
+      ],
+      "md-flanking": [
+        80.83,
+        457.67,
+        240.33,
+        20.33
+      ],
+      "md-underscore": [
+        80.83,
+        423.34,
+        95.67,
+        20.33
+      ],
+      "md-link": [
+        80.83,
+        389.01,
+        150,
+        20.33
+      ],
+      "md-strike": [
+        80.83,
+        354.67,
+        69.33,
+        20.33
+      ],
+      "md-code": [
+        80.83,
+        320.34,
+        185.67,
+        20.33
+      ],
+      "md-mixed": [
+        80.83,
+        286.01,
+        182.33,
+        20.33
+      ]
+    },
+    "markdown-weights": {
+      "w-bold-title": [
+        154.5,
+        646.83,
+        93,
+        33.67
+      ],
+      "w-md-bold-title": [
+        154.5,
+        599.17,
+        93,
+        33.67
+      ],
+      "w-body-monospaced": [
+        154.5,
+        564.83,
+        63.33,
+        20.33
+      ],
+      "w-monospaced": [
+        154.5,
+        530.5,
+        63.33,
+        20.33
+      ],
+      "w-md-code": [
+        154.5,
+        496.17,
+        63.33,
+        20.33
+      ],
+      "w-bold-italic": [
+        154.5,
+        461.83,
+        57,
+        20.33
+      ],
+      "w-md-both": [
+        154.5,
+        427.5,
+        57,
+        20.33
+      ],
+      "w-italic": [
+        154.5,
+        393.17,
+        54.33,
+        20.33
+      ],
+      "w-md-italic": [
+        154.5,
+        358.83,
+        54.33,
+        20.33
+      ],
+      "w-regular": [
+        154.5,
+        324.5,
+        53.67,
+        20.33
+      ],
+      "w-semibold": [
+        154.5,
+        290.17,
+        56,
+        20.33
+      ],
+      "w-bold": [
+        154.5,
+        255.83,
+        56,
+        20.33
+      ],
+      "w-md-bold": [
+        154.5,
+        221.5,
+        56,
+        20.33
+      ]
+    },
+    "interpolated": {
+      "interp-wrapped": [
+        122.5,
+        492.33,
+        102,
+        20.33
+      ],
+      "interp-verbatim": [
+        122.5,
+        458,
+        99,
+        20.33
+      ],
+      "interp-variable": [
+        122.5,
+        423.67,
+        59.33,
+        20.33
+      ],
+      "interp-mixed": [
+        122.5,
+        389.33,
+        157,
+        20.33
+      ]
+    },
+    "attributed": {
+      "attr-count": [
+        144,
+        499,
+        100.67,
+        20.33
+      ],
+      "attr-markdown": [
+        144,
+        464.67,
+        99,
+        20.33
+      ],
+      "attr-plain": [
+        144,
+        430.33,
+        84.33,
+        20.33
+      ],
+      "attr-joined": [
+        144,
+        382.67,
+        114,
+        33.67
+      ]
+    },
+    "text-image": {
+      "img-tinted": [
+        104.33,
+        675.83,
+        39,
+        20.33
+      ],
+      "img-rated-large": [
+        104.33,
+        615.5,
+        193.33,
+        42.33
+      ],
+      "img-heart-large": [
+        104.33,
+        556.83,
+        90,
+        40.67
+      ],
+      "img-star-large": [
+        104.33,
+        496.5,
+        92.33,
+        42.33
+      ],
+      "img-ref-large": [
+        104.33,
+        437.83,
+        48.33,
+        40.67
+      ],
+      "img-plus-body": [
+        104.33,
+        399.5,
+        103.33,
+        20.33
+      ],
+      "img-rated-body": [
+        104.33,
+        360.17,
+        99.67,
+        21.33
+      ],
+      "img-person-body": [
+        104.33,
+        321.83,
+        43.33,
+        20.33
+      ],
+      "img-heart-body": [
+        104.33,
+        283.5,
+        45.33,
+        20.33
+      ],
+      "img-star-body": [
+        104.33,
+        244.17,
+        46.67,
+        21.33
+      ],
+      "img-ref-body": [
+        104.33,
+        205.83,
+        24.67,
+        20.33
+      ]
+    },
+    "symbol-variant": {
+      "sym-label-fill": [
+        89.5,
+        693.83,
+        73,
+        20.33
+      ],
+      "sym-slash-missing": [
+        89.5,
+        647.83,
+        44,
+        36
+      ],
+      "sym-square-missing": [
+        89.5,
+        601.83,
+        44,
+        36
+      ],
+      "sym-fill.square": [
+        89.5,
+        555.83,
+        44,
+        36
+      ],
+      "sym-rectangle": [
+        89.5,
+        509.83,
+        44,
+        36
+      ],
+      "sym-slash": [
+        89.5,
+        463.83,
+        44,
+        36
+      ],
+      "sym-square": [
+        89.5,
+        417.83,
+        44,
+        36
+      ],
+      "sym-circle.fill": [
+        89.5,
+        371.83,
+        44,
+        36
+      ],
+      "sym-fill.circle": [
+        89.5,
+        325.83,
+        44,
+        36
+      ],
+      "sym-circle": [
+        89.5,
+        279.83,
+        44,
+        36
+      ],
+      "sym-fill": [
+        89.5,
+        233.83,
+        44,
+        36
+      ],
+      "sym-none": [
+        89.5,
+        187.83,
+        44,
+        36
+      ]
+    },
+    "fonts": {
+      "font-Brand Sans": [
+        6.5,
+        628.83,
+        271.67,
+        25.33
+      ],
+      "font-Snell Roundhand": [
+        6.5,
+        592.83,
+        272.67,
+        28
+      ],
+      "font-Times New Roman": [
+        6.5,
+        560.17,
+        312,
+        24.67
+      ],
+      "font-Courier New": [
+        6.5,
+        527.17,
+        330.33,
+        25
+      ],
+      "font-Palatino": [
+        6.5,
+        494.83,
+        239.67,
+        24.33
+      ],
+      "font-Gill Sans": [
+        6.5,
+        461.5,
+        219.33,
+        25.33
+      ],
+      "font-Futura": [
+        6.5,
+        424.83,
+        221.67,
+        28.67
+      ],
+      "font-Helvetica Neue": [
+        6.5,
+        391.17,
+        307.33,
+        25.67
+      ],
+      "font-Menlo": [
+        6.5,
+        357.5,
+        251.67,
+        25.67
+      ],
+      "font-Georgia": [
+        6.5,
+        324.5,
+        235,
+        25
+      ],
+      "font-AvenirNext-DemiBold": [
+        6.5,
+        286.17,
+        389,
+        30.33
+      ],
+      "font-Avenir Next": [
+        6.5,
+        247.83,
+        279.67,
+        30.33
+      ]
+    },
+    "masks": {
+      "mask-text": [
+        81,
+        199,
+        240,
+        60
+      ],
+      "mask-circle": [
+        151,
+        275,
+        100,
+        100
+      ],
+      "mask-symbol": [
+        151,
+        391,
+        100,
+        100
+      ],
+      "mask-aligned": [
+        151,
+        507,
+        100,
+        100
+      ],
+      "zindex": [
+        161,
+        623,
+        80,
+        80
+      ]
+    },
+    "parser": {
+      "p-text-inside": [
+        88.33,
+        613.0,
+        63.0,
+        20.33
+      ],
+      "p-text": [
+        88.33,
+        578.67,
+        61.33,
+        20.33
+      ],
+      "p-image": [
+        88.33,
+        543.33,
+        76.33,
+        21.33
+      ],
+      "p-atom": [
+        88.33,
+        509.0,
+        76.33,
+        20.33
+      ],
+      "p-parens": [
+        88.33,
+        474.67,
+        81.33,
+        20.33
+      ],
+      "p-entity": [
+        88.33,
+        440.33,
+        117.33,
+        20.33
+      ],
+      "p-tilde": [
+        88.33,
+        406.0,
+        107.0,
+        20.33
+      ],
+      "p-angle": [
+        88.33,
+        371.67,
+        214.67,
+        20.33
+      ],
+      "p-www": [
+        88.33,
+        337.33,
+        202.67,
+        20.33
+      ],
+      "p-email": [
+        88.33,
+        303.0,
+        225.33,
+        20.33
+      ],
+      "p-url": [
+        88.33,
+        268.67,
+        206.0,
+        20.33
+      ]
+    },
+    "attributedMore": {
+      "am-strike": [
+        161.83,
+        595.33,
+        53.67,
+        20.33
+      ],
+      "am-code": [
+        161.83,
+        561.0,
+        63.33,
+        20.33
+      ],
+      "am-emphasized": [
+        161.83,
+        526.67,
+        54.33,
+        20.33
+      ],
+      "am-strong": [
+        161.83,
+        492.33,
+        56.0,
+        20.33
+      ],
+      "am-replaced": [
+        161.83,
+        458.0,
+        53.67,
+        20.33
+      ],
+      "am-merged": [
+        161.83,
+        423.67,
+        56.0,
+        20.33
+      ],
+      "am-contained": [
+        161.83,
+        389.33,
+        78.33,
+        20.33
+      ],
+      "am-localized": [
+        161.83,
+        355.0,
+        56.0,
+        20.33
+      ],
+      "am-scoped": [
+        161.83,
+        320.67,
+        58.33,
+        20.33
+      ],
+      "am-inserted": [
+        161.83,
+        286.33,
+        71.0,
+        20.33
+      ]
+    },
+    "titlesMore": {
+      "t-mask-opacity": [
+        16.0,
+        650.83,
+        60.0,
+        60.0
+      ],
+      "t-named-large": [
+        16.0,
+        598.17,
+        88.33,
+        40.67
+      ],
+      "t-named-plus": [
+        16.0,
+        551.83,
+        52.33,
+        34.33
+      ],
+      "t-named": [
+        16.0,
+        505.5,
+        64.67,
+        34.33
+      ],
+      "t-ref": [
+        16.0,
+        473.17,
+        24.67,
+        20.33
+      ],
+      "t-gradient": [
+        16.0,
+        418.83,
+        163.0,
+        42.33
+      ],
+      "t-gear": [
+        16.0,
+        374.17,
+        32.67,
+        32.67
+      ],
+      "t-env-fill": [
+        16.0,
+        328.17,
+        36.33,
+        34.0
+      ],
+      "t-key": [
+        16.0,
+        295.83,
+        57.33,
+        20.33
+      ],
+      "t-navlink": [
+        16.0,
+        263.5,
+        67.33,
+        20.33
+      ],
+      "t-link": [
+        16.0,
+        231.17,
+        66.33,
+        20.33
+      ],
+      "t-toggle": [
+        16.0,
+        191.17,
+        370.0,
+        28.0
+      ]
+    }
+  },
+  "findings": {
+    "markdown": [
+      "Literal Text, Button and Label titles are Markdown: ** and __ bold, * and _ italic, *** both, ` monospaced, ~~ strikethrough, [text](url) a link.",
+      "Bold is .bold(): \"**Weight**\" is 56 wide, as Text(\"Weight\").bold() (and .semibold, also 56; 93 at .title, as .title.bold()). Italic is .italic() (54.33), both is .bold().italic() (57), code is .monospaced() (63.33; regular is 53.67).",
+      "A link is drawn in the tint: rgb(0, 136, 255), the accent, on a Text whose .foregroundStyle(.red) colours the rest; .tint(.green) makes it rgb(52, 199, 89). No underline.",
+      "Button(\"**Save** now\") draws Save bold, the whole title in the accent. Label(\"*Starred* items\") draws Starred italic.",
+      "Delimiters that do not flank a word stay as written: \"5 * 3 * 2 and snake_case_name\" draws its asterisks and underscores."
+    ],
+    "interpolated": [
+      "A String put into a literal is not parsed: Text(\"Hi \\(name), **welcome**\") with name \"**Ann**\" draws \"Hi **Ann**, \" plain and \"welcome\" bold.",
+      "The literal around it still is: Text(\"Plain **\\(name)**\") draws the value, asterisks and all, bold.",
+      "Text(name) and Text(verbatim:) draw their asterisks."
+    ],
+    "attributed": [
+      "AttributedString(\"Hello\") with .foregroundColor red and .font .title.bold(), + AttributedString(\" world\") blue: one line 114 x 33.67, each half in its own font and colour.",
+      "AttributedString(markdown: \"**Bold** and [link](https://apple.com)\") draws Bold bold and link in the accent. characters.count of \"Hello world\" is 11."
+    ],
+    "textImage": [
+      "An image in text takes the text's font. Between two H's at body (17 pt, cap height 12, baseline 16.5 in a 20.33 line), star.fill adds 22 to the width (HH 24.67, H*H 46.67), heart.fill 20.67 and person 18.67; at largeTitle (34 pt) 44 and 41.67.",
+      "Its ink is about centred on the capitals: star.fill at body from 15.33 above the baseline to 2 below (17.33 tall, 18 wide), heart.fill 13.33 above to 2 below; at largeTitle star.fill from 30.67 above to 4.33 below.",
+      "A star makes the body line 21.33 tall rather than 20.33, and the large title 42.33 rather than 40.67; a heart leaves it as it was.",
+      "Text(\"Rated \\(Image(systemName: \"star.fill\")) 4.8\") and Text(Image) + Text draw the image inline in the text's colour; .foregroundStyle(.blue) colours both."
+    ],
+    "symbolVariant": [
+      ".symbolVariant appends the variant to the name in SF Symbols' order, shape then slash then fill: star with .fill.circle and with .circle.fill both draw star.circle.fill; .square star.square, .slash star.slash, heart .fill.square heart.square.fill.",
+      "Where the composed name does not exist the base draws: folder with .square draws folder, person with .rectangle draws person.",
+      "Label(\"Inbox\", systemImage: \"tray\").symbolVariant(.fill) draws tray.fill."
+    ],
+    "fonts": [
+      ".custom(family, size: 22) draws each built-in family, by family name or PostScript name (AvenirNext-DemiBold is the demi bold face). Futura alone draws its medium face. A family iOS lacks (\"Brand Sans\") draws the system font at the size.",
+      "Line heights at 22 pt: Avenir Next 30.33, Georgia 25, Menlo 25.67, Helvetica Neue 25.67, Futura 28.67, Gill Sans 25.33, Palatino 24.33, Courier New 25, Times New Roman 24.67, Snell Roundhand 28, an unknown family 25.33."
+    ],
+    "masks": [
+      "LinearGradient(red to blue) 240 x 60 masked by Text(\"Gradient\") at .largeTitle.bold() draws only the letters, centred, coloured by the gradient across the 240-wide frame: its left end is rgb(201, 108, 139), not red.",
+      "Color.blue 100 x 100 masked by Circle() is a circle; masked by a star.fill symbol at 80 pt is the star; .mask(alignment: .topLeading) { Circle().frame(width: 50, height: 50) } is a 50 pt circle in the top-left corner. Each frame stays 100 x 100.",
+      "In a ZStack a red circle with .zIndex(1) written before a blue one draws above it."
+    ],
+    "parser": [
+      "Text draws a bare https:// URL, an email address and a www. address as links in the accent, and <https://apple.com> as the link without its brackets.",
+      "A single ~tilde~ is struck through, as ~~two~~ are. &amp; draws & and &lt; draws <.",
+      "[link](https://a.com/(x)) draws link alone: the URL takes the balanced parentheses.",
+      "A value put into the literal counts as punctuation in the flanking rules: Text(\"x**\\(name)**y\") draws x**Ann**y as written.",
+      "Markdown reads across a value put in: \"**Bold** \\(Image(systemName: \"star.fill\")) *it*\" draws Bold bold, the star, then it italic; \"**Hi** \\(Text(\"there\").italic())\" draws Hi bold and there italic, and \"**Hi \\(Text(\"there\"))**\" both bold."
+    ],
+    "attributedMore": [
+      "An AttributedString put into a Text literal draws its runs: x, inside in red, y.",
+      "text.swiftUI.foregroundColor = .red, AttributedString(localized: \"**Weight**\") (bold, 56 wide), AttributedString(\"Contained\", attributes:) of a container with a red foregroundColor all draw as written.",
+      "mergeAttributes(container with .body.bold()) keeps the run's blue and adds bold (56); setAttributes(container with red) leaves only the red, not bold (53.67).",
+      "inlinePresentationIntent .stronglyEmphasized is bold (56), .emphasized italic (54.33), .code monospaced (63.33), .strikethrough struck (53.67), as their Markdown."
+    ],
+    "titlesMore": [
+      "Toggle, Link and NavigationLink literal titles and a LocalizedStringKey variable draw their Markdown: \"**Bold** toggle\" draws Bold bold.",
+      ".environment(\\.symbolVariants, .fill) draws star.fill; VStack { Image(systemName: \"gear\") }.symbolVariant(.fill.circle) draws gear.circle.fill.",
+      "Under a LinearGradient foregroundStyle, an inline star.fill is painted with its part of the one gradient that runs across the whole text.",
+      "An asset image in text keeps its own size, 40 x 30 pt, its bottom on the baseline: it adds 40 to \"HH\" and makes a body line 34.33 tall (above 30.17, below 4.17), a large title line staying 40.67. The same for Text(Image(\"photo\")) + Text.",
+      "Color.blue masked by Circle().fill(.black.opacity(0.3)) draws at 30%: rgb(178, 219, 255) on white.",
+      "tab-default, tab-none and tab-label-none: a TabView draws house.fill and tray.fill with .symbolVariant(.none) on the TabView and on each item's Label alike."
+    ]
+  }
+}

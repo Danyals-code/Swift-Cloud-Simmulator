@@ -12,6 +12,9 @@ import {
   type DynamicTypeSize,
   isDynamicTypeSize,
   hasCornerRadii,
+  MASK_RECEIVER_MODIFIERS,
+  MASK_SHAPE_MODIFIERS,
+  MASK_SHAPES,
   MONO_FAMILY,
   rgba,
   ROUNDED_FAMILY,
@@ -78,7 +81,7 @@ import {
 } from './presentation'
 import { asCornerRadii, cornerRadiiOf } from './corners'
 import { applyTrim, asCanvasContext, asPath, toSVGPath } from './paths'
-import { resolveSymbol } from './sf-symbols'
+import { resolveSymbol, variantSymbol } from './sf-symbols'
 import {
   unitPoint,
   bodyFont,
@@ -467,6 +470,8 @@ interface ControlStyles {
   readonly gauge?: string
   readonly controlSize?: string
   readonly buttonBorderShape?: string
+  /** `.symbolVariant(.fill.circle)`, as one chain (Wave 6a). */
+  readonly symbolVariant?: string
   /** Whether a `foregroundStyle` or `foregroundColor` is set on this view or one around it, which a button's title takes over its tint. */
   readonly foregroundSet?: boolean
   /** A toolbar item drawn in a capsule it shares with the items beside it, so without a glass of its own. */
@@ -489,16 +494,24 @@ const STYLE_MODIFIERS: readonly (readonly [string, keyof ControlStyles])[] = [
   ['gaugeStyle', 'gauge'],
   ['controlSize', 'controlSize'],
   ['buttonBorderShape', 'buttonBorderShape'],
+  ['symbolVariant', 'symbolVariant'],
 ]
 
 function withStyles(outer: ControlStyles, view: ViewValue, scheme: ColorScheme): ControlStyles {
   let next = view.name === 'List' ? { ...outer, container: 'list' as const }
     : view.name === 'Form' ? { ...outer, container: 'form' as const } : outer
-  const colorScheme = view.modifiers.find((modifier) => modifier.name === 'environment' && asKeyPath(modifier.args[0]?.value)?.components[0] === 'colorScheme')
-  const appearance = tokenName(colorScheme?.args[1]?.value)
-  if (appearance === 'light' || appearance === 'dark') next = { ...next, colorScheme: appearance }
-  const typeEnvironment = view.modifiers.find((m) => m.name === 'environment' && asKeyPath(m.args[0]?.value)?.components[0] === 'dynamicTypeSize')
-  const category = tokenName(modifierArg(view, 'dynamicTypeSize', 0) ?? typeEnvironment?.args[1]?.value)
+  // `.environment(\.colorScheme, .dark)`, `(\.dynamicTypeSize, …)` and `(\.symbolVariants, .fill)`,
+  // which is `.symbolVariant(.fill)` (Wave 6a).
+  let typeEnvironment: SwiftValue | undefined
+  for (const modifier of view.modifiers) {
+    if (modifier.name !== 'environment') continue
+    const key = asKeyPath(modifier.args[0]?.value)?.components[0], value = modifier.args[1]?.value
+    const name = tokenName(value)
+    if (key === 'colorScheme' && (name === 'light' || name === 'dark')) next = { ...next, colorScheme: name }
+    else if (key === 'dynamicTypeSize') typeEnvironment = value
+    else if (key === 'symbolVariants' && name !== null) next = { ...next, symbolVariant: name }
+  }
+  const category = tokenName(modifierArg(view, 'dynamicTypeSize', 0) ?? typeEnvironment)
   if (isDynamicTypeSize(category)) next = { ...next, dynamicTypeSize: category }
   scheme = next.colorScheme ?? scheme
   for (const [modifier, key] of STYLE_MODIFIERS) {
@@ -1301,6 +1314,8 @@ class Converter {
     // Modifiers wrap outward in source order, so `.padding().background()` nests as
     // background(padding(view)) and therefore covers the padding.
     for (const [index, modifier] of view.modifiers.entries()) {
+      const masked = modifier.name === 'mask' ? this.maskedBy(view, index, element, `${path}m${index}`) : null
+      if (masked) { element = masked; continue }
       const converted = this.convertModifier(modifier, `${path}m${index}`, view)
       // `.fill(.blue.shadow(.drop(radius: 4)))`: what the paint fills casts its shadow.
       const cast = ['fill', 'foregroundStyle', 'foregroundColor'].includes(modifier.name) ? this.dropShadow(positional(modifier.args, 0)) : null
@@ -1446,7 +1461,7 @@ class Converter {
       case 'Text': {
         // A concatenation carries its operands as children; anything else is one run,
         // and stays on the path that allocates nothing per run.
-        const runs = view.children.length > 0 ? this.textRuns(view) : null
+        const runs = view.children.length > 0 || this.imageInText(view) ? this.textRuns(view) : null
         return {
           kind: 'text',
           id: path,
@@ -1810,15 +1825,51 @@ class Converter {
         }
         return
       }
-      out.push({ text: textOf(operand), ...this.runAttributes(operand) })
+      leaf(operand, this.runAttributes(operand))
+    }
+    const leaf = (operand: ViewValue, attributes: Omit<TextRunSpec, 'text'>): void => {
+      const image = this.imageInText(operand)
+      out.push(image ? { text: '\ufffc', ...image, ...attributes } : { text: textOf(operand), ...attributes })
     }
 
+    // `Text(Image(…))` alone is one run, whose own modifiers are the outer ones below.
+    if (!view.children.length) leaf(view, {})
     for (const child of view.children) walk(child)
     const outer = this.runAttributes(view)
     if (Object.keys(outer).length > 0) {
       for (let i = 0; i < out.length; i++) out[i] = { ...outer, ...out[i]! }
     }
     return out
+  }
+
+  /**
+   * A title's words, as the runs of its Markdown where the host found any (Wave 6a):
+   * `Button("**Save** now")` draws Save bold.
+   */
+  private titleText(view: ViewValue, id: string, title: string, origin?: object): LayoutElement {
+    const written = positional(view.args, 0)
+    const styled = written?.kind === 'string' && written.styled ? asView(written.styled) : null
+    return { kind: 'text', id, text: title, ...(styled ? { runs: this.textRuns(styled) } : {}), ...origin }
+  }
+
+  /**
+   * What `Text(Image(…))` draws in the text (Wave 6a): a symbol, or a project image at its
+   * own size, as iOS 27 draws `Text("a \(Image("photo")) b")` (docs/parity/native/iphone18pro-text).
+   */
+  private imageInText(view: ViewValue): Pick<TextRunSpec, 'symbol' | 'bitmap'> | null {
+    const first = view.name === 'Text' ? positional(view.args, 0) : undefined
+    const image = first?.kind === 'opaque' ? asView(first) : null
+    if (image?.name !== 'Image') return null
+    const symbol = stringArg(labelled(image.args, 'systemName'))
+    const bitmap = symbol === null ? this.bitmapOf(stringArg(positional(image.args, 0))) : null
+    return symbol !== null ? { symbol } : bitmap && { bitmap }
+  }
+
+  /** The project image `Image("name")` draws, as a PNG or JPEG data URL, in this appearance. */
+  private bitmapOf(name: string | null): { url: string; name: string; width: number; height: number } | null {
+    const image = name === null ? undefined : this.images.find(image => image.name === name)
+    const url = image && (this.scheme === 'dark' ? image.dark ?? image.light : image.light)
+    return image && url && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(url) ? { url, name: image.name, width: image.width, height: image.height } : null
   }
 
   /** What one span's own modifier chain sets, as overrides on its surroundings. */
@@ -2370,12 +2421,8 @@ class Converter {
     const resizable = view.modifiers.some((m) => m.name === 'resizable')
 
     if (systemName === null && assetName !== null) {
-      const image = this.images.find(image => image.name === assetName)
-      const url = image && (this.scheme === 'dark' ? image.dark ?? image.light : image.light)
-      if (image && url && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(url)) return {
-        kind: 'image', id: path, glyph: '', resizable, approximated: false,
-        bitmap: { url, name: assetName, width: image.width, height: image.height }, ...origin,
-      }
+      const bitmap = this.bitmapOf(assetName)
+      if (bitmap) return { kind: 'image', id: path, glyph: '', resizable, approximated: false, bitmap, ...origin }
       return {
         kind: 'placeholder',
         id: path,
@@ -2384,7 +2431,8 @@ class Converter {
       }
     }
 
-    const symbol = resolveSymbol(systemName ?? '')
+    const named = systemName && variantSymbol(systemName, this.styles.symbolVariant)
+    const symbol = resolveSymbol(named ?? '')
     return {
       kind: 'image',
       id: path,
@@ -2392,7 +2440,7 @@ class Converter {
       symbolScale: this.styles.imageScale === 'small' ? 0.8 : this.styles.imageScale === 'large' ? 1.3 : 1,
       resizable,
       approximated: symbol.approximated,
-      ...(systemName ? { symbol: systemName } : {}),
+      ...(named ? { symbol: named } : {}),
       ...origin,
       ...(systemName ? { debugName: `Image(systemName: "${systemName}")` } : {}),
     }
@@ -2400,7 +2448,8 @@ class Converter {
 
   private label(view: ViewValue, path: string, origin: object): LayoutElement {
     const title = stringArg(positional(view.args, 0))
-    const systemImage = stringArg(labelled(view.args, 'systemImage'))
+    const written = stringArg(labelled(view.args, 'systemImage'))
+    const systemImage = written && variantSymbol(written, this.styles.symbolVariant)
     const symbol = systemImage ? resolveSymbol(systemImage) : null
 
     // `.labelStyle` decides which halves are drawn. `.titleAndIcon` is the default
@@ -2432,7 +2481,7 @@ class Converter {
       // A button's Label takes the button's colour instead, grey when it is disabled.
       child: this.styles.buttonLabel ? children[0] : { kind: 'modified', id: `${path}icon-tint`, modifier: { kind: 'foregroundStyle', color: this.color('accentColor') }, child: children[0] },
     }
-    if (title !== null && wantsTitle) children.push({ kind: 'text', id: `${path}title`, text: title })
+    if (title !== null && wantsTitle) children.push(this.titleText(view, `${path}title`, title))
     if (wantsTitle || !(symbol || icon.length)) children.push(...this.convertList(view.children, path, 'horizontal'))
 
     return {
@@ -2455,7 +2504,7 @@ class Converter {
     const iconAlone = title === null && this.toolbarIcon(content)
     const label: LayoutElement =
       title !== null
-        ? { kind: 'text', id: `${path}label`, text: title, ...origin }
+        ? this.titleText(view, `${path}label`, title, origin)
         : {
             kind: 'stack',
             id: `${path}label`,
@@ -2625,7 +2674,7 @@ class Converter {
     const iconAlone = title === null && this.toolbarIcon(view.children)
     const label: LayoutElement =
       title !== null
-        ? { kind: 'text', id: `${path}label`, text: title }
+        ? this.titleText(view, `${path}label`, title)
         : {
             kind: 'stack',
             id: `${path}label`,
@@ -2692,7 +2741,7 @@ class Converter {
 
     const label: LayoutElement =
       title !== null
-        ? { kind: 'text', id: `${path}label`, text: title }
+        ? this.titleText(view, `${path}label`, title)
         : {
             kind: 'stack',
             id: `${path}label`,
@@ -3721,7 +3770,7 @@ class Converter {
       : view.name === 'ShareLink' ? [{ name: 'Label', args: [{ label: null, value: { kind: 'string', value: title ?? 'Share…' } }, { label: 'systemImage', value: { kind: 'string', value: 'square.and.arrow.up' } }], children: [], modifiers: [], action: null, span: view.span } satisfies ViewValue]
       : []
     const label: LayoutElement = content.length === 0
-      ? { kind: 'text', id: path, text: title ?? '', ...origin }
+      ? this.titleText(view, path, title ?? '', origin)
       : { kind: 'stack', id: `${path}label`, axis: 'horizontal', spacing: 4, alignment: CENTER, children: content.map((child, index) => this.convert(child, `${path}l${index}`, 'horizontal')), ...origin }
     return {
       kind: 'modified',
@@ -3732,6 +3781,48 @@ class Converter {
   }
 
   // --------------------------------------------------------------- modifiers
+
+  /**
+   * `.mask` with a view, drawn as what it leaves (Wave 6a), as iOS 27 draws it
+   * (docs/parity/native/iphone18pro-text):
+   * - a shape cuts the view to it, framed and placed by `alignment:` when it has a frame;
+   * - text or a symbol over a colour or a gradient is that text or symbol in the fill,
+   *   spread across the view, which isn't drawn itself.
+   * Null leaves the mask to `convertModifier`, which draws a gradient or colour mask.
+   */
+  private maskedBy(view: ViewValue, index: number, element: LayoutElement, id: string): LayoutElement | null {
+    const args = view.modifiers[index]!.args
+    const value = positional(args, 0) ?? labelled(args, 'content')
+    const content = value?.kind === 'opaque' ? asView(value) : null
+    if (!content) return null
+    const alignment = alignmentFromToken(labelled(args, 'alignment')) ?? CENTER
+    if (MASK_SHAPES.has(content.name)) {
+      if (!content.modifiers.every((m) => MASK_SHAPE_MODIFIERS.has(m.name))) return null
+      // A mask shows the view by its paint's alpha: a colour's, `.fill(.black.opacity(0.3))`
+      // at 30%, as iOS 27 draws it. A gradient's alpha varies, which a cut can't draw.
+      const paint = content.modifiers.find((m) => m.name !== 'frame')
+      const fill = paint ? resolveFillArg(positional(paint.args, 0), this.scheme, this.styles.tint) : null
+      if (fill && fill.kind !== 'solid') return null
+      const frame = content.modifiers.find((m) => m.name === 'frame')
+      const width = numberArg(labelled(frame?.args ?? [], 'width')), height = numberArg(labelled(frame?.args ?? [], 'height'))
+      const cut: LayoutElement = { kind: 'modified', id, modifier: width === null && height === null ? clipTo(shapeOf(value)) : { ...clipTo(shapeOf(value)), size: { ...width !== null ? { width } : {}, ...height !== null ? { height } : {} }, alignment }, child: element }
+      return !fill || fill.color.a >= 1 ? cut : { kind: 'modified', id: `${id}paint`, modifier: { kind: 'opacity', value: fill.color.a }, child: cut }
+    }
+    if (content.name !== 'Text' && !(content.name === 'Image' && labelled(content.args, 'systemName'))) return null
+    const receiver = view.modifiers.slice(0, index)
+    if (!receiver.every((m) => MASK_RECEIVER_MODIFIERS.has(m.name))) return null
+    // What the view draws: a colour or gradient, or one laid over it, as gradient text is written.
+    const overlay = [...receiver].reverse().find((m) => m.name === 'overlay')
+    const drawn = overlay ? positional(overlay.args, 0) ?? labelled(overlay.args, 'content') : view.name === 'Color' ? positional(view.args, 0) : undefined
+    const painting = drawn?.kind === 'opaque' && asView(drawn)?.name === 'Color' ? positional(asView(drawn)!.args, 0) : drawn
+    const fill = painting && resolveFillArg(painting, this.scheme, this.styles.tint)
+    if (!fill) return null
+    // The view's own opacity, as Design writes it before the mask, stays on what shows through.
+    const opacity = receiver.reduce((product, m) => m.name === 'opacity' ? product * (numberArg(positional(m.args, 0)) ?? 1) : product, 1)
+    const drawnContent = this.convert(content, `${id}mask`, 'vertical')
+    const shown: LayoutElement = opacity === 1 ? drawnContent : { kind: 'modified', id: `${id}maskopacity`, modifier: { kind: 'opacity', value: opacity }, child: drawnContent }
+    return { kind: 'modified', id, modifier: { kind: 'overlay', content: shown, alignment, paints: fill }, child: element }
+  }
 
   private convertModifier(
     modifier: ModifierValue,
@@ -3976,7 +4067,10 @@ class Converter {
         return { kind: 'ignoresSafeArea', edges: edgeSet(edges) }
       }
 
-      case 'zIndex':
+      case 'zIndex': {
+        const value = numberArg(positional(args, 0))
+        return value === null ? null : { kind: 'zIndex', value }
+      }
       case 'id':
       case 'listRowSeparator':
       case 'listRowInsets':
@@ -4762,7 +4856,7 @@ function cutMaterial(content: LayoutElement, shape: ShapeOutline): LayoutElement
 }
 
 /** The clip that cuts a view to a shape, as `.clipShape` and `.background(_:in:)` do. */
-function clipTo(shape: ShapeOutline): LayoutModifier {
+function clipTo(shape: ShapeOutline): Extract<LayoutModifier, { kind: 'clip' }> {
   return { ...shape, kind: 'clip', shape: shape.kind }
 }
 

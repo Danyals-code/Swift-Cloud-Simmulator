@@ -37,6 +37,12 @@ export interface DesignControl {
    * Absent anywhere else, and for a value Changeable per copy can't take.
    */
   readonly exposeAs?: Exclude<ComponentInputKind, 'shown'>
+  /**
+   * On a Text's words, or a Button's, Label's, Toggle's, Link's or NavigationLink's title,
+   * written as a literal whose Markdown changes what iOS draws (Wave 6a), by `markdownSpans`.
+   * Absent for `Text(verbatim:)`, a String, and marks iOS draws as written (`snake_case`).
+   */
+  readonly markdown?: true
   /** A visible control that cannot currently be changed safely. */
   readonly disabledReason?: string
   readonly min?: number

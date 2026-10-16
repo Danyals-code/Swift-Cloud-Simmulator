@@ -6,11 +6,15 @@ export interface CallArgument {
   readonly value: SwiftValue
   readonly span: SourceSpan
   /**
-   * For a string literal given as a call's first unlabelled argument, its text as a
-   * `LocalizedStringKey` writes it, with numbers for the locale: "Goal: 2,000 mL" where
-   * `value` is "Goal: 2000 mL". The views and modifiers that take a title key read it.
+   * For a string literal given as a call's first unlabelled argument, a title key: its own
+   * text and what was put into it, alternately, starting and ending with its own text.
+   * `"Goal: \(goal) mL"` is `["Goal: ", "2,000", " mL"]`, a value written as a
+   * `LocalizedStringKey` writes it, with numbers for the locale, where `value` reads
+   * "Goal: 2000 mL". A value the host draws in text, `\(Image(…))`, is there as itself.
+   * The views and modifiers that take a title key read it, and Markdown reads only the
+   * literal's own text (Wave 6a).
    */
-  readonly title?: string
+  readonly titleParts?: readonly (string | SwiftValue)[]
 }
 
 export interface HostCall {
@@ -56,6 +60,12 @@ export interface InterpreterHost {
 
   /** A call to a global that is not a user declaration: `VStack(spacing: 8) { … }`. */
   callGlobal?(name: string, call: HostCall): SwiftValue | undefined
+
+  /**
+   * Whether `target.member` is `target` itself under another name, written through as it:
+   * `text.swiftUI.foregroundColor = .red` writes `text`'s own attribute.
+   */
+  isSelfMember?(target: SwiftValue, member: string): boolean
 
   /** `target.member(args)` where the interpreter does not own `target`. */
   callMember?(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined
