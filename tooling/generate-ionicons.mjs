@@ -3,13 +3,18 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const mapping = readFileSync(resolve(root, 'packages/shared/src/symbol-map.ts'), 'utf8')
+// The symbol table: `name|icon|flags` a line, `p` naming the icon's `-outline` form too.
+const table = readFileSync(resolve(root, 'packages/shared/src/symbol-map.ts'), 'utf8').match(/const TABLE = `([^`]*)`/)[1]
+const mapped = table.split('\n').flatMap((line) => {
+  const [, icon = '', flags = ''] = line.split('|')
+  return !icon || icon.startsWith('#') ? [] : flags.includes('p') ? [icon, `${icon}-outline`] : [icon]
+})
 const gallery = readFileSync(resolve(root, 'apps/web/components/TemplateGallery.tsx'), 'utf8')
 // Gallery artwork uses the same sprite as the simulator. Keep both consumers in
 // the generated asset so rebuilding it cannot silently remove welcome icons.
 const galleryIcons = [...gallery.matchAll(/\['([a-z][a-z-]+)', '#[\da-f]+'/g)].map((m) => m[1])
 const icons = [...new Set([
-  ...[...mapping.matchAll(/"icon": "([^"#]+)"/g)].map((m) => m[1]),
+  ...mapped,
   ...galleryIcons,
   ...[...gallery.matchAll(/<GallerySymbol name="([a-z-]+)"/g)].map((m) => m[1]),
 ])].sort()

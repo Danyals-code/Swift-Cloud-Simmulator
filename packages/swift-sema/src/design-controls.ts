@@ -13,6 +13,7 @@ import { isConstantToken } from './layer/values'
 import { enumCases } from './authoring-context'
 import { pickerAbove } from './authoring-picker-tags'
 import { colorSource, readColor } from './layer/color'
+import { symbolControls } from './design-symbol-controls'
 
 interface Patch { readonly start: number; readonly end: number; readonly text: string }
 export interface ControlRecipe {
@@ -106,6 +107,17 @@ export function literalText(expr: Expr | null | undefined): string | undefined {
 }
 
 /**
+ * The members of a literal chain written with no type, `.circle.fill` as circle and fill, or
+ * with `type` first, `SymbolVariants.fill`; undefined for any other value, such as one
+ * worked out in Swift.
+ */
+export function memberChain(expr: Expr | null | undefined, type?: string): string[] | undefined {
+  const parts: string[] = []
+  for (; expr?.kind === 'memberAccess'; expr = expr.base) parts.unshift(expr.member)
+  return parts.length && (!expr || type !== undefined && expr.kind === 'identifier' && expr.name === type) ? parts : undefined
+}
+
+/**
  * A Button's role from the Swift of its `role:` argument (Wave 4a): `none` when it has none,
  * and undefined for one other than Destructive and Cancel, such as iOS 26's `.confirm`, which
  * only Code changes.
@@ -184,8 +196,9 @@ function plainSpacer(statement: Stmt): boolean {
   return call?.kind === 'call' && call.callee.kind === 'identifier' && call.callee.name === 'Spacer' && !call.args.length && !call.trailingClosure
 }
 
-/** Several edits to one stretch of text, as the one patch a control writes. */
-function merged(text: string, patches: readonly Patch[]): Patch {
+/** Several edits to one stretch of text, as the one patch a control writes; none writes nothing. */
+export function merged(text: string, patches: readonly Patch[]): Patch {
+  if (!patches.length) return { start: 0, end: 0, text: '' }
   const sorted = [...patches].sort((a, b) => a.start - b.start)
   const start = sorted[0]!.start, end = Math.max(...sorted.map(patch => patch.end))
   let out = '', at = start
@@ -625,6 +638,8 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     if (base.args[0].label === 'systemName') symbolName(base.args[0].value)
     else replace('image', 'Asset name', base.args[0].value, 'text')
   }
+  // A symbol's Rendering and Fill, written with any of Image's initialisers that take its name (Wave 6b).
+  if (node.kind !== 'component' && node.name === 'Image' && base.args[0]?.label === 'systemName') symbolControls({ node, expr, base, modifiers, text, target: targetVersion, appendable: !ownModifier, colors, add, byId })
   if (node.kind !== 'component' && constructorEditable) {
     const symbol = node.name === 'Label' && base.args.find(arg => arg.label === 'systemImage')
     if (symbol) symbolName(symbol.value)

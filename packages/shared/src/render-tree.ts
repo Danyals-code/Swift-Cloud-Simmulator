@@ -1,5 +1,6 @@
 import type { SourceSpan } from './source'
 import { symbolMetrics } from './symbol-map'
+import type { SymbolPaint } from './symbol-table'
 
 /**
  * The worker -> main-thread contract.
@@ -457,6 +458,8 @@ export interface ImagePayload {
   /** The symbol name, for drawing it, for the inspector and for telemetry. */
   readonly symbol?: string
   readonly symbolScale?: number
+  /** How the symbol's layers are painted, left out for monochrome at full value (Wave 6b). */
+  readonly symbolPaint?: SymbolPaint
   /** `.resizable()` - the image fills its frame rather than being sized by the font. */
   readonly resizable?: boolean
 }

@@ -1,0 +1,2642 @@
+{
+  "source": "Built from tests/fixtures/ios27-symbols-6b.swift with swiftc -parse-as-library -warnings-as-errors for arm64-apple-ios27.0-simulator (Xcode 27.0, SDK 27.0) and run on a scratch iPhone 18 Pro simulator (iOS 27.0, 24A434), light appearance, Large text, status bar overridden to 9:41; one launch per screen with -screen <name>, on 2026-10-16. Frames are printed by the fixture (MEASURE lines, onGeometryChange in the global space, points) and read with simctl launch --console-pty. Colours were read from the 3x screenshots as the most common non-white pixels in each frame. 1206x2622 pixels / 402x874 points at 3x.",
+  "fixtureSha256": "008033f77466770d6252c4d19b7a27a72aaa3e1d22ad82c0760e53acf38cbeef",
+  "captures": [
+    {
+      "file": "multicolor.png",
+      "sha256": "aa0d8eefa679d35974214a4e678bfddfa6d6bdeda218ab1efe12b606f2d0f19c",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "multicolor-tinted.png",
+      "sha256": "263a44419777d6882e261bdd1e23536db4b8f98b545bbe4212cae8ed07e04889",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "hierarchical.png",
+      "sha256": "9bdb1fb9831d4b82b0f7ba181e9b7387751eed3946b96b3c645afa12cc2d0172",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "hierarchical-red.png",
+      "sha256": "90cc4ea30d6fbd94b654a16f23782d79c84e8d356255c7b0868d210ff97d71eb",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "palette.png",
+      "sha256": "3ade81b68cd90cf9f5174742f301c5b148cafe3e2fe0bb63b0d2c58fc399c176",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "variable.png",
+      "sha256": "e39e7810b2e5b0bf85de4d9c7ffd5617879952f8124e1d0c169b4728ccb85cd3",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "effects.png",
+      "sha256": "fd94406a71d632b045b9c8234d567c9f7816f4b4036650392b487f70ad83ce3c",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "names-1.png",
+      "sha256": "a4b476343849c71de551392e259870c34e8d8d0477e3a28fc139598751c6d142",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "names-2.png",
+      "sha256": "7796f5b0f268bdf46873505172cbb0306a8ef7a54d0a2ff879d951ceb583fcd5",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "names-3.png",
+      "sha256": "82f2e53320aa057bca68dd5935c9aa5cd5d4b2ef1a3bd16ba7ca0813ddfda9ae",
+      "size": [
+        1206,
+        2622
+      ]
+    }
+  ],
+  "frames": {
+    "multicolor": {
+      "battery.25": [
+        155,
+        529,
+        44,
+        44
+      ],
+      "hare.fill": [
+        203,
+        577,
+        44,
+        44
+      ],
+      "app.badge": [
+        11,
+        481,
+        44,
+        44
+      ],
+      "heart": [
+        59,
+        289,
+        44,
+        44
+      ],
+      "checkmark.circle.fill": [
+        299,
+        577,
+        44,
+        44
+      ],
+      "star.fill": [
+        251,
+        337,
+        44,
+        44
+      ],
+      "cloud.bolt.rain.fill": [
+        347,
+        385,
+        44,
+        44
+      ],
+      "folder.badge.plus": [
+        107,
+        481,
+        44,
+        44
+      ],
+      "sun.max.fill": [
+        347,
+        337,
+        44,
+        44
+      ],
+      "moon.stars.fill": [
+        107,
+        385,
+        44,
+        44
+      ],
+      "cloud.snow.fill": [
+        11,
+        433,
+        44,
+        44
+      ],
+      "moon.fill": [
+        59,
+        385,
+        44,
+        44
+      ],
+      "wifi.exclamationmark": [
+        203,
+        529,
+        44,
+        44
+      ],
+      "xmark.octagon.fill": [
+        11,
+        529,
+        44,
+        44
+      ],
+      "leaf.fill": [
+        203,
+        289,
+        44,
+        44
+      ],
+      "sunrise.fill": [
+        203,
+        433,
+        44,
+        44
+      ],
+      "leaf": [
+        251,
+        289,
+        44,
+        44
+      ],
+      "drop.fill": [
+        299,
+        289,
+        44,
+        44
+      ],
+      "bolt": [
+        59,
+        337,
+        44,
+        44
+      ],
+      "paintpalette.fill": [
+        299,
+        529,
+        44,
+        44
+      ],
+      "lightbulb.fill": [
+        347,
+        529,
+        44,
+        44
+      ],
+      "person.crop.circle.badge.plus": [
+        155,
+        481,
+        44,
+        44
+      ],
+      "exclamationmark.triangle.fill": [
+        347,
+        481,
+        44,
+        44
+      ],
+      "flag.fill": [
+        59,
+        577,
+        44,
+        44
+      ],
+      "bolt.fill": [
+        11,
+        337,
+        44,
+        44
+      ],
+      "bell.badge": [
+        299,
+        433,
+        44,
+        44
+      ],
+      "bell.badge.fill": [
+        347,
+        433,
+        44,
+        44
+      ],
+      "cloud.rain.fill": [
+        251,
+        385,
+        44,
+        44
+      ],
+      "thermometer.sun.fill": [
+        155,
+        433,
+        44,
+        44
+      ],
+      "tortoise.fill": [
+        155,
+        577,
+        44,
+        44
+      ],
+      "person.crop.circle.badge.checkmark": [
+        203,
+        481,
+        44,
+        44
+      ],
+      "sunset.fill": [
+        251,
+        433,
+        44,
+        44
+      ],
+      "snowflake": [
+        107,
+        433,
+        44,
+        44
+      ],
+      "drop": [
+        347,
+        289,
+        44,
+        44
+      ],
+      "cloud.sun.fill": [
+        203,
+        385,
+        44,
+        44
+      ],
+      "flame.fill": [
+        107,
+        289,
+        44,
+        44
+      ],
+      "cloud.fill": [
+        155,
+        385,
+        44,
+        44
+      ],
+      "plus.circle.fill": [
+        347,
+        577,
+        44,
+        44
+      ],
+      "cloud.bolt.fill": [
+        299,
+        385,
+        44,
+        44
+      ],
+      "umbrella.fill": [
+        11,
+        577,
+        44,
+        44
+      ],
+      "flame": [
+        155,
+        289,
+        44,
+        44
+      ],
+      "battery.100": [
+        107,
+        529,
+        44,
+        44
+      ],
+      "heart.fill": [
+        11,
+        289,
+        44,
+        44
+      ],
+      "cloud.moon.fill": [
+        59,
+        433,
+        44,
+        44
+      ],
+      "envelope.badge": [
+        59,
+        481,
+        44,
+        44
+      ],
+      "star": [
+        299,
+        337,
+        44,
+        44
+      ],
+      "sun.max": [
+        11,
+        385,
+        44,
+        44
+      ],
+      "xmark.bin": [
+        251,
+        577,
+        44,
+        44
+      ],
+      "checkmark.seal.fill": [
+        59,
+        529,
+        44,
+        44
+      ],
+      "trash": [
+        107,
+        337,
+        44,
+        44
+      ],
+      "pawprint.fill": [
+        107,
+        577,
+        44,
+        44
+      ],
+      "pencil.circle.fill": [
+        251,
+        529,
+        44,
+        44
+      ],
+      "trash.fill": [
+        155,
+        337,
+        44,
+        44
+      ],
+      "trash.circle.fill": [
+        203,
+        337,
+        44,
+        44
+      ],
+      "cart.badge.plus": [
+        299,
+        481,
+        44,
+        44
+      ],
+      "calendar.badge.plus": [
+        251,
+        481,
+        44,
+        44
+      ]
+    },
+    "multicolor-tinted": {
+      "bolt": [
+        59,
+        337,
+        44,
+        44
+      ],
+      "flag.fill": [
+        59,
+        577,
+        44,
+        44
+      ],
+      "star.fill": [
+        251,
+        337,
+        44,
+        44
+      ],
+      "wifi.exclamationmark": [
+        203,
+        529,
+        44,
+        44
+      ],
+      "cloud.rain.fill": [
+        251,
+        385,
+        44,
+        44
+      ],
+      "snowflake": [
+        107,
+        433,
+        44,
+        44
+      ],
+      "lightbulb.fill": [
+        347,
+        529,
+        44,
+        44
+      ],
+      "star": [
+        299,
+        337,
+        44,
+        44
+      ],
+      "battery.100": [
+        107,
+        529,
+        44,
+        44
+      ],
+      "moon.stars.fill": [
+        107,
+        385,
+        44,
+        44
+      ],
+      "trash.fill": [
+        155,
+        337,
+        44,
+        44
+      ],
+      "pencil.circle.fill": [
+        251,
+        529,
+        44,
+        44
+      ],
+      "heart.fill": [
+        11,
+        289,
+        44,
+        44
+      ],
+      "cloud.snow.fill": [
+        11,
+        433,
+        44,
+        44
+      ],
+      "person.crop.circle.badge.plus": [
+        155,
+        481,
+        44,
+        44
+      ],
+      "trash.circle.fill": [
+        203,
+        337,
+        44,
+        44
+      ],
+      "heart": [
+        59,
+        289,
+        44,
+        44
+      ],
+      "pawprint.fill": [
+        107,
+        577,
+        44,
+        44
+      ],
+      "exclamationmark.triangle.fill": [
+        347,
+        481,
+        44,
+        44
+      ],
+      "hare.fill": [
+        203,
+        577,
+        44,
+        44
+      ],
+      "xmark.octagon.fill": [
+        11,
+        529,
+        44,
+        44
+      ],
+      "flame": [
+        155,
+        289,
+        44,
+        44
+      ],
+      "xmark.bin": [
+        251,
+        577,
+        44,
+        44
+      ],
+      "thermometer.sun.fill": [
+        155,
+        433,
+        44,
+        44
+      ],
+      "umbrella.fill": [
+        11,
+        577,
+        44,
+        44
+      ],
+      "cart.badge.plus": [
+        299,
+        481,
+        44,
+        44
+      ],
+      "trash": [
+        107,
+        337,
+        44,
+        44
+      ],
+      "leaf.fill": [
+        203,
+        289,
+        44,
+        44
+      ],
+      "checkmark.circle.fill": [
+        299,
+        577,
+        44,
+        44
+      ],
+      "calendar.badge.plus": [
+        251,
+        481,
+        44,
+        44
+      ],
+      "envelope.badge": [
+        59,
+        481,
+        44,
+        44
+      ],
+      "drop.fill": [
+        299,
+        289,
+        44,
+        44
+      ],
+      "flame.fill": [
+        107,
+        289,
+        44,
+        44
+      ],
+      "app.badge": [
+        11,
+        481,
+        44,
+        44
+      ],
+      "battery.25": [
+        155,
+        529,
+        44,
+        44
+      ],
+      "bell.badge.fill": [
+        347,
+        433,
+        44,
+        44
+      ],
+      "paintpalette.fill": [
+        299,
+        529,
+        44,
+        44
+      ],
+      "moon.fill": [
+        59,
+        385,
+        44,
+        44
+      ],
+      "folder.badge.plus": [
+        107,
+        481,
+        44,
+        44
+      ],
+      "sunrise.fill": [
+        203,
+        433,
+        44,
+        44
+      ],
+      "bolt.fill": [
+        11,
+        337,
+        44,
+        44
+      ],
+      "checkmark.seal.fill": [
+        59,
+        529,
+        44,
+        44
+      ],
+      "cloud.sun.fill": [
+        203,
+        385,
+        44,
+        44
+      ],
+      "person.crop.circle.badge.checkmark": [
+        203,
+        481,
+        44,
+        44
+      ],
+      "tortoise.fill": [
+        155,
+        577,
+        44,
+        44
+      ],
+      "cloud.bolt.fill": [
+        299,
+        385,
+        44,
+        44
+      ],
+      "sun.max.fill": [
+        347,
+        337,
+        44,
+        44
+      ],
+      "plus.circle.fill": [
+        347,
+        577,
+        44,
+        44
+      ],
+      "sunset.fill": [
+        251,
+        433,
+        44,
+        44
+      ],
+      "sun.max": [
+        11,
+        385,
+        44,
+        44
+      ],
+      "cloud.fill": [
+        155,
+        385,
+        44,
+        44
+      ],
+      "cloud.bolt.rain.fill": [
+        347,
+        385,
+        44,
+        44
+      ],
+      "leaf": [
+        251,
+        289,
+        44,
+        44
+      ],
+      "bell.badge": [
+        299,
+        433,
+        44,
+        44
+      ],
+      "cloud.moon.fill": [
+        59,
+        433,
+        44,
+        44
+      ],
+      "drop": [
+        347,
+        289,
+        44,
+        44
+      ]
+    },
+    "hierarchical": {
+      "xmark.circle.fill": [
+        59,
+        385,
+        44,
+        44
+      ],
+      "heart.fill": [
+        347,
+        433,
+        44,
+        44
+      ],
+      "plus.circle.fill": [
+        107,
+        385,
+        44,
+        44
+      ],
+      "wifi": [
+        203,
+        481,
+        44,
+        44
+      ],
+      "cloud.sun.fill": [
+        299,
+        433,
+        44,
+        44
+      ],
+      "exclamationmark.triangle.fill": [
+        251,
+        433,
+        44,
+        44
+      ],
+      "checkmark.circle.fill": [
+        11,
+        385,
+        44,
+        44
+      ],
+      "star.circle": [
+        203,
+        385,
+        44,
+        44
+      ],
+      "person.circle.fill": [
+        347,
+        385,
+        44,
+        44
+      ],
+      "folder.badge.plus": [
+        203,
+        433,
+        44,
+        44
+      ],
+      "trash.circle": [
+        299,
+        481,
+        44,
+        44
+      ],
+      "chevron.right.circle.fill": [
+        155,
+        481,
+        44,
+        44
+      ],
+      "speaker.wave.3.fill": [
+        251,
+        481,
+        44,
+        44
+      ],
+      "star.square.fill": [
+        251,
+        385,
+        44,
+        44
+      ],
+      "person.crop.circle.fill": [
+        59,
+        433,
+        44,
+        44
+      ],
+      "person.crop.circle": [
+        11,
+        433,
+        44,
+        44
+      ],
+      "bell.badge.fill": [
+        155,
+        433,
+        44,
+        44
+      ],
+      "heart.circle.fill": [
+        155,
+        385,
+        44,
+        44
+      ],
+      "bell.badge": [
+        107,
+        433,
+        44,
+        44
+      ],
+      "line.3.horizontal.decrease.circle": [
+        347,
+        481,
+        44,
+        44
+      ],
+      "info.circle": [
+        299,
+        385,
+        44,
+        44
+      ],
+      "play.circle.fill": [
+        59,
+        481,
+        44,
+        44
+      ],
+      "arrow.up.circle.fill": [
+        107,
+        481,
+        44,
+        44
+      ],
+      "message.circle.fill": [
+        11,
+        481,
+        44,
+        44
+      ]
+    },
+    "hierarchical-red": {
+      "cloud.sun.fill": [
+        299,
+        433,
+        44,
+        44
+      ],
+      "person.circle.fill": [
+        347,
+        385,
+        44,
+        44
+      ],
+      "star.square.fill": [
+        251,
+        385,
+        44,
+        44
+      ],
+      "play.circle.fill": [
+        59,
+        481,
+        44,
+        44
+      ],
+      "line.3.horizontal.decrease.circle": [
+        347,
+        481,
+        44,
+        44
+      ],
+      "exclamationmark.triangle.fill": [
+        251,
+        433,
+        44,
+        44
+      ],
+      "star.circle": [
+        203,
+        385,
+        44,
+        44
+      ],
+      "speaker.wave.3.fill": [
+        251,
+        481,
+        44,
+        44
+      ],
+      "arrow.up.circle.fill": [
+        107,
+        481,
+        44,
+        44
+      ],
+      "heart.circle.fill": [
+        155,
+        385,
+        44,
+        44
+      ],
+      "message.circle.fill": [
+        11,
+        481,
+        44,
+        44
+      ],
+      "heart.fill": [
+        347,
+        433,
+        44,
+        44
+      ],
+      "info.circle": [
+        299,
+        385,
+        44,
+        44
+      ],
+      "checkmark.circle.fill": [
+        11,
+        385,
+        44,
+        44
+      ],
+      "person.crop.circle": [
+        11,
+        433,
+        44,
+        44
+      ],
+      "plus.circle.fill": [
+        107,
+        385,
+        44,
+        44
+      ],
+      "wifi": [
+        203,
+        481,
+        44,
+        44
+      ],
+      "bell.badge.fill": [
+        155,
+        433,
+        44,
+        44
+      ],
+      "bell.badge": [
+        107,
+        433,
+        44,
+        44
+      ],
+      "xmark.circle.fill": [
+        59,
+        385,
+        44,
+        44
+      ],
+      "person.crop.circle.fill": [
+        59,
+        433,
+        44,
+        44
+      ],
+      "chevron.right.circle.fill": [
+        155,
+        481,
+        44,
+        44
+      ],
+      "trash.circle": [
+        299,
+        481,
+        44,
+        44
+      ],
+      "folder.badge.plus": [
+        203,
+        433,
+        44,
+        44
+      ]
+    },
+    "palette": {
+      "palette heart.fill": [
+        299,
+        251,
+        44,
+        44
+      ],
+      "palette cloud.sun.fill": [
+        251,
+        251,
+        44,
+        44
+      ],
+      "palette bell.badge": [
+        203,
+        251,
+        44,
+        44
+      ],
+      "palette heart.circle.fill": [
+        155,
+        251,
+        44,
+        44
+      ],
+      "palette checkmark.circle.fill": [
+        107,
+        251,
+        44,
+        44
+      ],
+      "palette person.crop.circle.fill": [
+        59,
+        251,
+        44,
+        44
+      ],
+      "two-styles heart.fill": [
+        299,
+        303,
+        44,
+        44
+      ],
+      "two-styles cloud.sun.fill": [
+        251,
+        303,
+        44,
+        44
+      ],
+      "two-styles bell.badge": [
+        203,
+        303,
+        44,
+        44
+      ],
+      "two-styles heart.circle.fill": [
+        155,
+        303,
+        44,
+        44
+      ],
+      "two-styles checkmark.circle.fill": [
+        107,
+        303,
+        44,
+        44
+      ],
+      "two-styles person.crop.circle.fill": [
+        59,
+        303,
+        44,
+        44
+      ],
+      "white-blue heart.fill": [
+        299,
+        355,
+        44,
+        44
+      ],
+      "white-blue cloud.sun.fill": [
+        251,
+        355,
+        44,
+        44
+      ],
+      "white-blue bell.badge": [
+        203,
+        355,
+        44,
+        44
+      ],
+      "white-blue heart.circle.fill": [
+        155,
+        355,
+        44,
+        44
+      ],
+      "white-blue checkmark.circle.fill": [
+        107,
+        355,
+        44,
+        44
+      ],
+      "white-blue person.crop.circle.fill": [
+        59,
+        355,
+        44,
+        44
+      ],
+      "three heart.fill": [
+        299,
+        407,
+        44,
+        44
+      ],
+      "three cloud.sun.fill": [
+        251,
+        407,
+        44,
+        44
+      ],
+      "three bell.badge": [
+        203,
+        407,
+        44,
+        44
+      ],
+      "three heart.circle.fill": [
+        155,
+        407,
+        44,
+        44
+      ],
+      "three checkmark.circle.fill": [
+        107,
+        407,
+        44,
+        44
+      ],
+      "three person.crop.circle.fill": [
+        59,
+        407,
+        44,
+        44
+      ],
+      "one-style heart.fill": [
+        299,
+        459,
+        44,
+        44
+      ],
+      "one-style cloud.sun.fill": [
+        251,
+        459,
+        44,
+        44
+      ],
+      "one-style bell.badge": [
+        203,
+        459,
+        44,
+        44
+      ],
+      "one-style heart.circle.fill": [
+        155,
+        459,
+        44,
+        44
+      ],
+      "one-style checkmark.circle.fill": [
+        107,
+        459,
+        44,
+        44
+      ],
+      "one-style person.crop.circle.fill": [
+        59,
+        459,
+        44,
+        44
+      ],
+      "hier-two heart.fill": [
+        299,
+        511,
+        44,
+        44
+      ],
+      "hier-two cloud.sun.fill": [
+        251,
+        511,
+        44,
+        44
+      ],
+      "hier-two bell.badge": [
+        203,
+        511,
+        44,
+        44
+      ],
+      "hier-two heart.circle.fill": [
+        155,
+        511,
+        44,
+        44
+      ],
+      "hier-two checkmark.circle.fill": [
+        107,
+        511,
+        44,
+        44
+      ],
+      "hier-two person.crop.circle.fill": [
+        59,
+        511,
+        44,
+        44
+      ],
+      "mono-two heart.fill": [
+        299,
+        563,
+        44,
+        44
+      ],
+      "mono-two cloud.sun.fill": [
+        251,
+        563,
+        44,
+        44
+      ],
+      "mono-two bell.badge": [
+        203,
+        563,
+        44,
+        44
+      ],
+      "mono-two heart.circle.fill": [
+        155,
+        563,
+        44,
+        44
+      ],
+      "mono-two checkmark.circle.fill": [
+        107,
+        563,
+        44,
+        44
+      ],
+      "mono-two person.crop.circle.fill": [
+        59,
+        563,
+        44,
+        44
+      ],
+      "multi-two heart.fill": [
+        299,
+        615,
+        44,
+        44
+      ],
+      "multi-two cloud.sun.fill": [
+        251,
+        615,
+        44,
+        44
+      ],
+      "multi-two bell.badge": [
+        203,
+        615,
+        44,
+        44
+      ],
+      "multi-two heart.circle.fill": [
+        155,
+        615,
+        44,
+        44
+      ],
+      "multi-two checkmark.circle.fill": [
+        107,
+        615,
+        44,
+        44
+      ],
+      "multi-two person.crop.circle.fill": [
+        59,
+        615,
+        44,
+        44
+      ]
+    },
+    "variable": {
+      "touchid 1.0": [
+        323,
+        601,
+        44,
+        44
+      ],
+      "touchid 0.8": [
+        275,
+        601,
+        44,
+        44
+      ],
+      "touchid 0.67": [
+        227,
+        601,
+        44,
+        44
+      ],
+      "touchid 0.5": [
+        179,
+        601,
+        44,
+        44
+      ],
+      "touchid 0.34": [
+        131,
+        601,
+        44,
+        44
+      ],
+      "touchid 0.2": [
+        83,
+        601,
+        44,
+        44
+      ],
+      "touchid 0.0": [
+        35,
+        601,
+        44,
+        44
+      ],
+      "chart.bar.fill 1.0": [
+        323,
+        553,
+        44,
+        44
+      ],
+      "chart.bar.fill 0.8": [
+        275,
+        553,
+        44,
+        44
+      ],
+      "chart.bar.fill 0.67": [
+        227,
+        553,
+        44,
+        44
+      ],
+      "chart.bar.fill 0.5": [
+        179,
+        553,
+        44,
+        44
+      ],
+      "chart.bar.fill 0.34": [
+        131,
+        553,
+        44,
+        44
+      ],
+      "chart.bar.fill 0.2": [
+        83,
+        553,
+        44,
+        44
+      ],
+      "chart.bar.fill 0.0": [
+        35,
+        553,
+        44,
+        44
+      ],
+      "speaker.wave.1 1.0": [
+        323,
+        505,
+        44,
+        44
+      ],
+      "speaker.wave.1 0.8": [
+        275,
+        505,
+        44,
+        44
+      ],
+      "speaker.wave.1 0.67": [
+        227,
+        505,
+        44,
+        44
+      ],
+      "speaker.wave.1 0.5": [
+        179,
+        505,
+        44,
+        44
+      ],
+      "speaker.wave.1 0.34": [
+        131,
+        505,
+        44,
+        44
+      ],
+      "speaker.wave.1 0.2": [
+        83,
+        505,
+        44,
+        44
+      ],
+      "speaker.wave.1 0.0": [
+        35,
+        505,
+        44,
+        44
+      ],
+      "speaker.wave.2 1.0": [
+        323,
+        457,
+        44,
+        44
+      ],
+      "speaker.wave.2 0.8": [
+        275,
+        457,
+        44,
+        44
+      ],
+      "speaker.wave.2 0.67": [
+        227,
+        457,
+        44,
+        44
+      ],
+      "speaker.wave.2 0.5": [
+        179,
+        457,
+        44,
+        44
+      ],
+      "speaker.wave.2 0.34": [
+        131,
+        457,
+        44,
+        44
+      ],
+      "speaker.wave.2 0.2": [
+        83,
+        457,
+        44,
+        44
+      ],
+      "speaker.wave.2 0.0": [
+        35,
+        457,
+        44,
+        44
+      ],
+      "speaker.wave.3.fill 1.0": [
+        323,
+        409,
+        44,
+        44
+      ],
+      "speaker.wave.3.fill 0.8": [
+        275,
+        409,
+        44,
+        44
+      ],
+      "speaker.wave.3.fill 0.67": [
+        227,
+        409,
+        44,
+        44
+      ],
+      "speaker.wave.3.fill 0.5": [
+        179,
+        409,
+        44,
+        44
+      ],
+      "speaker.wave.3.fill 0.34": [
+        131,
+        409,
+        44,
+        44
+      ],
+      "speaker.wave.3.fill 0.2": [
+        83,
+        409,
+        44,
+        44
+      ],
+      "speaker.wave.3.fill 0.0": [
+        35,
+        409,
+        44,
+        44
+      ],
+      "speaker.wave.3 1.0": [
+        323,
+        361,
+        44,
+        44
+      ],
+      "speaker.wave.3 0.8": [
+        275,
+        361,
+        44,
+        44
+      ],
+      "speaker.wave.3 0.67": [
+        227,
+        361,
+        44,
+        44
+      ],
+      "speaker.wave.3 0.5": [
+        179,
+        361,
+        44,
+        44
+      ],
+      "speaker.wave.3 0.34": [
+        131,
+        361,
+        44,
+        44
+      ],
+      "speaker.wave.3 0.2": [
+        83,
+        361,
+        44,
+        44
+      ],
+      "speaker.wave.3 0.0": [
+        35,
+        361,
+        44,
+        44
+      ],
+      "cellularbars 1.0": [
+        323,
+        313,
+        44,
+        44
+      ],
+      "cellularbars 0.8": [
+        275,
+        313,
+        44,
+        44
+      ],
+      "cellularbars 0.67": [
+        227,
+        313,
+        44,
+        44
+      ],
+      "cellularbars 0.5": [
+        179,
+        313,
+        44,
+        44
+      ],
+      "cellularbars 0.34": [
+        131,
+        313,
+        44,
+        44
+      ],
+      "cellularbars 0.2": [
+        83,
+        313,
+        44,
+        44
+      ],
+      "cellularbars 0.0": [
+        35,
+        313,
+        44,
+        44
+      ],
+      "wifi 1.0": [
+        323,
+        265,
+        44,
+        44
+      ],
+      "wifi 0.8": [
+        275,
+        265,
+        44,
+        44
+      ],
+      "wifi 0.67": [
+        227,
+        265,
+        44,
+        44
+      ],
+      "wifi 0.5": [
+        179,
+        265,
+        44,
+        44
+      ],
+      "wifi 0.34": [
+        131,
+        265,
+        44,
+        44
+      ],
+      "wifi 0.2": [
+        83,
+        265,
+        44,
+        44
+      ],
+      "wifi 0.0": [
+        35,
+        265,
+        44,
+        44
+      ]
+    },
+    "effects": {
+      "end-2": [
+        206.33,
+        459,
+        46,
+        33.67
+      ],
+      "appear-inactive": [
+        166,
+        458.83,
+        36.33,
+        34
+      ],
+      "removed-inside": [
+        125.67,
+        458.83,
+        36.33,
+        34
+      ],
+      "removed-false": [
+        85.33,
+        458.83,
+        36.33,
+        34
+      ],
+      "removed": [
+        45,
+        458.83,
+        36.33,
+        34
+      ],
+      "end": [
+        311,
+        417.17,
+        46,
+        33.67
+      ],
+      "variable-color": [
+        273,
+        419,
+        34,
+        30
+      ],
+      "scale-up": [
+        235,
+        419,
+        34,
+        30
+      ],
+      "appear": [
+        197,
+        419,
+        34,
+        30
+      ],
+      "disappear-down": [
+        159,
+        419,
+        34,
+        30
+      ],
+      "disappear-inactive": [
+        121,
+        419,
+        34,
+        30
+      ],
+      "disappear": [
+        83,
+        419,
+        34,
+        30
+      ],
+      "bounce": [
+        45,
+        419,
+        34,
+        30
+      ]
+    },
+    "names-1": {
+      "line.3.horizontal.decrease.circle": [
+        299,
+        361,
+        44,
+        44
+      ],
+      "line.3.horizontal.decrease": [
+        251,
+        361,
+        44,
+        44
+      ],
+      "bubble.left": [
+        251,
+        457,
+        44,
+        44
+      ],
+      "phone.fill": [
+        347,
+        313,
+        44,
+        44
+      ],
+      "chevron.forward": [
+        107,
+        313,
+        44,
+        44
+      ],
+      "tram": [
+        11,
+        553,
+        44,
+        44
+      ],
+      "stopwatch": [
+        251,
+        505,
+        44,
+        44
+      ],
+      "qrcode": [
+        155,
+        409,
+        44,
+        44
+      ],
+      "umbrella": [
+        347,
+        553,
+        44,
+        44
+      ],
+      "moon.stars": [
+        203,
+        553,
+        44,
+        44
+      ],
+      "figure.run": [
+        155,
+        553,
+        44,
+        44
+      ],
+      "dollarsign.circle": [
+        299,
+        505,
+        44,
+        44
+      ],
+      "headphones": [
+        203,
+        505,
+        44,
+        44
+      ],
+      "bubble.right": [
+        299,
+        457,
+        44,
+        44
+      ],
+      "pin": [
+        59,
+        409,
+        44,
+        44
+      ],
+      "trophy": [
+        11,
+        409,
+        44,
+        44
+      ],
+      "power": [
+        251,
+        409,
+        44,
+        44
+      ],
+      "note.text": [
+        347,
+        409,
+        44,
+        44
+      ],
+      "mic.fill": [
+        59,
+        361,
+        44,
+        44
+      ],
+      "video": [
+        347,
+        457,
+        44,
+        44
+      ],
+      "car": [
+        347,
+        361,
+        44,
+        44
+      ],
+      "shuffle": [
+        107,
+        505,
+        44,
+        44
+      ],
+      "chevron.backward": [
+        155,
+        313,
+        44,
+        44
+      ],
+      "star.leadinghalf.filled": [
+        59,
+        457,
+        44,
+        44
+      ],
+      "phone": [
+        299,
+        313,
+        44,
+        44
+      ],
+      "ellipsis.circle": [
+        203,
+        361,
+        44,
+        44
+      ],
+      "cloud.rain": [
+        251,
+        553,
+        44,
+        44
+      ],
+      "printer": [
+        107,
+        409,
+        44,
+        44
+      ],
+      "message.fill": [
+        251,
+        313,
+        44,
+        44
+      ],
+      "speaker.wave.3": [
+        59,
+        505,
+        44,
+        44
+      ],
+      "checklist": [
+        299,
+        409,
+        44,
+        44
+      ],
+      "figure.walk": [
+        107,
+        553,
+        44,
+        44
+      ],
+      "mic": [
+        11,
+        361,
+        44,
+        44
+      ],
+      "bicycle": [
+        59,
+        553,
+        44,
+        44
+      ],
+      "fork.knife": [
+        203,
+        409,
+        44,
+        44
+      ],
+      "person.crop.circle.fill": [
+        59,
+        313,
+        44,
+        44
+      ],
+      "cloud.sun": [
+        299,
+        553,
+        44,
+        44
+      ],
+      "bus": [
+        347,
+        505,
+        44,
+        44
+      ],
+      "repeat": [
+        155,
+        505,
+        44,
+        44
+      ],
+      "photo.on.rectangle": [
+        11,
+        505,
+        44,
+        44
+      ],
+      "square.and.arrow.down": [
+        155,
+        457,
+        44,
+        44
+      ],
+      "message": [
+        203,
+        313,
+        44,
+        44
+      ],
+      "mappin.circle": [
+        155,
+        361,
+        44,
+        44
+      ],
+      "person.crop.circle": [
+        11,
+        313,
+        44,
+        44
+      ],
+      "doc.on.doc": [
+        203,
+        457,
+        44,
+        44
+      ],
+      "bell.badge": [
+        11,
+        457,
+        44,
+        44
+      ],
+      "arrow.triangle.2.circlepath": [
+        107,
+        457,
+        44,
+        44
+      ],
+      "mappin": [
+        107,
+        361,
+        44,
+        44
+      ]
+    },
+    "names-2": {
+      "chevron.compact.down": [
+        347,
+        505,
+        44,
+        44
+      ],
+      "checkmark.seal": [
+        155,
+        505,
+        44,
+        44
+      ],
+      "app.badge": [
+        107,
+        457,
+        44,
+        44
+      ],
+      "arrow.left.to.line": [
+        203,
+        553,
+        44,
+        44
+      ],
+      "barcode": [
+        347,
+        313,
+        44,
+        44
+      ],
+      "arrow.up.right.square": [
+        299,
+        553,
+        44,
+        44
+      ],
+      "newspaper": [
+        59,
+        361,
+        44,
+        44
+      ],
+      "arrow.down.right": [
+        59,
+        553,
+        44,
+        44
+      ],
+      "chevron.left.2": [
+        251,
+        505,
+        44,
+        44
+      ],
+      "xmark.octagon.fill": [
+        107,
+        505,
+        44,
+        44
+      ],
+      "star.slash": [
+        59,
+        505,
+        44,
+        44
+      ],
+      "person.badge.plus": [
+        347,
+        457,
+        44,
+        44
+      ],
+      "archivebox": [
+        155,
+        361,
+        44,
+        44
+      ],
+      "pills": [
+        107,
+        313,
+        44,
+        44
+      ],
+      "arrow.triangle.branch": [
+        347,
+        553,
+        44,
+        44
+      ],
+      "face.smiling": [
+        155,
+        409,
+        44,
+        44
+      ],
+      "crown": [
+        107,
+        361,
+        44,
+        44
+      ],
+      "graduationcap": [
+        11,
+        361,
+        44,
+        44
+      ],
+      "takeoutbag.and.cup.and.straw": [
+        299,
+        361,
+        44,
+        44
+      ],
+      "arrow.down.to.line": [
+        107,
+        553,
+        44,
+        44
+      ],
+      "arrow.up.to.line": [
+        155,
+        553,
+        44,
+        44
+      ],
+      "text.bubble": [
+        203,
+        457,
+        44,
+        44
+      ],
+      "rectangle.portrait.and.arrow.right": [
+        299,
+        409,
+        44,
+        44
+      ],
+      "hand.wave": [
+        203,
+        409,
+        44,
+        44
+      ],
+      "chevron.right.2": [
+        299,
+        505,
+        44,
+        44
+      ],
+      "checkmark.shield": [
+        203,
+        505,
+        44,
+        44
+      ],
+      "laptopcomputer": [
+        347,
+        409,
+        44,
+        44
+      ],
+      "cube": [
+        203,
+        361,
+        44,
+        44
+      ],
+      "square.and.arrow.up.on.square": [
+        251,
+        409,
+        44,
+        44
+      ],
+      "brain.head.profile": [
+        107,
+        409,
+        44,
+        44
+      ],
+      "gearshape.2": [
+        251,
+        457,
+        44,
+        44
+      ],
+      "cross.case": [
+        59,
+        313,
+        44,
+        44
+      ],
+      "heart.text.square": [
+        11,
+        313,
+        44,
+        44
+      ],
+      "arrow.up.left": [
+        11,
+        553,
+        44,
+        44
+      ],
+      "person.crop.circle.badge.plus": [
+        299,
+        457,
+        44,
+        44
+      ],
+      "plus.app": [
+        155,
+        457,
+        44,
+        44
+      ],
+      "hand.raised": [
+        155,
+        313,
+        44,
+        44
+      ],
+      "hexagon": [
+        59,
+        457,
+        44,
+        44
+      ],
+      "sun.horizon": [
+        251,
+        361,
+        44,
+        44
+      ],
+      "bed.double": [
+        59,
+        409,
+        44,
+        44
+      ],
+      "applewatch": [
+        11,
+        457,
+        44,
+        44
+      ],
+      "square.grid.2x2.fill": [
+        203,
+        313,
+        44,
+        44
+      ],
+      "dumbbell": [
+        347,
+        361,
+        44,
+        44
+      ],
+      "rectangle.grid.1x2": [
+        251,
+        313,
+        44,
+        44
+      ],
+      "antenna.radiowaves.left.and.right": [
+        299,
+        313,
+        44,
+        44
+      ],
+      "heart.slash": [
+        11,
+        505,
+        44,
+        44
+      ],
+      "arrow.right.to.line": [
+        251,
+        553,
+        44,
+        44
+      ],
+      "figure.strengthtraining.traditional": [
+        11,
+        409,
+        44,
+        44
+      ]
+    },
+    "names-3": {
+      "forward.end.fill": [
+        299,
+        361,
+        44,
+        44
+      ],
+      "bubble.left.and.bubble.right": [
+        347,
+        313,
+        44,
+        44
+      ],
+      "basket": [
+        251,
+        409,
+        44,
+        44
+      ],
+      "playpause": [
+        251,
+        361,
+        44,
+        44
+      ],
+      "music.note.list": [
+        11,
+        409,
+        44,
+        44
+      ],
+      "tray.full": [
+        155,
+        313,
+        44,
+        44
+      ],
+      "externaldrive": [
+        251,
+        313,
+        44,
+        44
+      ],
+      "camera.rotate": [
+        59,
+        361,
+        44,
+        44
+      ],
+      "backward.end.fill": [
+        347,
+        361,
+        44,
+        44
+      ],
+      "doc.badge.plus": [
+        59,
+        313,
+        44,
+        44
+      ],
+      "signpost.right": [
+        251,
+        457,
+        44,
+        44
+      ],
+      "scribble": [
+        347,
+        553,
+        44,
+        44
+      ],
+      "cellularbars": [
+        347,
+        505,
+        44,
+        44
+      ],
+      "network": [
+        203,
+        457,
+        44,
+        44
+      ],
+      "figure.yoga": [
+        59,
+        505,
+        44,
+        44
+      ],
+      "sidebar.left": [
+        299,
+        505,
+        44,
+        44
+      ],
+      "sunrise": [
+        155,
+        505,
+        44,
+        44
+      ],
+      "envelope.badge": [
+        299,
+        313,
+        44,
+        44
+      ],
+      "trash.slash": [
+        59,
+        553,
+        44,
+        44
+      ],
+      "seal": [
+        251,
+        553,
+        44,
+        44
+      ],
+      "receipt": [
+        107,
+        457,
+        44,
+        44
+      ],
+      "banknote": [
+        299,
+        409,
+        44,
+        44
+      ],
+      "lightbulb": [
+        203,
+        553,
+        44,
+        44
+      ],
+      "livephoto": [
+        155,
+        361,
+        44,
+        44
+      ],
+      "safari": [
+        299,
+        457,
+        44,
+        44
+      ],
+      "film": [
+        107,
+        409,
+        44,
+        44
+      ],
+      "folder.badge.plus": [
+        107,
+        313,
+        44,
+        44
+      ],
+      "mic.slash": [
+        203,
+        361,
+        44,
+        44
+      ],
+      "storefront": [
+        11,
+        457,
+        44,
+        44
+      ],
+      "ferry": [
+        11,
+        505,
+        44,
+        44
+      ],
+      "cloud.bolt": [
+        203,
+        505,
+        44,
+        44
+      ],
+      "waveform.path.ecg": [
+        59,
+        409,
+        44,
+        44
+      ],
+      "ticket": [
+        347,
+        409,
+        44,
+        44
+      ],
+      "airplane.departure": [
+        347,
+        457,
+        44,
+        44
+      ],
+      "globe.americas": [
+        155,
+        457,
+        44,
+        44
+      ],
+      "wallet.bifold": [
+        59,
+        457,
+        44,
+        44
+      ],
+      "viewfinder": [
+        107,
+        361,
+        44,
+        44
+      ],
+      "pencil.line": [
+        11,
+        313,
+        44,
+        44
+      ],
+      "octagon": [
+        299,
+        553,
+        44,
+        44
+      ],
+      "cloud.moon": [
+        251,
+        505,
+        44,
+        44
+      ],
+      "calendar.badge.plus": [
+        155,
+        409,
+        44,
+        44
+      ],
+      "bookmark.slash": [
+        11,
+        553,
+        44,
+        44
+      ],
+      "cart.badge.plus": [
+        203,
+        409,
+        44,
+        44
+      ],
+      "wifi.slash": [
+        155,
+        553,
+        44,
+        44
+      ],
+      "tray.and.arrow.down": [
+        203,
+        313,
+        44,
+        44
+      ],
+      "video.slash": [
+        11,
+        361,
+        44,
+        44
+      ],
+      "location.slash": [
+        107,
+        553,
+        44,
+        44
+      ],
+      "figure.stand": [
+        107,
+        505,
+        44,
+        44
+      ]
+    }
+  },
+  "findings": {
+    "multicolor": "Fixed colours, the same under a purple foreground style: heart and heart.fill, trash, trash.fill and trash.circle.fill (white glyph) systemRed 255,56,60; leaf and leaf.fill systemGreen 52,199,89; bolt, bolt.fill, star, star.fill, sun.max.fill and exclamationmark.triangle.fill systemYellow 255,204,0; flag.fill systemOrange 255,141,40; xmark.octagon.fill red with a white glyph; checkmark.circle.fill systemBlue 0,136,255 and plus.circle.fill green, each with a white glyph. Badges: the dot of bell.badge, bell.badge.fill, app.badge and envelope.badge red; the plus of folder.badge.plus, person.crop.circle.badge.plus, cart.badge.plus and calendar.badge.plus a green disc with a white plus (calendar.badge.plus also draws its calendar red); person.crop.circle.badge.checkmark a blue disc; the symbol itself in the foreground style. flame, drop, sun.max, snowflake, umbrella.fill, pawprint.fill, tortoise.fill, hare.fill, checkmark.seal.fill, pencil.circle.fill and xmark.bin follow the foreground style. Clouds and moons (cloud.fill, cloud.sun.fill, moon.fill, moon.stars.fill) are white, with a yellow sun and cyan 0,192,232 rain.",
+    "hierarchical": "One foreground colour at three strengths: the glyph at full, an outline container (star.circle, info.circle, trash.circle), a badge's symbol (bell.badge) and the waves of speaker.wave.3.fill at 0.5 (255,156,158 over white from 255,56,60), and a filled container (checkmark.circle.fill, person.crop.circle.fill) at 0.25 (255,206,207). heart.fill, wifi and person.crop.circle draw in one colour.",
+    "palette": "Two styles with no rendering mode draw exactly as .palette. The glyph or badge takes the first style; a badge's symbol or a cloud's sun the second; a filled container the third, or the second when two are given. One style paints every layer that colour (a solid disc, no knockout). .hierarchical, .monochrome and .multicolor ignore a second style.",
+    "variable": "Parts above the value are drawn at 0.3 (178 over white from black). A part lights when the value is above its share rounded to hundredths: wifi (dot, two arcs) and speaker.wave.3 light parts above 0, 0.33 and 0.67, so 0.67 leaves the last dim; cellularbars above 0, 0.25, 0.5 and 0.75; speaker.wave.2 above 0 and 0.5. At 0 every part is dim; the speaker itself never dims.",
+    "effects": "Frames are kept by every effect. .disappear, .disappear.down and .appear hide the symbol while active; isActive: false draws it. .bounce and .variableColor draw it as it is at rest (variableColor animates); .scale.up draws it about 1.25 times larger. .symbolEffectsRemoved() between the effect and the symbol draws it again; one written after the effect, or symbolEffectsRemoved(false), does not.",
+    "names": "names-1 to names-3 draw 144 of the names the preview maps as look-alikes, eight a row in the order of the fixture's sample lists, for reference."
+  }
+}

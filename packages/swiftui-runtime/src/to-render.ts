@@ -236,6 +236,7 @@ function toRenderNode(node: PlacedNode, keyOf?: KeyOf): RenderNode | null {
           resizable: paint.resizable,
           symbolScale: paint.symbolScale,
           ...(paint.symbol ? { symbol: paint.symbol } : {}),
+          symbolPaint: paint.symbolPaint,
         },
         a11y: { role: 'img', label: node.debugName ?? 'Image' },
       }

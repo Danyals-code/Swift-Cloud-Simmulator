@@ -19,6 +19,15 @@ export function isSymbolVariant(name: string): boolean {
   return name.split('.').every((part) => VARIANTS.has(part))
 }
 
+const EFFECTS = new Set(['appear', 'disappear', 'scale', 'bounce', 'pulse', 'variableColor', 'wiggle', 'breathe', 'rotate', 'replace'])
+const EFFECT_OPTIONS = new Set(['up', 'down', 'left', 'right', 'forward', 'backward', 'clockwise', 'counterClockwise', 'byLayer', 'wholeSymbol',
+  'iterative', 'cumulative', 'reversing', 'nonReversing', 'hideInactiveLayers', 'dimInactiveLayers', 'offUp', 'downUp', 'upUp', 'plain'])
+
+/** Whether `.member` is an option of the symbol effect `effect` names, `.disappear.down` (Wave 6b). */
+export function isSymbolEffectOption(effect: string, member: string): boolean {
+  return EFFECTS.has(effect.split('.')[0]!) && EFFECT_OPTIONS.has(member)
+}
+
 /**
  * The symbol `.symbolVariant(variant)` draws for `name`, composed as `symbolVariantName`
  * says. Where the preview has no such symbol it draws the one written, as iOS 27 draws

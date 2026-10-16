@@ -40,7 +40,7 @@ These break trust: the studio says "Design updated." and is wrong, or one ordina
 | 7 | After Max width 260, the Size card also shows Max height 260 and the width select disappears. | hands-on T6 |
 | 8 | A sheet's Title writes `.navigationTitle` on a sheet with no NavigationStack, so it never shows. | hands-on T8 |
 | 9 | "Appear animation" is offered on views that are never inserted or removed, where it never plays. | hands-on T9 |
-| 10 | `aspectRatio(.fit)` is read as Stretch, and choosing Fit then duplicates the scaling. Unknown SF Symbol names are accepted. | panel probes |
+| 10 | `aspectRatio(.fit)` is read as Stretch, and choosing Fit then duplicates the scaling. Unknown SF Symbol names are accepted (since Wave 6b the picker offers 836, and a name it has no drawing for says the preview shows a placeholder). | panel probes |
 
 **The preview is silently wrong (no diagnostic)**
 
@@ -113,7 +113,7 @@ Ranked by how common the construct is in real and AI-generated SwiftUI.
 
 | # | Gap | Status |
 | --- | --- | --- |
-| 1 | **SF Symbols:** 243 names mapped to look-alikes; 84 of 241 common names (35%) draw "?", including person.crop.circle, ellipsis.circle, message, phone, mic, mappin, chevron.forward, arrow.up.circle.fill. Rendering modes (multicolor, hierarchical, palette), variants, effects and variable values are ignored. | Placeholder / Ignored |
+| 1 | **SF Symbols:** 243 names mapped to look-alikes; 84 of 241 common names (35%) draw "?", including person.crop.circle, ellipsis.circle, message, phone, mic, mappin, chevron.forward, arrow.up.circle.fill. Rendering modes (multicolor, hierarchical, palette), variants, effects and variable values are ignored. **Since Wave 6b** 836 names draw a look-alike, all 241 of the common names among them, and the symbol picker searches them all by name or everyday word, by category; a real name with no drawing still draws "?" with a warning. Hierarchical, palette and multicolor draw as layers where the look-alike has them, and `variableValue` dims wifi, cellular and speaker symbols. | Look-alike (Wave 6b) |
 | 2 | **Liquid Glass:** `.glassEffect()` ignored, `.glassEffect(.regular.tint())` traps, `GlassEffectContainer` placeholder; `.buttonStyle(.glass)` and bar glass approximated. | Ignored / Missing |
 | 3 | `Color(hex:)` and Color extension initialisers draw clear (above). | Missing, silent |
 | 4 | **Custom fonts** fall back to the system face; there is no way to add a font file. `.fontDesign(.rounded)` only resolves in Safari. | Ignored |
@@ -125,7 +125,7 @@ Ranked by how common the construct is in real and AI-generated SwiftUI.
 | 10 | `Text(Image(...))` concatenation draws nothing for the image; `"\(Image(...))"` draws "View". | Missing |
 | 11 | Ordinary style chains that trap (above). | Missing, traps |
 | 12 | DatePicker `.graphical` and `.wheel` styles are not drawn; the default DatePicker is a text row; ColorPicker has no swatch. | Ignored / Approximate |
-| 13 | Symbol styling (rendering modes, variants, effects). | Ignored |
+| 13 | Symbol styling (rendering modes, variants, effects). **Since Waves 6a and 6b** variants and their chains draw the variant symbol (6a); rendering modes paint layers or their own colours where the look-alike has them, and say so where it doesn't; effects draw the symbol still, `.disappear` hidden; and a symbol Image has Rendering and Filled in Design, from iOS 15 (6b). | Approximate (Waves 6a, 6b) |
 | 14 | Custom Toggle and Label styles, Label icon closures. | Ignored, silent |
 | 15 | Shape and text masks are ignored (gradient text via overlay plus mask shows a rectangle); `.zIndex` is ignored. | Ignored |
 | 16 | Motion: `matchedGeometryEffect`, `phaseAnimator`, `keyframeAnimator`, `contentTransition(.numericText())`, `scrollTransition`; `repeatForever` plays once. | Ignored |

@@ -19,6 +19,8 @@ import {
   rgba,
   ROUNDED_FAMILY,
   SERIF_FAMILY,
+  symbolMulticolor,
+  isSymbolRenderingMode,
   UI_FONT_FAMILY,
   type CornerRadii,
   type CornerStyle,
@@ -27,6 +29,8 @@ import {
   type ShapeKind,
   type ShapeOutline,
   type Size,
+  type SymbolPaint,
+  type SymbolRenderingMode,
   type TransitionPart,
 } from '@studio/shared'
 import {
@@ -472,6 +476,12 @@ interface ControlStyles {
   readonly buttonBorderShape?: string
   /** `.symbolVariant(.fill.circle)`, as one chain (Wave 6a). */
   readonly symbolVariant?: string
+  /** `.symbolRenderingMode(.palette)` (Wave 6b). */
+  readonly symbolMode?: SymbolRenderingMode
+  /** The nearest `.foregroundStyle`, whose styles palette paints a symbol's layers in, read only at a symbol (Wave 6b). */
+  readonly symbolForeground?: ModifierValue
+  /** A `.symbolEffect` that hides its symbols, `.disappear` or `.appear` while active (Wave 6b). */
+  readonly symbolHidden?: boolean
   /** Whether a `foregroundStyle` or `foregroundColor` is set on this view or one around it, which a button's title takes over its tint. */
   readonly foregroundSet?: boolean
   /** A toolbar item drawn in a capsule it shares with the items beside it, so without a glass of its own. */
@@ -518,9 +528,33 @@ function withStyles(outer: ControlStyles, view: ViewValue, scheme: ColorScheme):
     const name = tokenName(modifierArg(view, modifier, 0))
     if (name !== null) next = { ...next, [key]: name }
   }
+  const mode = tokenName(modifierArg(view, 'symbolRenderingMode', 0)) ?? undefined
+  if (isSymbolRenderingMode(mode)) next = { ...next, symbolMode: mode }
   const tint = view.modifiers.find((modifier) => modifier.name === 'tint' || modifier.name === 'accentColor')
   if (tint) next = { ...next, tint: resolveColorArg(tint.args[0]?.value, scheme, outer.tint) ?? undefined }
-  if (view.modifiers.some((modifier) => modifier.name === 'foregroundStyle' || modifier.name === 'foregroundColor')) next = { ...next, foregroundSet: true }
+  const foreground = view.modifiers.find((modifier) => modifier.name === 'foregroundStyle' || modifier.name === 'foregroundColor')
+  if (foreground) next = { ...next, foregroundSet: true, symbolForeground: foreground }
+  return symbolEffects(next, view)
+}
+
+/**
+ * `.symbolEffect(.disappear)` and `.symbolEffect(.appear)` hide the symbols they reach while
+ * active, keeping their frames, as iOS 27 draws them at rest; every other effect draws the
+ * symbol as it is. `.symbolEffectsRemoved()` between the effect and the symbol draws it
+ * again, and one around the effect doesn't (Wave 6b). Modifiers are read outermost first.
+ */
+function symbolEffects(styles: ControlStyles, view: ViewValue): ControlStyles {
+  let next = styles
+  for (let index = view.modifiers.length - 1; index >= 0; index--) {
+    const modifier = view.modifiers[index]!
+    if (modifier.name === 'symbolEffect' && /^(dis)?appear(\.|$)/.test(tokenName(positional(modifier.args, 0)) ?? '')) {
+      const active = labelled(modifier.args, 'isActive')
+      if (!(active?.kind === 'bool' && !active.value)) next = { ...next, symbolHidden: true }
+    } else if (modifier.name === 'symbolEffectsRemoved' && next.symbolHidden) {
+      const removed = modifier.args[0]?.value
+      if (!(removed?.kind === 'bool' && !removed.value)) next = { ...next, symbolHidden: false }
+    }
+  }
   return next
 }
 
@@ -2433,7 +2467,9 @@ class Converter {
 
     const named = systemName && variantSymbol(systemName, this.styles.symbolVariant)
     const symbol = resolveSymbol(named ?? '')
-    return {
+    const value = numberArg(labelled(view.args, 'variableValue'))
+    const paint = this.symbolPaint(named, value === null ? undefined : Math.min(1, Math.max(0, value)))
+    return this.shownSymbol({
       kind: 'image',
       id: path,
       glyph: symbol.glyph,
@@ -2441,9 +2477,33 @@ class Converter {
       resizable,
       approximated: symbol.approximated,
       ...(named ? { symbol: named } : {}),
+      symbolPaint: paint,
       ...origin,
       ...(systemName ? { debugName: `Image(systemName: "${systemName}")` } : {}),
-    }
+    }, path)
+  }
+
+  /**
+   * How a symbol's layers are painted (Wave 6b): in the mode written around it, or in palette
+   * where the nearest `.foregroundStyle` gives two styles and no mode is written, as iOS 27
+   * draws it (docs/parity/native/iphone18pro-symbols); and how full its variable value is.
+   * The styles are resolved here, in the symbol's own scheme and tint, as SwiftUI resolves them
+   * where the symbol is drawn, and only for a symbol.
+   */
+  private symbolPaint(name: string | null, variableValue?: number): SymbolPaint | undefined {
+    const written = this.styles.symbolMode
+    const styles = this.styles.symbolForeground?.args.filter((arg) => arg.label === null)
+    const mode = written === 'monochrome' ? undefined : written ?? (styles && styles.length > 1 ? 'palette' : undefined)
+    if (!mode && variableValue === undefined) return undefined
+    const scheme = this.styles.colorScheme ?? this.scheme
+    const colors = mode === 'palette' ? styles?.map((arg) => resolveColorArg(arg.value, scheme, this.styles.tint))
+      : mode === 'multicolor' && name ? symbolMulticolor(name)?.map((color) => color ? this.color(color) : null) : undefined
+    return { mode, colors, variableValue }
+  }
+
+  /** A symbol a `.symbolEffect` hides, drawn clear in its frame (Wave 6b). */
+  private shownSymbol(element: LayoutElement, id: string): LayoutElement {
+    return this.styles.symbolHidden ? { kind: 'modified', id: `${id}effect`, modifier: { kind: 'opacity', value: 0 }, child: element } : element
   }
 
   private label(view: ViewValue, path: string, origin: object): LayoutElement {
@@ -2462,7 +2522,8 @@ class Converter {
     const icon = symbol ? [] : argViews(view, 'icon')
     const children: LayoutElement[] = wantsIcon ? this.convertList(icon, `${path}icon`, 'horizontal') : []
     if (symbol && wantsIcon) {
-      children.push({
+      const paint = this.symbolPaint(systemImage)
+      children.push(this.shownSymbol({
         kind: 'image',
         id: `${path}icon`,
         glyph: symbol.glyph,
@@ -2471,7 +2532,8 @@ class Converter {
         resizable: false,
         approximated: symbol.approximated,
         ...(systemImage ? { symbol: systemImage } : {}),
-      })
+        symbolPaint: paint,
+      }, `${path}icon`))
     }
     // Centred in a column 24 pt wide, with the title 16 pt after it, at 72 on the phone.
     // The column is a line of text tall: the icon reaches past it, and the row keeps

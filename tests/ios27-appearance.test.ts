@@ -217,7 +217,7 @@ describe('Ionicons adapter', () => {
   })
   it('has no drawing for a name Apple ships no symbol by, since Xcode draws nothing for it (G1)', () => {
     // Checked against the SF Symbols names and their aliases in macOS 27's CoreGlyphs on 2026-09-24.
-    for (const name of ['gear.fill', 'calendar.fill', 'timer.fill', 'battery.100.fill', 'sparkles.fill', 'wand.and.stars.fill', 'hourglass.fill', 'house.square', 'house.square.fill']) {
+    for (const name of ['gear.fill', 'calendar.fill', 'timer.fill', 'battery.100.fill', 'sparkles.fill', 'wand.and.stars.fill', 'hourglass.fill', 'house.square', 'house.square.fill', 'facetime', 'bluetooth', 'ellipsis.vertical']) {
       expect(symbolDefinition(name), name).toBeNull()
     }
   })

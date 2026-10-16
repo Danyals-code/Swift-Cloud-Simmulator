@@ -72,11 +72,13 @@ const BACKGROUND_WRITTEN = DOTS_BACKGROUND.slice(1).replace(/\s/g, '')
 /**
  * The nearest view around `node`, in the body it is written in, with `modifier` switched on
  * (Wave 4c): an environment value such as `.indexViewStyle`, which the views inside it take
- * unless they set their own.
+ * unless they set their own. Several names are one value written either way, as
+ * `foregroundStyle` and `foregroundColor` are.
  */
-export function setAround(node: AuthoringNode, byId: (id: string | undefined) => AuthoringNode | undefined, modifier: string): { readonly view: AuthoringNode; readonly modifier: AuthoringModifier } | undefined {
+export function setAround(node: AuthoringNode, byId: (id: string | undefined) => AuthoringNode | undefined, modifier: string | readonly string[]): { readonly view: AuthoringNode; readonly modifier: AuthoringModifier } | undefined {
+  const names: readonly string[] = typeof modifier === 'string' ? [modifier] : modifier
   for (let at = byId(node.parentId); at && at.kind !== 'definition'; at = byId(at.parentId)) {
-    const found = at.modifiers?.find(m => m.name === modifier && m.enabled !== false)
+    const found = at.modifiers?.find(m => names.includes(m.name) && m.enabled !== false)
     if (found) return { view: at, modifier: found }
   }
   return undefined

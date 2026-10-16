@@ -170,7 +170,9 @@ details.settingsSection[open] > summary + * { margin-top: 12px; }
 
 /* Choose a symbol: a grid of tiles, the chosen one selected. */
 .symbolPicker > summary { display: flex; align-items: center; min-height: var(--row-height); font-size: var(--text-body); color: var(--color-xc-text); }
-.symbolPicker > input { width: 100%; height: var(--control-height); }
+/* Search beside the category, both a control high; the grid below shows the matches. */
+.symbolPicker > span { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.symbolPicker > span > * { width: 100%; min-width: 0; height: var(--control-height); }
 .symbolPicker > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; max-height: 232px; overflow: auto; }
 .symbolPicker > div > button { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px; width: 100%; min-height: 0; padding: 8px 4px; border-radius: var(--radius-md); background: transparent; color: var(--color-xc-text); transition: background-color var(--duration-fast), color var(--duration-fast); }
 .symbolPicker > div > button:hover:not(:disabled) { background: var(--color-xc-fill); }

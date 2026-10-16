@@ -113,6 +113,24 @@ asset catalog holding a 40 x 30 pt "photo"), measure what the Wave 6a fixes draw
 
 `tests/text-trust-runtime.test.ts` cites these.
 
+10 light images in [native/iphone18pro-symbols](native/iphone18pro-symbols/measurements.json),
+paired with `tests/fixtures/ios27-symbols-6b.swift`, measure what Wave 6b draws. Each screen
+prints the frames of what it measures. They cover:
+- `.multicolor` on 56 common symbols, under the accent and under purple: which keep fixed
+  colours (heart red, leaf green, star and bolt yellow, badges red, green or blue) and which
+  follow the foreground style (flame, drop);
+- `.hierarchical` on enclosed and badged symbols: a filled container at 0.25 and an outline
+  container, a badge's symbol or speaker waves at 0.5;
+- palette: two styles alone are palette; the glyph takes the first style, a filled container
+  the last; one style fills every layer; the other modes ignore a second style;
+- `variableValue` at seven values on wifi, cellularbars and speaker.wave.*: parts above the
+  value are drawn at 0.3;
+- symbol effects at rest: `.disappear` and `.appear` hide the symbol in its frame, and
+  `.symbolEffectsRemoved()` between the effect and the symbol draws it again;
+- 144 of the names the preview draws as look-alikes, for reference.
+
+`tests/symbols-runtime.test.ts` cites these.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh

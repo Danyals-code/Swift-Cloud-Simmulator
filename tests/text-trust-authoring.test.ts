@@ -503,7 +503,7 @@ describe('a symbol variant', () => {
   })
 
   it.each([
-    ['Image(systemName: "star").symbolVariant(.slash)', 'star.slash', 'star'],
+    ['Image(systemName: "house").symbolVariant(.slash)', 'house.slash', 'house'],
     ['Label("Files", systemImage: "folder").symbolVariant(.square)', 'folder.square', 'folder'],
     ['VStack { Image(systemName: "folder") }.symbolVariant(.square)', 'folder.square', 'folder'],
     ['HStack { Label("A", systemImage: "star"); Image(systemName: "folder").padding() }.symbolVariant(.square)', 'folder.square', 'folder'],
