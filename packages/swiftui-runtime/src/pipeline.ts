@@ -19,6 +19,7 @@ import {
   type MeasuredTextData,
   type PagePreview,
   type Rect,
+  type RGBA,
   type RenderNode,
   type RenderTree,
   type SourceFile,
@@ -50,7 +51,7 @@ import { AppRuntime, type EvaluationResult } from './app-runtime'
 import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } from './style'
 import { appendPlaced, nodeKeys, placedToRenderTree, type KeyOf } from './to-render'
-import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
+import { screenToLayout, slotIds, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
 import { reveals, shownView, stoppedFailures, type NestedPage, type NotDrawn, type OverlayKind, type ResolvedUI, type Revealable } from './presentation'
 import { runnableProgram, setAsideRan, type Runnable } from './set-aside'
 import { exhausts, toFailure } from './failures'
@@ -400,6 +401,8 @@ function layoutScreen(input: ScreenInput, engine: LayoutEngine, values: LayerDra
 /** How one layout pass names its nodes, who is told where its elements go, and whether it reuses measurements. */
 interface LayoutPass extends Pick<PassRoot, 'prefix' | 'root'> {
   readonly placements?: Placements
+  /** Where the canvas the pass lays out in starts on the screen: a slot's corner, beside views (Wave 6c). */
+  readonly shift?: { readonly x: number; readonly y: number }
   readonly reuse?: boolean
   readonly keyOf?: KeyOf
 }
@@ -410,7 +413,7 @@ const passOptions = (pass: LayoutPass) => ({ ...(pass.placements ? { observer: p
 
 /**
  * Each tree of a screen that a view the canvas selects can be in: its content, its bars and
- * search field, and a sheet's screen, whose nodes are named under `overlay/` and placed in
+ * search field, the views around its container (Wave 6c), and a sheet's screen, whose nodes are named under `overlay/` and placed in
  * its surface. `change` may return a new tree, and the screen is rebuilt around it.
  * `composeScreen` lays each of them out against a rect of its own.
  */
@@ -424,6 +427,7 @@ function eachTree(screen: ScreenLayout, change: (root: PassRoot) => LayoutElemen
     bottomBar: screen.bottomBar && at(screen.bottomBar),
     ...(screen.search ? { search: { ...screen.search, element: at(screen.search.element) } } : {}),
     overlay: screen.overlay && { ...screen.overlay, ...(screen.overlay.screen ? { screen: eachTree(screen.overlay.screen, change, `${prefix}overlay/`, `${prefix}overlay-surface`) } : {}) },
+    outer: screen.outer && { ...screen.outer, element: at(screen.outer.element) },
   }
 }
 
@@ -437,8 +441,18 @@ function passRoots(screen: ScreenLayout): PassRoot[] {
 const draftScreen = (screen: ScreenLayout, edits: readonly LayoutDraftEdit[]) => eachTree(screen, ({ element }) => applyLayoutDraft(element, edits))
 
 function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { width: number; height: number }, safeArea: { top: number; leading: number; bottom: number; trailing: number }, env: LayoutEnvironment, pass: LayoutPass = PLAIN): RenderTree {
+  if (screen.outer) return composeAround(engine, screen, screen.outer, canvas, safeArea, env, pass)
+  const { tree, source } = composeBody(engine, screen, canvas, safeArea, env, pass)
+  return screen.overlay ? present(engine, tree, screen.overlay, source, canvas, safeArea, env, pass) : tree
+}
+
+/**
+ * A screen's content and bars, without what is presented over it, and where the view a
+ * context menu or a compact popover is open on was drawn, for placing it.
+ */
+function composeBody(engine: LayoutEngine, screen: ScreenLayout, canvas: { width: number; height: number }, safeArea: { top: number; leading: number; bottom: number; trailing: number }, env: LayoutEnvironment, pass: LayoutPass): { readonly tree: RenderTree; readonly source: Rect | undefined } {
   const barHeight = screen.navigationBar?.height ?? 0
-  const tabHeight = screen.tabBar ? TAB_BAR_HEIGHT : 0
+  const tabHeight = screen.tabBar ? screen.tabBarHeight ?? TAB_BAR_HEIGHT : 0
   const regular = canvas.width >= 600
   const topTabs = regular ? tabHeight : 0
   // A bottom bar shares the tab bar's row (Wave 4b), so the two take its height once.
@@ -459,10 +473,12 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
   // `.ignoresSafeArea()` on one view no longer makes the whole screen full-bleed.
   const screenRect: Rect = { x: 0, y: 0, width: canvas.width, height: canvas.height }
   const options = passOptions(pass)
-  // A context menu goes beside the view it is open on (Wave 4a), so where that is placed is watched.
-  const owner = screen.overlay?.contextMenu
+  // A context menu goes beside the view it is open on (Wave 4a), and a compact popover beside its
+  // source (Wave 6c), so where that is placed is watched.
+  const popover = screen.overlay?.compact?.source
+  const owner = screen.overlay?.contextMenu ?? popover
   const pressed: Pressed = {}
-  const placed = engine.layout(content, contentBounds, { ...env, safeArea: { inner: contentBounds, outer: screenRect } }, CENTER, owner === undefined ? options : { ...options, observer: watchPressed(owner, pressed, options.observer) })
+  const placed = engine.layout(content, contentBounds, { ...env, safeArea: { inner: contentBounds, outer: screenRect } }, CENTER, owner === undefined ? options : { ...options, observer: watchPressed(owner, pressed, options.observer, popover !== undefined) })
   let tree = placedToRenderTree(placed, canvas, ++revision, screen.background, pass.keyOf)
   // At rest the bar has no colour of its own in iOS 27, so what reaches under it shows
   // through. Where nothing does, it keeps the screen's colour, which looks the same.
@@ -496,11 +512,54 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
     const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? bottomBarsEnd - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER, passOptions(pass))
     tree = appendPlaced(tree, search, BAR_Z + 2000, pass.keyOf)
   }
-  if (screen.overlay) {
-    const view = pressed.at && onScreen(pressed.at, tree)
-    tree = { ...tree, nodes: [...tree.nodes.map(n => n.parent || allowsBackgroundInteraction(screen.overlay!, canvas, safeArea) ? n : { ...n, inert: true }), ...presentOverlay(engine, screen.overlay, canvas, safeArea, env, pass, view).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }
+  const source = pressed.at && onScreen(pressed.at, tree)
+  return { tree: { ...tree, ...(scroll && collapseDistance ? { chrome: { scrollId: scroll.id, collapseDistance } } : {}) }, source }
+}
+
+/**
+ * What is presented over a screen, above it: the screen takes no taps behind it unless the
+ * presentation lets it, and a context menu or compact popover goes beside `source`.
+ */
+function present(engine: LayoutEngine, tree: RenderTree, overlay: NonNullable<ScreenLayout['overlay']>, source: Rect | undefined, canvas: { width: number; height: number }, safeArea: { top: number; leading: number; bottom: number; trailing: number }, env: LayoutEnvironment, pass: LayoutPass): RenderTree {
+  const interactive = allowsBackgroundInteraction(overlay, canvas, safeArea)
+  return { ...tree, nodes: [...tree.nodes.map(n => n.parent || interactive ? n : { ...n, inert: true }), ...presentOverlay(engine, overlay, canvas, safeArea, env, pass, source).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }
+}
+
+/**
+ * A screen with views around its container (Wave 6c), as iOS 27 lays one out
+ * (docs/parity/native/iphone18pro-chrome, beside): the views around it are laid out in the safe
+ * area with the container a slot taking what it is offered, and the screen, its bars included, in
+ * the slot as if it were the device, reaching the screen's edge where the slot reaches the safe
+ * area's. A bar keeps its place above the slot's bottom, as a tab bar does over a view under it;
+ * content with no bar ends at that bottom. What is written before the container in a stack is
+ * painted below the screen, what is after it above the screen's bars, and presentations above all.
+ */
+function composeAround(engine: LayoutEngine, screen: ScreenLayout, outer: NonNullable<ScreenLayout['outer']>, canvas: { width: number; height: number }, safeArea: { top: number; leading: number; bottom: number; trailing: number }, env: LayoutEnvironment, pass: LayoutPass): RenderTree {
+  const bounds: Rect = { x: safeArea.leading, y: safeArea.top, width: canvas.width - safeArea.leading - safeArea.trailing, height: canvas.height - safeArea.top - safeArea.bottom }
+  const options = passOptions(pass)
+  const ids = slotIds(outer.slot)
+  let slot: Rect = bounds
+  const observer: PlaceObserver = (element, rect, space) => { options.observer?.(element, rect, space); if (element.id === ids.frame) slot = rect }
+  const placed = engine.layout(outer.element, bounds, { ...env, safeArea: { inner: bounds, outer: { x: 0, y: 0, width: canvas.width, height: canvas.height } } }, CENTER, { ...options, observer })
+  const left = slot.x <= safeArea.leading + 0.5 ? 0 : slot.x, top = slot.y <= safeArea.top + 0.5 ? 0 : slot.y
+  const right = slot.x + slot.width >= canvas.width - safeArea.trailing - 0.5 ? canvas.width : slot.x + slot.width
+  const bottom = slot.y + slot.height >= canvas.height - safeArea.bottom - 0.5 ? canvas.height : slot.y + slot.height
+  const barred = !!(screen.tabBar || screen.bottomBar)
+  const inset = { top: top ? 0 : safeArea.top, leading: left ? 0 : safeArea.leading, bottom: bottom === canvas.height || barred ? safeArea.bottom : 0, trailing: right === canvas.width ? safeArea.trailing : 0 }
+  // The screen is laid out from the slot's corner, so where its views are placed is told from the canvas's.
+  const drawn = composeBody(engine, screen, { width: right - left, height: bottom - top }, inset, env, left || top ? { ...pass, shift: { x: left, y: top } } : pass)
+  // The views around it painted before the slot's fill are below the screen, the others above it.
+  const slotZ = placed.find(node => node.id === ids.fill)?.z ?? 0
+  const nodes: RenderNode[] = [{ id: 'screen', kind: 'layer', frame: { x: 0, y: 0, width: canvas.width, height: canvas.height }, z: 0, opacity: 1, background: { kind: 'solid', color: outer.background } }]
+  for (const node of drawn.tree.nodes) {
+    const frame = node.parent ? node.frame : { x: node.frame.x + left, y: node.frame.y + top, width: node.frame.width, height: node.frame.height }
+    nodes.push({ ...node, id: node.id === 'screen' ? 'screen-slot' : node.id, frame, z: node.z + slotZ })
   }
-  return { ...tree, ...(scroll && collapseDistance ? { chrome: { scrollId: scroll.id, collapseDistance } } : {}) }
+  let tree: RenderTree = { ...drawn.tree, canvas, nodes }
+  tree = appendPlaced(tree, placed.filter(node => node.z < slotZ), 0, pass.keyOf)
+  tree = appendPlaced(tree, placed.filter(node => node.z > slotZ), BAR_Z + 3000, pass.keyOf)
+  const source = drawn.source && { x: drawn.source.x + left, y: drawn.source.y + top, width: drawn.source.width, height: drawn.source.height }
+  return screen.overlay ? present(engine, tree, screen.overlay, source, canvas, safeArea, env, pass) : tree
 }
 
 function withAnimation(
@@ -517,12 +576,18 @@ interface Pressed { at?: { readonly rect: Rect; readonly space: string | null } 
 /**
  * Notes in `pressed` where the view a context menu is open on is placed (Wave 4a), as iOS
  * lifts it: a list's row as a whole, by the frame the list gives it, or else the view's tap
- * target. `inner` is told of every element, as it was before.
+ * target. `inner` is told of every element, as it was before. For a compact popover's
+ * `popoverSource`, it is the view as drawn instead (Wave 6c).
  */
-function watchPressed(owner: string, pressed: Pressed, inner: PlaceObserver | undefined): PlaceObserver {
+function watchPressed(owner: string, pressed: Pressed, inner: PlaceObserver | undefined, popoverSource = false): PlaceObserver {
   const row = `${owner}rowsize`, target = `${owner}hit`
   return (element, rect, space) => {
     inner?.(element, rect, space)
+    if (popoverSource) {
+      // A popover's source is the view as drawn, its modifiers included: its outermost element, placed first (Wave 6c).
+      if (!pressed.at && (element.id === owner || element.id === target || element.id.startsWith(`${owner}m`))) pressed.at = { rect, space }
+      return
+    }
     if (element.id === row || !pressed.at && element.id === target) pressed.at = { rect, space }
   }
 }
@@ -558,7 +623,7 @@ function presentOverlay(
     z: 0,
     opacity: 1,
     cornerRadius: 0,
-    paint: { kind: 'fill', fill: { kind: 'solid', color: rgba(0, 0, 0, overlay.contextMenu ? SURFACES.contextMenu.dim : overlay.kind === 'dialog' || overlay.kind === 'menu' ? 0 : 0.2) } },
+    paint: { kind: 'fill', fill: { kind: 'solid', color: rgba(0, 0, 0, overlay.contextMenu ? SURFACES.contextMenu.dim : overlay.kind === 'dialog' || overlay.kind === 'menu' || overlay.compact ? 0 : 0.2) } },
     ...(overlay.dismissId
       ? {
           hitTarget: {
@@ -604,6 +669,7 @@ function presentOverlay(
   for (const node of surface) nodes.push({ ...node, z: node.z + 1 })
 
   const painted = placedToRenderTree(nodes, canvas, 0, undefined, pass.keyOf).nodes.slice(interactiveBackground ? 1 : 2)
+  if (overlay.compact) return [...dimNodes, ...popoverBubble(painted, overlay.compact.fill, pressed, canvas, safeArea)]
   if (overlay.kind === 'menu' || overlay.kind === 'dialog') {
     // A single local panel can be anchored after browser scroll offsets are known.
     const roots = painted.filter(n => !n.parent)
@@ -619,6 +685,31 @@ function presentOverlay(
     return [...dimNodes, panel, ...painted.map(n => n.parent ? n : { ...n, parent: panel.id, frame: { ...n.frame, x: n.frame.x - x, y: n.frame.y - y } }), ...arrow]
   }
   return [...dimNodes, ...painted]
+}
+
+/**
+ * A compact popover (Wave 6c), as iOS 27 draws one (iphone18pro-chrome popover): its content at its
+ * own size on a bubble, centred over its source and kept `margin` from the screen's edges, above it
+ * when it fits under the safe area's top and below it otherwise, an arrow from the bubble's edge to
+ * the source's. With no source found, it is centred on the screen.
+ */
+function popoverBubble(painted: readonly RenderNode[], fill: RGBA, source: Rect | undefined, canvas: { width: number; height: number }, safeArea: { top: number }): RenderNode[] {
+  const { arrow, arrowWidth, margin } = SURFACES.popover
+  const roots = painted.filter(n => !n.parent)
+  const x0 = Math.min(...roots.map(n => n.frame.x)), y0 = Math.min(...roots.map(n => n.frame.y))
+  const width = Math.max(...roots.map(n => n.frame.x + n.frame.width)) - x0, height = Math.max(...roots.map(n => n.frame.y + n.frame.height)) - y0
+  const at = source ?? { x: canvas.width / 2, y: canvas.height / 2, width: 0, height: 0 }
+  const middle = at.x + at.width / 2
+  const above = at.y - arrow - height >= safeArea.top
+  const x = Math.max(margin, Math.min(canvas.width - margin - width, middle - width / 2))
+  const y = above ? at.y - arrow - height : at.y + at.height + arrow
+  const panel: RenderNode = { id: 'overlay-popover', kind: 'layer', frame: { x, y, width, height }, z: 1, opacity: 1 }
+  // Pointing down from the bubble's bottom, or up from its top, its tip a little rounded.
+  const half = arrowWidth / 2
+  const d = above ? `M 0 0 L ${half - 2} ${arrow - 1.5} Q ${half} ${arrow + 0.5} ${half + 2} ${arrow - 1.5} L ${arrowWidth} 0 Z` : `M 0 ${arrow} L ${half - 2} 1.5 Q ${half} -0.5 ${half + 2} 1.5 L ${arrowWidth} ${arrow} Z`
+  const tip: RenderNode = { id: 'overlay-popover-arrow', kind: 'path', parent: panel.id, frame: { x: Math.max(SURFACES.popover.radius, Math.min(width - SURFACES.popover.radius, middle - x)) - half, y: above ? height - 0.5 : 0.5 - arrow, width: arrowWidth, height: arrow }, z: 2, opacity: 1,
+    path: { d, fill: { kind: 'solid', color: fill }, fillRule: 'nonzero' } }
+  return [panel, ...painted.map(n => n.parent ? n : { ...n, parent: panel.id, frame: { ...n.frame, x: n.frame.x - x0, y: n.frame.y - y0 } }), tip]
 }
 
 /**

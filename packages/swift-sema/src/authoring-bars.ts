@@ -1,11 +1,13 @@
 import { CONTENT_SLOT_NAMES, MODIFIER_SLOTS, PAGE_SLOTS, TOOLBAR_CONTENT, TOOLBAR_ITEMS, deploymentVersion, isNonView, type AuthoringNode, type AuthoringOperation, type ScreenBarItem, type ScreenBars, type SourceFile, type ToolbarPlacement } from '@studio/shared'
-import { Lexer, afterOffMarkers, forEachChild, insertView, type CallExpr, type Node, type StructDecl } from '@studio/swift-syntax'
+import { Lexer, afterOffMarkers, forEachChild, insertView, type CallExpr, type Node, type Stmt, type StructDecl } from '@studio/swift-syntax'
 import { applyPatches, expressionOf, indentAt, insertMember, layerById, modifierIndent, namedStruct, scalarType, type FeatureContext, type SourcePatch } from './authoring-context'
 import { nameTaken } from './authoring-behavior'
 import { swiftString, viewCallChain } from './design-controls'
 import { navigationAround, navigationStackPatches } from './authoring-navigation'
 import { TOOLBAR_PLACEMENTS, toolbarPlacement } from './design-object-controls'
 import { modifierSegment } from './authoring-modifiers'
+import { modifierName } from './authoring-border'
+import { pagesThrough } from './page-style'
 
 /**
  * A screen's bars (Wave 4b): its toolbar items and search field, added from the Bars section
@@ -16,8 +18,9 @@ import { modifierSegment } from './authoring-modifiers'
 
 /** What gives the views inside it a navigation bar: a stack, or a split view's columns. */
 const BARRED: ReadonlySet<string> = new Set(['NavigationStack', 'NavigationView', 'NavigationSplitView'])
-/** What an item a designer adds shows until it is changed: a button for an action, a title in place of the title. */
-const DEFAULT_ITEMS: Readonly<Record<ToolbarPlacement, string>> = { leading: 'Button("Edit") { }', trailing: 'Button("Add", systemImage: "plus") { }', principal: 'Text("Title")', bottom: 'Button("Action") { }', automatic: 'Button("Action") { }' }
+/** What an item a designer adds shows until it is changed: a title in place of the title, and elsewhere a button for an action (`DEFAULT_ITEM`). */
+const DEFAULT_ITEMS: Readonly<Partial<Record<ToolbarPlacement, string>>> = { leading: 'Button("Edit") { }', trailing: 'Button("Add", systemImage: "plus") { }', principal: 'Text("Title")' }
+const DEFAULT_ITEM = 'Button("Action") { }'
 /** The items of a screen with no toolbar, shared by every such screen: most screens, built on every model build. */
 const NO_ITEMS: readonly ScreenBarItem[] = Object.freeze([])
 /** Why a screen of tabs takes nothing in its bars: each tab's screen has bars of its own. */
@@ -30,6 +33,8 @@ interface Found {
   readonly titleTabbed: boolean
   readonly toolbars: readonly AuthoringNode[]
   readonly search?: AuthoringNode
+  /** The first TabView, as the preview finds the app's tabs: the screen's content, or beside other views (Wave 6c). */
+  readonly tabs?: AuthoringNode
 }
 const NOTHING: Found = { titleTabbed: false, toolbars: [] }
 /** What each definition holds, found once for each model: a helper's views are in every screen that calls it. */
@@ -47,12 +52,13 @@ function found(ctx: FeatureContext, definition: AuthoringNode, calling: Readonly
   if (already) return already
   if (calling.has(definition.id)) { cut.cut = true; return NOTHING }
   const seen = new Set<string>(), toolbars: AuthoringNode[] = [], within = { cut: false }
-  let next: Set<string> | undefined, title: Found['title'], titleTabbed = false, search: AuthoringNode | undefined
+  let next: Set<string> | undefined, title: Found['title'], titleTabbed = false, search: AuthoringNode | undefined, tabs: AuthoringNode | undefined
   const visit = (node: AuthoringNode, tabbed: boolean): void => {
     if (seen.has(node.id) || node.kind === 'branch' && PAGE_SLOTS.has(node.name)) return
     seen.add(node.id)
     if (node.kind === 'branch' && node.name === MODIFIER_SLOTS.toolbar) toolbars.push(node)
     const inTabs = tabbed || node.name === 'TabView'
+    if (inTabs && !tabbed) tabs ??= node
     if (node.kind !== 'definition' && node.modifiers) for (const modifier of node.modifiers) {
       if (!modifier.enabled) continue
       if (!search && modifier.name === 'searchable') search = node
@@ -67,10 +73,11 @@ function found(ctx: FeatureContext, definition: AuthoringNode, calling: Readonly
     const held = found(ctx, helper, next ??= new Set(calling).add(definition.id), within)
     if (!title && held.title) { title = held.title; titleTabbed = inTabs || held.titleTabbed }
     search ??= held.search
+    tabs ??= held.tabs
     toolbars.push(...held.toolbars)
   }
   visit(definition, false)
-  const result: Found = { title, titleTabbed, toolbars, search }
+  const result: Found = { title, titleTabbed, toolbars, search, tabs }
   if (within.cut) cut.cut = true
   else known.set(definition.id, result)
   return result
@@ -87,6 +94,14 @@ interface ScreenParts {
   readonly site?: AuthoringNode
   /** Whether that is in a TabView: a screen of tabs, whose tabs each have their own bars. */
   readonly tabbed: boolean
+  /** The tab bar it holds, whose search tab Bars switches (Wave 6c): its TabView, alone or beside other views, as written. */
+  readonly tabs?: { readonly node: AuthoringNode; readonly call: CallExpr }
+}
+
+/** The tab bar a TabView is, as written: its call, unless its pages are swiped through, which have no tab bar. */
+function tabBar(ctx: FeatureContext, node: AuthoringNode | undefined): ScreenParts['tabs'] {
+  const expr = node && expressionOf(ctx, node), chain = expr && viewCallChain(expr)
+  return chain && !pagesThrough(chain.modifiers) ? { node: node!, call: chain.base } : undefined
 }
 
 function screenParts(ctx: FeatureContext, definition: AuthoringNode): ScreenParts {
@@ -98,7 +113,8 @@ function screenParts(ctx: FeatureContext, definition: AuthoringNode): ScreenPart
   const held = found(ctx, definition)
   // A title written on the stack itself shows nothing; what goes beside it goes on the content.
   const titled = held.title && !BARRED.has(held.title.node.name) ? held.title.node : undefined
-  return { title: held.title, toolbars: held.toolbars, search: held.search, root, site: titled ?? content, tabbed: titled ? held.titleTabbed : content?.name === 'TabView' }
+  const tabs = held.tabs && tabBar(ctx, held.tabs)
+  return { title: held.title, toolbars: held.toolbars, search: held.search, root, site: titled ?? content, tabbed: titled ? held.titleTabbed : content?.name === 'TabView' || !!tabs, tabs }
 }
 
 /** Why `parts` can't take a bar's part that needs iOS `minimum`, named as `what` needs it; undefined when it can. */
@@ -118,7 +134,7 @@ function needsStack(ctx: FeatureContext, parts: ScreenParts): boolean {
 }
 
 /** The operations Bars sends, each to a screen's definition. */
-type BarsOperation = Extract<AuthoringOperation, { kind: 'toolbar-item-add' | 'searchable-add' | 'searchable-remove' }>
+type BarsOperation = Extract<AuthoringOperation, { kind: 'toolbar-item-add' | 'searchable-add' | 'searchable-remove' | 'search-tab-add' | 'search-tab-remove' }>
 
 /**
  * A screen's parts, when `node` is a screen's definition, which has bars: a view of the
@@ -135,6 +151,7 @@ function screenOf(ctx: FeatureContext, node: AuthoringNode): ScreenParts | undef
 export function barsEdit(ctx: FeatureContext, node: AuthoringNode, operation: BarsOperation): { files: SourceFile[]; offset: number } {
   const parts = screenOf(ctx, node)
   if (!parts || !namedStruct(ctx, node.name)) throw new Error('Select a screen to change its bars.')
+  if (operation.kind === 'search-tab-add' || operation.kind === 'search-tab-remove') return { files: applyPatches(ctx, searchTabPatches(ctx, parts, operation.kind === 'search-tab-add')), offset: node.source.start }
   const patches = operation.kind === 'toolbar-item-add' ? toolbarItem(ctx, node, parts, operation) : operation.kind === 'searchable-add' ? searchField(ctx, node, parts, operation.prompt) : noSearchField(ctx, parts)
   return { files: operation.kind === 'searchable-remove' ? applyPatches(ctx, patches) : withStack(ctx, parts, patches), offset: node.source.start }
 }
@@ -228,7 +245,7 @@ function toolbarItem(ctx: FeatureContext, definition: AuthoringNode, parts: Scre
   if (problem) throw new Error(problem)
   const file = definition.source.file, text = ctx.files.find(f => f.id === file)?.text ?? ''
   const { unit } = indentAt(text, parts.site!.source.start)
-  const shown = (snippet ?? DEFAULT_ITEMS[placement]).trim()
+  const shown = (snippet ?? DEFAULT_ITEMS[placement] ?? DEFAULT_ITEM).trim()
   const item = TOOLBAR_CONTENT.has(/^\w+/.exec(shown)?.[0] ?? '') ? shown : `ToolbarItem${placement === 'automatic' ? '' : `(placement: .${TOOLBAR_PLACEMENTS[placement]})`} {\n${shown.split('\n').map(line => line && unit + line).join('\n')}\n}`
   // A toolbar written on the stack itself shows nothing, so an item goes in one that shows.
   const toolbar = parts.toolbars.find(written => !BARRED.has(layerById(ctx, written.parentId)?.name ?? ''))
@@ -273,11 +290,97 @@ function withStack(ctx: FeatureContext, parts: ScreenParts, patches: readonly So
   return applyPatches(next, navigationStackPatches(next, { ...root.source, start, end }, end))
 }
 
+/** A tab as a TabView's closure writes it (Wave 6c): its statement and call chain, and the statements of the TabSection it is in. */
+interface WrittenTab {
+  readonly statement: Stmt
+  readonly chain: ReturnType<typeof viewCallChain>
+  readonly section?: readonly Stmt[]
+}
+
+/** The tab bar's search tab as Bars reads it (Wave 6c): the TabView's statements, its search tab and the stretch removing it takes away. */
+interface SearchTabs {
+  readonly statements: readonly Stmt[]
+  readonly search?: { readonly node?: AuthoringNode; readonly removal?: { readonly start: number; readonly end: number } }
+  readonly problem?: string
+}
+
+const ALONE_IN_SECTION = 'This search tab is the only tab in its section. Take it away in Code.'
+const SHARES_LINES = 'This search tab shares its lines with other code. Take it away in Code.'
+
+/** What a call's trailing closure holds. */
+const closureStatements = (call: CallExpr): readonly Stmt[] => call.trailingClosure?.body.statements ?? []
+/** The name a view's call is written with: `Tab`, `TabSection`; empty for any other callee. */
+const viewName = (call: CallExpr) => call.callee.kind === 'identifier' ? call.callee.name : ''
+
+/** A TabView's tabs as written, each TabSection's tabs in its place, as a phone shows them. */
+function writtenTabs(call: CallExpr, section?: readonly Stmt[]): WrittenTab[] {
+  return closureStatements(call).flatMap(statement => {
+    const chain = statement.kind === 'exprStmt' ? viewCallChain(statement.expression) : null
+    return chain && viewName(chain.base) === 'TabSection' ? writtenTabs(chain.base, closureStatements(chain.base)) : [{ statement, chain, section }]
+  })
+}
+
+/** Whether a tab is the search tab: `Tab(role: .search)`, whatever else it says. */
+const isSearchTab = ({ chain }: WrittenTab) => !!chain && viewName(chain.base) === 'Tab' && chain.base.args.some(a => a.label === 'role' && a.value.kind === 'memberAccess' && !a.value.base && a.value.member === 'search')
+
+/** The lines a statement is written on, with a note ending its last one; undefined when other code shares them. */
+function ownLines(text: string, statement: Stmt): { start: number; end: number } | undefined {
+  const start = text.lastIndexOf('\n', statement.span.start - 1), lineEnd = text.indexOf('\n', statement.span.end)
+  const end = lineEnd < 0 ? text.length : lineEnd
+  if (start < 0 || text.slice(start + 1, statement.span.start).trim() || !/^\s*(?:\/\/.*)?$/.test(text.slice(statement.span.end, end))) return undefined
+  return { start, end }
+}
+
+/**
+ * The search tab of the tab bar a screen holds (Wave 6c), alone or beside other views;
+ * undefined when it holds none. A search tab is a `Tab`, so one goes only beside tabs each
+ * written as a `Tab`, in a `TabSection` or not, at iOS 18, in a TabView that keeps no
+ * selection, which would need the search tab to have a value of its own.
+ */
+function searchTabs(ctx: FeatureContext, parts: ScreenParts): SearchTabs | undefined {
+  if (!parts.tabs) return undefined
+  const { node, call } = parts.tabs, statements = closureStatements(call), tabs = writtenTabs(call)
+  const found = tabs.find(isSearchTab)
+  if (found) {
+    const removal = ownLines(ctx.files.find(f => f.id === node.source.file)!.text, found.statement)
+    const layer = node.children.map(id => layerById(ctx, id)).find(child => child?.source.start === found.statement.span.start)
+    return { statements, search: { node: layer, removal }, problem: found.section?.length === 1 ? ALONE_IN_SECTION : removal ? undefined : SHARES_LINES }
+  }
+  // What stops the switch for good is said before what a newer deployment target would fix.
+  const below18 = deploymentVersion(ctx.deploymentTarget) < 18
+  const problem = tabs.some(tab => tab.chain?.modifiers.some(m => modifierName(m) === 'tabItem'))
+    ? `These tabs are written with .tabItem. Write them as Tab${below18 ? ', at iOS 18 or newer,' : ''} to add a search tab in Code.`
+    : !tabs.length || !tabs.every(tab => tab.chain && viewName(tab.chain.base) === 'Tab') ? 'These tabs are built in Swift, so a search tab is added in Code.'
+    : below18 ? 'A search tab needs iOS 18 or newer. Change the deployment target to add one.'
+    : call.args.some(a => a.label === 'selection') ? 'This TabView keeps which tab is selected, so a search tab needs a value of its own. Add it in Code.'
+    : undefined
+  return { statements, problem }
+}
+
+/**
+ * The search tab switched on, as the last of the tabs at their indent, or off, taking its lines
+ * away with a note ending them (Wave 6c). Switching it to what it is writes nothing.
+ */
+function searchTabPatches(ctx: FeatureContext, parts: ScreenParts, on: boolean): SourcePatch[] {
+  const tabs = searchTabs(ctx, parts)
+  if (!tabs) throw new Error('This screen has no tab bar to add a search tab to.')
+  if (on === !!tabs.search) return []
+  if (tabs.problem) throw new Error(tabs.problem)
+  const file = parts.tabs!.node.source.file, text = ctx.files.find(f => f.id === file)!.text
+  if (tabs.search) return [{ file, ...tabs.search.removal!, text: '' }]
+  const last = tabs.statements.at(-1)!, { indent, unit } = indentAt(text, last.span.start)
+  // After a note ending the last tab's line, unless more code follows it there.
+  const lineEnd = text.indexOf('\n', last.span.end), rest = text.slice(last.span.end, lineEnd < 0 ? text.length : lineEnd)
+  const at = /^\s*(?:\/\/.*)?$/.test(rest) ? last.span.end + rest.length : last.span.end
+  const lines = ['Tab(role: .search) {', `${unit}NavigationStack {`, `${unit}${unit}Text("Search")`, `${unit}${unit}${unit}.navigationTitle("Search")`, `${unit}}`, '}']
+  return [{ file, start: at, end: at, text: lines.map(line => `\n${indent}${line}`).join('') }]
+}
+
 /** A screen's bars for Screen settings (Wave 4b); undefined for what is no screen: a helper, a `#Preview` or the app. */
 export function screenBars(ctx: FeatureContext, definition: AuthoringNode): ScreenBars | undefined {
   const parts = screenOf(ctx, definition)
   if (!parts) return undefined
-  const at = parts.title?.node ?? parts.site
+  const at = parts.title?.node ?? parts.site, tabs = searchTabs(ctx, parts)
   return {
     title: parts.title && { node: parts.title.node.id, control: parts.title.control },
     barless: at && navigationAround(ctx, at).bar === false || undefined,
@@ -285,6 +388,7 @@ export function screenBars(ctx: FeatureContext, definition: AuthoringNode): Scre
     search: parts.search && searchOf(parts.search),
     problem: placeProblem(ctx, parts, 14, 'Toolbar items'),
     searchProblem: parts.search ? undefined : placeProblem(ctx, parts, 15, 'A search field'),
+    searchTab: tabs && { on: !!tabs.search, node: tabs.search?.node?.id, problem: tabs.problem },
   }
 }
 

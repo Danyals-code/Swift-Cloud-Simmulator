@@ -107,10 +107,13 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `NavigationStack` + `NavigationLink` | 🟡 | 6 | destination/value links work. Bound `NavigationStack(path:)` is not synchronized and now warns |
 | `.navigationDestination` | 🟡 | 6 | `for:` with a metatype, resolved on link push. `isPresented:` and `item:` overloads warn as unsupported |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
-| `.toolbar` | 🟡 | 6 | leading/trailing items work, drawn as iOS 27 draws them: a Label as its icon alone in a 44-pt glass circle, text in a 44-pt capsule, the label colour unless a tint is written, and items side by side in one capsule. A NavigationLink in the toolbar pushes. Keyboard, bottomBar and principal placements warn and are omitted |
-| `ToolbarSpacer`, `DefaultToolbarItem` | ⬜ | Wave 6c | known Apple names since Wave 6a: drawn as labelled boxes that say they are not drawn in the preview, where the checker used to say Xcode won't build them |
+| `.toolbar` | 🟡 | 6 | items drawn as iOS 27 draws them: a Label as its icon alone in a 44-pt glass circle, text in a 44-pt capsule, the label colour unless a tint is written, and items side by side in one capsule. A NavigationLink in the toolbar pushes. Leading and trailing (and their older names), `.principal` in the title's place and `.bottomBar` at the foot of the screen since Wave 4b. Since Wave 6c, as captured in `native/iphone18pro-chrome`: `.navigation` at the leading side, `.status` in the middle of the bottom bar in a glass capsule of its own, `.secondaryAction` behind an ellipsis button named More at the trailing side, whose menu lists them, and `.confirmationAction` and `.primaryAction` at the trailing side as iOS 27 draws them. The `.keyboard` placement warns and is omitted |
+| `ToolbarSpacer`, `DefaultToolbarItem` | ✅ | Wave 6c | a `.fixed` spacer splits a glass group into two capsules 11 pt apart, and a `.flexible` one pushes the groups to the edges, in the navigation bar and the bottom bar. `DefaultToolbarItem(kind: .search, placement: .bottomBar)` draws the bottom search field, as iOS 27 draws it; at other placements it draws nothing |
 | `.toolbarBackground` | 🟡 | - | navigation bar only: `.hidden` paints no bar background, so the content behind shows, and a colour or gradient paints that. `.visible` and the other bars draw as before. A view extending under the bar with `.ignoresSafeArea` also clears the bar, as iOS does at the top of the content |
-| `TabView` | ✅ | 6 | tab bar with `.tabItem` or `Tab`, bound or unbound selection, pages from `ForEach` selected by their ids, a `TabSection`'s tabs in the bar with the others, and `.page`, whose dots are also the way through - a preview has no swipe |
+| `TabView` | ✅ | 6 | tab bar with `.tabItem` or `Tab`, bound or unbound selection, pages from `ForEach` selected by their ids, a `TabSection`'s tabs in the bar with the others, and `.page`, whose dots are also the way through - a preview has no swipe. Since Wave 6c, `Tab(role: .search)` is drawn as iOS 27.0 draws it: a tab labelled Search with a magnifying glass at the end of the bar, as wide as the others, where it was an empty tab; a tap on it opens its tab. A bar of four items or more, a search tab among them, is 20.33 pt in from each edge, as native draws it (it was 17); a bar of three or fewer draws as before |
+| `.tabViewBottomAccessory` | ✅ | Wave 6c | a glass capsule 48 pt tall, 7.67 pt above the tab bar and 20.33 pt from the screen's edges, holding the accessory's views, as measured in the iOS 27 simulator; the tab bar stretches to the same width. With `isEnabled: false` there is no capsule and the bar keeps its own width, as on iOS |
+| `.navigationSubtitle` | ✅ | Wave 6c | a 12-pt line in the secondary colour (the caption style) under the title, as measured in the iOS 27 simulator: inline, the title draws at 16 pt semibold and the two sit centred together on the bar's row; large, the title moves down 3 pt and the content 19.33 pt. Written as a string or as a `Text`; a `Text` the preview can't read as one string warns |
+| Views beside a `NavigationStack` or `TabView` | 🟡 | Wave 6c | a view in a `ZStack` beside the container, a view in a `VStack` above or below it, and an `.overlay` or `.safeAreaInset` written on it are drawn. The screen, with its bars, is laid out in the space the container is given: a `ZStack` sibling paints above the bars, a `VStack` sibling takes its height, so a tab bar moves up above a mini player, and an overlay paints above the screen and below a sheet or alert. A popover or a context menu opens at its source, and a view beside the container, or inside a container that doesn't start at the screen's corner, is outlined and dragged where it is drawn. A screen with nothing beside its containers draws as before. Only the app's outermost container: a view beside a NavigationStack inside a tab's page still warns and is not drawn |
 | `NavigationSplitView` | 🟡 | - | collapsed sidebar stack on every device; no iPad multi-column layout |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |
 
@@ -122,7 +125,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.fullScreenCover` | ✅ | 6 |
 | `.alert` | 🟡 | 6 | title/message, action pills and bound text/secure fields; backdrop does not dismiss. Native keyboard/focus and all overloads incomplete |
 | `.confirmationDialog` | 🟡 | 6 | floating capsule-action panel matched to supplied iPhone capture; explicit title visibility, destructive actions and backdrop dismissal; platform adaptation approximate |
-| `.popover` | 🟡 | - | always sheet-shaped; no anchored regular-width popover |
+| `.popover` | 🟡 | Wave 6c | a sheet on iPhone, as iOS adapts a popover in compact width. With `.presentationCompactAdaptation(.popover)` it is a bubble sized to its content, with corners of about 28 pt and an arrow 13 pt tall, above the view that opens it when it fits there and below it otherwise, its arrow at the middle of that edge. `attachmentAnchor:` and `arrowEdge:` are not drawn and warn. A popover on a toolbar button presents nothing. No regular-width (iPad) popover |
 | `.presentationBackground` | 🟡 | - | Color and Material work; custom view backgrounds warn |
 | `.presentationBackgroundInteraction` | 🟡 | - | enabled/disabled and enabled(upThrough:) control background hit testing for the current sheet detent; no detent dragging |
 | `.inspector` | 🟡 | - | iPhone sheet adaptation and binding dismissal; no iPad trailing-column implementation |
@@ -209,7 +212,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `RadialGradient` / `AngularGradient` | ✅ | 6 | drawn as radial and conic gradients |
 | `Material` (`.ultraThinMaterial` etc.) | ✅ | 7 | a real translucent, blurred panel via `backdrop-filter`. `Material.ultraThin` and `.ultraThinMaterial` are the same value. Cut to a shape, as `.background(.regularMaterial, in: .capsule)` and `.fill(.regularMaterial)` are, the panel is cut itself, because a browser blurs nothing behind a box whose parent is cut |
 | `.glassEffect(_:in:)`, `Glass` | 🟡 | - | approximated as a material cut to the shape (a capsule unless `in:` gives another), with a light rim inside a hairline, measured over colour in the iOS 27 simulator: `.regular` lightens what is behind it by about 40% and blurs it over about 6 pt, `.clear` by about 12% with almost no blur, and `.tint(_:)` covers it at about 90%. `.interactive()` draws as the glass does at rest, and `.identity` draws nothing. The lens refraction, the highlights and the shadow are not drawn, and neither is `GlassEffectContainer`'s merging |
-| `GlassEffectContainer` | ⬜ | Wave 6c | a known Apple name since Wave 6a: drawn as a labelled box that says it is not drawn in the preview, where the checker used to say Xcode won't build it. It builds at iOS 26 |
+| `GlassEffectContainer` | 🟡 | Wave 6c | lays out its content as a centred VStack, as iOS 27 does, and each view in it draws its own glass. The merging of nearby glass shapes into one is not drawn. It builds at iOS 26 |
 | `ShapeStyle` conformances generally | 🟡 | 6 | colours, tokens and gradients anywhere a style is taken |
 
 ## Interaction and lifecycle
@@ -467,10 +470,15 @@ Listed in the exported README so nothing is a surprise on the Mac:
     alternative was a textual sweep that renamed unrelated symbols, and a rename that misses
     a use leaves a name the compiler will point at, where one that renames the wrong symbol
     leaves code that compiles and is wrong.
-21. **Views beside a NavigationStack or a TabView are not drawn.** A screen is the content of
-    its container, so a floating button in a `ZStack` beside the stack, a banner above a
-    TabView, and an `.overlay` or `.safeAreaInset` written on the stack are left out. Each one
-    warns where it is written. Sheets, alerts and search written on the containers do show.
+21. **Views beside a NavigationStack or a TabView are drawn around the screen.** Since Wave
+    6c a floating button in a `ZStack` beside the stack, a banner or mini player above or
+    below a TabView, and an `.overlay` or `.safeAreaInset` written on the stack are drawn: the
+    screen and its bars are laid out in the space left for the container, and the views
+    beside it paint in the order written. Presentations open at their source, and those
+    views, like the screen's own, are selected, outlined and dragged where they are drawn. A
+    screen with nothing beside its containers is laid out against the device, as before. This
+    is the app's outermost container only: a view beside a NavigationStack inside a tab's page
+    is still left out, and warns.
 22. **A trimmed fill is drawn whole.** `.trim` cuts strokes; iOS fills just the trimmed part of
     a filled shape, closed by a straight line. The fill warns.
 23. **Gradients blend in sRGB.** Measured in the iOS 27 simulator, a gradient blends in Oklab,
@@ -534,7 +542,7 @@ The checker said these real Apple names would not build in Xcode, with "Cannot f
 "does not recognise the modifier". Each builds in Xcode 27, so each is now a known name. Where the
 preview doesn't draw it yet, its warning says it is not drawn in the preview instead:
 
-- `GlassEffectContainer`, `ToolbarSpacer` and `DefaultToolbarItem` (drawn in Wave 6c);
+- `GlassEffectContainer`, `ToolbarSpacer` and `DefaultToolbarItem`, which Wave 6c draws;
 - `SectorMark`, `.chartXAxis`, `.chartYScale`, `.chartLegend` and `.annotation` (drawn in Wave 6e);
 - `AttributedString`, which was an error that blanked the screen, `AttributeContainer` and `SymbolVariants`, and `.symbolVariant(.fill.circle)`, which stopped it;
 - `.font(.custom(_:size:))` with a family iOS ships, which warned that the font was not in this project;

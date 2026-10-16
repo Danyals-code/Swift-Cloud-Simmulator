@@ -9,6 +9,7 @@ import { PAGE_KINDS } from '../../lib/pageKinds'
 import { describeState, stateSuggestions } from '../../lib/screenStates'
 import { TokenField, valueFields } from './TokenField'
 import { BarsSection, SheetSection } from './ScreenBars'
+import { searchTabScreen } from '../../lib/screenBars'
 import { Icon } from '../ui/Icon'
 import styles from './Settings.module.css'
 
@@ -83,7 +84,7 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
     </section>
     {/* How a sheet is presented is set where it is opened, whichever view it shows (Wave 4b). */}
     {PAGE_KINDS[screen.presentation].once && <SheetSection snapshot={snapshot} kind={screen.presentation} source={screen.page.source} onNodeChange={onNodeChange} onReveal={onReveal} />}
-    {!preview && <BarsSection snapshot={snapshot} definition={definition} root={root} busy={busy} onNodeChange={onNodeChange} onNodeCommand={onNodeCommand} onSelect={onSelect} />}
+    {!preview && <BarsSection snapshot={snapshot} definition={definition} root={root} tabs={searchTabScreen(snapshot, definition, tree.lanes.some(lane => lane.tab && lane.root.id === screen.id))} busy={busy} onNodeChange={onNodeChange} onNodeCommand={onNodeCommand} onSelect={onSelect} />}
     {root && <section className={styles.section} aria-label="Overrides">
       <div className={styles.sectionHeader}><h3>Overrides</h3></div>
       <p className={styles.note}>Replace an App value on this screen only. Everything on the screen inherits it.</p>

@@ -79,7 +79,7 @@ of the requested behavior, even if a name or placeholder is recognized.
 | `.presentationBackgroundInteraction` | Partial | Enabled/disabled and upThrough threshold control background interaction at the current sheet height; no dragging between heights |
 | `.interactiveDismissDisabled` | Partial | Blocks preview backdrop dismissal, including its default argument; no native swipe gesture |
 | `.fullScreenCover` | Partial | Covers full canvas, explicit dismissal works; native transition/keyboard behavior absent |
-| `.popover` | Partial | Always uses sheet geometry; no anchored iPad/Mac popover or arrow |
+| `.popover` | Partial | A sheet on iPhone, as iOS adapts it in compact width. Wave 6c: with `.presentationCompactAdaptation(.popover)`, a bubble sized to its content (corners about 28, an arrow 13 tall) above its source when it fits, below otherwise, as captured in `native/iphone18pro-chrome`; `attachmentAnchor:` and `arrowEdge:` warn and are not drawn; no iPad/Mac popover |
 | `.alert` | Partial | Title/message/actions and bound text/secure fields; native keyboard/focus, sizing under extreme content and every overload not reproduced |
 | `.confirmationDialog` | Partial | Floating capsule-action panel from the supplied iPhone reference, visible title option and destructive actions; native placement/adaptation approximate |
 | `.inspector` | Partial | Binding-driven iPhone sheet; no iPad trailing-column adaptation |
@@ -110,11 +110,11 @@ of the requested behavior, even if a name or placeholder is recognized.
 | Submit / keyboard hints | Partial | Enter calls common onSubmit closures; keyboardType/submitLabel/capitalization/correction map to browser hints; no native keyboard or focus synchronization |
 | `NavigationStack` / destination `NavigationLink` | Partial | Push/back and value destinations work; path synchronization and binding-driven destinations do not |
 | `NavigationSplitView` | Partial | Collapsed sidebar stack only, including on iPad; no multi-column detail layout |
-| `TabView` / modern `Tab` | Works | Common labels, selection and content switching |
+| `TabView` / modern `Tab` | Works | Common labels, selection and content switching. Wave 6c: `Tab(role: .search)` is a Search tab with a magnifying glass at the end of the bar, as iOS 27.0 draws it (two tabs and a search tab make a bar as wide as three tabs; four items or more sit 20.33 in from each edge, as native), where it was an empty tab |
 | `.sidebarAdaptable` tabs | Missing | Warn; no adaptable sidebar |
 | `.page` tabs | Partial | Page dots switch content; no swipe paging |
-| Navigation toolbar / `ToolbarItem` | Partial | Common leading/trailing and confirmation/cancellation placements work; `.principal` omitted with warning |
-| Bottom toolbar | Missing | `.bottomBar` placement warns and is omitted |
+| Navigation toolbar / `ToolbarItem` | Partial | Leading, trailing, `.principal`, confirmation and cancellation work. Wave 6c, from native captures: `.navigation` leading, `.secondaryAction` behind an ellipsis button, `.primaryAction` and `.confirmationAction` trailing as iOS 27 draws them; `ToolbarSpacer(.fixed)` splits a glass group into two capsules 11 apart and `.flexible` pushes groups to the edges |
+| Bottom toolbar | Works | `.bottomBar` items in glass capsules at the foot of the screen (Wave 4b). Wave 6c: `.status` centred in its own capsule, and `DefaultToolbarItem(kind: .search, placement: .bottomBar)` as the bottom search field |
 | Navigation title / display mode | Works | Large/inline and browser scroll collapse; limited native reference verified |
 | `List` / `Form` / `Section` | Partial | Common grouped/plain forms, headers/footers/insets; binding collections and all list styles incomplete |
 | `.swipeActions` | Works | Leading and trailing actions, tints, roles, icons and full swipe, measured against iOS 27 (`native/iphone18pro-system-ui`); `.onDelete` is one case of it |
@@ -142,6 +142,10 @@ of the requested behavior, even if a name or placeholder is recognized.
 | `.symbolEffect` | Partial | Wave 6b: the symbol is drawn still, with no warning, as iOS draws it before and after the effect; `.disappear`, and `.appear` while active, hide it and keep its space; `.scale` warns that the preview doesn't scale it |
 | `.mask` | Partial | Wave 6a: gradient, colour, shape, `Text` and symbol masks, so gradient text through a mask draws; a translucent mask lets its opacity through, as iOS does; other views as masks warn and draw unmasked |
 | `.zIndex` | Works | Wave 6a: changes the paint order among siblings, keeping layout |
+| `.tabViewBottomAccessory` | Works | Wave 6c: a glass capsule 48 tall, 7.67 above the tab bar and 20.33 from the screen's edges, as captured in `native/iphone18pro-chrome`; the bar stretches to the same width; `isEnabled: false` draws none |
+| `.navigationSubtitle` | Works | Wave 6c: a 12-pt secondary line (caption) under the inline title, which draws at 16 pt semibold, and under the large title, as captured in `native/iphone18pro-chrome`; a string or a `Text` |
+| `GlassEffectContainer` | Partial | Wave 6c: its content is laid out as a centred VStack, as iOS 27 does, each view with its own glass; nearby glass shapes are not merged |
+| Views beside `NavigationStack` / `TabView` | Partial | Wave 6c: a button in a `ZStack` beside a stack paints above its bars and takes taps (a `.padding(20)` 56-pt circle at 326..382 x 764..820, as native); a view in a `VStack` under a `TabView` takes its height and the bar moves up above it; an `.overlay` on the stack paints above the screen and below sheets and alerts; popovers and context menus open at their source, and those views are outlined and dragged where they are drawn. The app's outermost container only: beside a NavigationStack inside a tab's page, a view still warns and is left out |
 | Fonts iOS ships (`.custom("Avenir Next", size:)`) | Partial | Wave 6a: drawn in the browser's copy of the family, or the closest web face, with no "not in this project" warning; a PostScript name counts only if it is a face iOS ships, so `Georgia-Light` warns and draws the system font, as iOS does. A project's own font files are Wave 6f |
 
 ## How to reproduce

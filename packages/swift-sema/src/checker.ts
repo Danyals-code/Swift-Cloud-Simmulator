@@ -834,6 +834,7 @@ export class Checker {
         this.checkTrim(expr)
         this.markVariant(expr)
         this.checkCallee(expr.callee, scope)
+        this.checkDefaultToolbarItem(expr, scope)
         this.checkOverloadCoverage(expr, scope)
         this.checkFontCoverage(expr, scope)
         // A modifier is always *called*, so the coverage check belongs here rather
@@ -849,6 +850,7 @@ export class Checker {
             // A mark's own `.position(by:)` is not a view's `.position(x:y:)` (Wave 6a).
             if (!onAMark(expr.callee.base)) this.checkArgumentLabels(expr.callee.member, expr.args)
             this.checkBlendMode(expr.callee.member, expr.args)
+            this.checkCompactAdaptation(expr.callee.member, expr)
             this.checkStyleToken(expr.callee.member, expr.args)
             if (expr.callee.member === 'symbolVariant') this.checkSymbolVariant(expr.callee.base, expr.args[0]?.value)
             if (expr.callee.member === 'symbolRenderingMode') this.checkSymbolRendering(expr)
@@ -1013,6 +1015,9 @@ export class Checker {
       if (callee.member === 'contextMenu' && labels.has('forSelectionType')) reason = 'selection-based context menus are not implemented; use contextMenu with action buttons'
       if (callee.member === 'contextMenu' && labels.has('preview')) reason = 'custom menu previews are not implemented; menu actions are available'
       if (callee.member === 'background' && labels.has('fillStyle')) reason = 'the fillStyle argument is not applied in the preview'
+      // Where a bubble points (Wave 6c); a phone shows a plain popover as a sheet, which has none.
+      const pointing = callee.member === 'popover' ? ['attachmentAnchor', 'arrowEdge'].filter(label => labels.has(label)) : []
+      if (pointing.length) reason = `${pointing.join(' and ')} ${pointing.length > 1 ? 'are' : 'is'} not applied in the preview, so a popover drawn as one points at the middle of its view's edge`
     }
     // These two are told apart by their arguments, so they need no view at the root:
     // they are as often written on a view of the project's own.
@@ -1253,6 +1258,26 @@ export class Checker {
       "'.mask' is drawn by the preview for a gradient, a colour or a shape, and for text or a symbol masking a colour or a gradient; this mask is not, so the view is shown unmasked. It is exported to Xcode unchanged.",
       '.mask',
     )
+  }
+
+  /** A DefaultToolbarItem is drawn as the bottom bar's search field alone (Wave 6c); iOS 27 draws an empty capsule for search in the top bar. */
+  private checkDefaultToolbarItem(expr: CallExpr, scope: Scope): void {
+    if (expr.callee.kind !== 'identifier' || expr.callee.name !== 'DefaultToolbarItem' || scope.has('DefaultToolbarItem') || this.types.has('DefaultToolbarItem')) return
+    const arg = (label: string) => { const value = expr.args.find(a => a.label === label)?.value; return value?.kind === 'memberAccess' && !value.base ? value.member : undefined }
+    if (arg('kind') === 'search' && arg('placement') === 'bottomBar') return
+    this.report(expr.callee.span, 'warning', 'unsupported_swiftui_view', "'DefaultToolbarItem' is drawn in the preview as the search field in the bottom bar alone, so this one is not drawn here. Xcode draws it as written.", 'DefaultToolbarItem')
+  }
+
+  /**
+   * A compact adaptation is drawn as a popover's bubble for `.popover` and `.none`, which keeps
+   * it one (Wave 6c), and `.sheet` and `.automatic` are the sheet an iPhone shows anyway; any
+   * other is shown as a sheet. Of two, the horizontal one counts: a phone held upright is compact across.
+   */
+  private checkCompactAdaptation(member: string, expr: CallExpr): void {
+    if (member !== 'presentationCompactAdaptation') return
+    const value = (expr.args.length === 1 && !expr.args[0]!.label ? expr.args[0] : expr.args.find(a => a.label === 'horizontal'))?.value
+    if (value?.kind === 'memberAccess' && !value.base && ['popover', 'none', 'sheet', 'automatic'].includes(value.member)) return
+    this.report(expr.callee.kind === 'memberAccess' ? expr.callee.memberSpan : expr.span, 'warning', 'unsupported_swiftui_modifier', "'.presentationCompactAdaptation' is drawn by the preview for .popover and .none, and .sheet and .automatic are the sheet an iPhone shows anyway; this one is shown as a sheet. It is exported to Xcode unchanged.", '.presentationCompactAdaptation')
   }
 
   private checkBlendMode(member: string, args: readonly { label: string | null; value: Expr }[]): void {

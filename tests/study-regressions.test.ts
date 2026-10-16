@@ -386,19 +386,19 @@ describe('E3: presentations and search written on a NavigationStack or a TabView
     return compileView(source).diagnostics.map(d => ({ severity: d.severity, message: d.message, at: source.slice(d.span.start, d.span.end) }))
   }
 
-  it('warns, at the view, that a view beside a NavigationStack or a TabView is not drawn', () => {
+  it('draws a view beside a NavigationStack or a TabView, without a warning (Wave 6c)', () => {
     expect(warned(`var body: some View {
         ZStack(alignment: .bottomTrailing) {
           NavigationStack { Text("Home") }
           Button("New") { }
         }
-      }`)).toEqual([{ severity: 'warning', at: 'Button("New") { }', message: expect.stringContaining('beside the NavigationStack') }])
+      }`)).toEqual([])
     expect(warned(`var body: some View {
         VStack {
           Text("Offline banner")
           TabView { Text("Home").tabItem { Label("Home", systemImage: "house") } }
         }
-      }`)).toEqual([{ severity: 'warning', at: 'Text("Offline banner")', message: expect.stringContaining('beside the TabView') }])
+      }`)).toEqual([])
   })
 
   it('warns about a view beside a NavigationStack inside a sheet too', () => {
@@ -409,9 +409,8 @@ describe('E3: presentations and search written on a NavigationStack or a TabView
       }`)).toEqual([{ severity: 'warning', at: 'Button("New") { }', message: expect.stringContaining('beside the NavigationStack') }])
   })
 
-  it('warns that an overlay written on a NavigationStack is not drawn', () => {
-    expect(warned('var body: some View { NavigationStack { Text("Home") }.overlay(Text("Badge")) }'))
-      .toEqual([{ severity: 'warning', at: '.overlay(Text("Badge"))', message: expect.stringContaining('.overlay') }])
+  it('draws an overlay written on a NavigationStack, without a warning (Wave 6c)', () => {
+    expect(warned('var body: some View { NavigationStack { Text("Home") }.overlay(Text("Badge")) }')).toEqual([])
   })
 
   const stacks = Object.entries(placements).filter(([where]) => where !== 'the TabView')

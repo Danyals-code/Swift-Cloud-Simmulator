@@ -1,0 +1,887 @@
+{
+ "source": "Built from tests/fixtures/ios27-chrome-6c.swift with swiftc -parse-as-library -warnings-as-errors for arm64-apple-ios27.0-simulator (Xcode 27.0, 27A266a, SDK 27.0) and run on a scratch iPhone 18 Pro simulator \"6c capture\" (iOS 27.0, 24A434), light appearance, Large text, status bar overridden to 9:41; one launch per screen with -screen <name>, on 2026-10-16. Frames are printed by the fixture (MEASURE lines, onGeometryChange in the global space, points) and read with simctl launch --console-pty. Glass edges, ink and colours were read from the 3x screenshots along a row or column through the middle of what is measured; an edge is the outer pixel of a capsule's rim, so a capsule's frame is within about 0.67 of it. 1206x2622 pixels / 402x874 points at 3x. Every popover is up 0.6 s after launch, so nothing needed a tap.",
+ "fixtureSha256": "0296bed3955f5b13dd40e99cbb6ea726a782a29c4250423e74071b5c7bac8b15",
+ "captures": [
+  {
+   "file": "accessory.png",
+   "sha256": "f7a4df0216e92b709dcf2de76933252b69c5fe96e9931fad20dcc459297e0b13",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "confirmation.png",
+   "sha256": "ae5a4e43f4e63d23f7c540f0f3dad77a5c965207c3f0c05f7ea7c2955cada2d2",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "default-search-button.png",
+   "sha256": "1b2e63f4408d3cb84b49dbc355c7c49a3b49d85f02e441198f26bad08cae2884",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "default-search-top.png",
+   "sha256": "7d58b97cec81f133b28f748097d16730971e464d649e4cbe6499e96dc35f9f67",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "default-search.png",
+   "sha256": "30e2c4477a9cea3149913f9ed53a2dd65d5d83d369c5498020b892089a80d8df",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "floating-button.png",
+   "sha256": "87f965300f41ef69bfcbad9f3df2688c0f5895df7e67ca9696c451f039064f8b",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "glass-container.png",
+   "sha256": "94251705d3e8e7a100fadedefb6dfb78447893e9a94804a9137c5d009226ff02",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "nav-player.png",
+   "sha256": "0d341dd51f154d665a7edee946210cbf548c178bb01a470adbdf469ece260ea6",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "nav-toast.png",
+   "sha256": "4ee73519e58460b5c2a9718fdf6e27fc5365687fb9cd598f1705e1445570188b",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "placements.png",
+   "sha256": "ad8915c4a04b705490fdb98d880fc7d814f8ee4705e855743a3638bc50ab24c4",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "popover-below.png",
+   "sha256": "e72e2401e08dc77c03f84839a31dfd9fca3fc2f48323f644b395d7ad864fa76d",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "popover-bottom.png",
+   "sha256": "9e15e0b08f24811f9bb7f0728cc2b72705ae7d352df1c6c0561b4eef6f373437",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "popover-top.png",
+   "sha256": "0b176652bcbd13b4b5a6bbbd579acde8a2ba10f12b32b9004705633c59df696d",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "primary.png",
+   "sha256": "6a185e9489aca1f12b892492db8d27f58346d6a3288fadd8297826e8f9f004de",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "search-tab-accessory.png",
+   "sha256": "64ad40aecb28c1c537fc092916b04d9d0d4de516422391cdbfd6c762f85d6c5d",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "search-tab-three.png",
+   "sha256": "145fca0374758fcd3c5f249e5a890e56cb6d86bac89a3841baaae67dc1c152b2",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "search-tab.png",
+   "sha256": "ad8d0774ed4c64589327692b93451caa9612d32b3801781f692c4e92c713b6c5",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "spacer-fixed.png",
+   "sha256": "3e23c5b36c919b3a228c1b6a74466e8cadf6e3b5401394a459c7029e08fe9f67",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "spacer-flexible.png",
+   "sha256": "963e27abb210e6773cb051fee3cfbf785e7c77b1ea5dd916620e24e26dc8d91a",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "status.png",
+   "sha256": "e5e51f0007f2604a005ed847c7711d13b573cfeabef380a70295d529b0abcd5a",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "subtitle-inline.png",
+   "sha256": "fb4a4798ddb91eaa31b9a952d512eb7370cb32e151cb2d620c02e4a3be0b2d34",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "subtitle-large.png",
+   "sha256": "8707914be8231f542ea706b5319eb8114ba391588cecf760af33c58aead73da6",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "tabs-capsule.png",
+   "sha256": "7d42b72cb3e693c095c01c547c02a90ff4a00f31e8886506e796a3cc2e4f29ca",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "tabs-player.png",
+   "sha256": "476780f9bbcf96cff5ac5f88c17878e884a0dabaa87b329d9831230c2577dbcf",
+   "size": [
+    1206,
+    2622
+   ]
+  }
+ ],
+ "frames": {
+  "accessory": {
+   "player": [
+    21,
+    748.83,
+    360,
+    20.33
+   ],
+   "page": [
+    0,
+    62,
+    402,
+    673
+   ]
+  },
+  "floating-button": {
+   "fab": [
+    306,
+    744,
+    96,
+    96
+   ],
+   "stack": [
+    0,
+    62,
+    402,
+    778
+   ],
+   "row": [
+    32,
+    183.83,
+    65.33,
+    20.33
+   ]
+  },
+  "glass-container": {
+   "stacked": [
+    147,
+    460.33,
+    108,
+    44
+   ],
+   "second": [
+    172,
+    420,
+    58,
+    20.33
+   ],
+   "first": [
+    184.33,
+    397.67,
+    33.33,
+    20.33
+   ],
+   "bare": [
+    172,
+    397.67,
+    58,
+    42.67
+   ]
+  },
+  "nav-player": {
+   "player": [
+    0,
+    797.83,
+    402,
+    20.33
+   ],
+   "stack": [
+    0,
+    62,
+    402,
+    714
+   ],
+   "row": [
+    32,
+    183.83,
+    65.33,
+    20.33
+   ]
+  },
+  "nav-toast": {
+   "toast": [
+    161.5,
+    62,
+    79,
+    36.33
+   ],
+   "row": [
+    32,
+    183.83,
+    65.33,
+    20.33
+   ]
+  },
+  "popover-below": {
+   "source": [
+    175,
+    70,
+    52,
+    20.33
+   ],
+   "content": [
+    119,
+    103.33,
+    164,
+    76.67
+   ]
+  },
+  "popover-bottom": {
+   "source": [
+    175,
+    699.67,
+    52,
+    20.33
+   ],
+   "content": [
+    119,
+    610,
+    164,
+    76.67
+   ]
+  },
+  "popover-top": {
+   "source": [
+    175,
+    182.0,
+    52,
+    20.33
+   ],
+   "content": [
+    119,
+    92.33,
+    164,
+    76.67
+   ]
+  },
+  "search-tab-accessory": {
+   "player": [
+    21,
+    748.83,
+    360,
+    20.33
+   ],
+   "page": [
+    0,
+    62,
+    402,
+    673
+   ]
+  },
+  "search-tab-three": {
+   "page": [
+    0,
+    62,
+    402,
+    729
+   ]
+  },
+  "search-tab": {
+   "page": [
+    0,
+    62,
+    402,
+    729
+   ]
+  },
+  "subtitle-inline": {
+   "row": [
+    32,
+    166.83,
+    65.33,
+    20.33
+   ]
+  },
+  "subtitle-large": {
+   "row": [
+    32,
+    203.17,
+    65.33,
+    20.33
+   ]
+  },
+  "tabs-capsule": {
+   "capsule": [
+    159.67,
+    703.67,
+    82.67,
+    136.33
+   ],
+   "tabs": [
+    0,
+    62,
+    402,
+    778
+   ],
+   "page": [
+    0,
+    62,
+    402,
+    729
+   ]
+  },
+  "tabs-player": {
+   "player": [
+    0,
+    797.83,
+    402,
+    20.33
+   ],
+   "tabs": [
+    0,
+    62,
+    402,
+    714
+   ],
+   "page": [
+    0,
+    62,
+    402,
+    631
+   ]
+  }
+ },
+ "measured": {
+  "units": "points on a 402 x 874 iPhone 18 Pro; x and y ranges are [from, to]",
+  "searchTab": {
+   "twoTabs": {
+    "bar": {
+     "x": [
+      63.33,
+      338.67
+     ],
+     "y": [
+      791,
+      853.33
+     ]
+    },
+    "labels": [
+     "Home",
+     "Library",
+     "Search"
+    ]
+   },
+   "threeTabs": {
+    "bar": {
+     "x": [
+      20.33,
+      381.67
+     ]
+    },
+    "labels": [
+     "Home",
+     "Library",
+     "Radio",
+     "Search"
+    ]
+   },
+   "note": "Tab(role: .search) is an ordinary item inside the bar in iOS 27.0, last, labelled Search with a magnifying glass, not a circle of its own: two tabs and a search tab make the bar as wide as three tabs do. The page fills to the bar's top, 62 to 791."
+  },
+  "accessory": {
+   "capsule": {
+    "x": [
+     20.33,
+     381.67
+    ],
+    "y": [
+     735.33,
+     783.33
+    ],
+    "height": 48
+   },
+   "bar": {
+    "x": [
+     20.33,
+     381.67
+    ],
+    "y": [
+     791,
+     853.33
+    ]
+   },
+   "page": {
+    "y": [
+     62,
+     735
+    ]
+   },
+   "content": {
+    "x": [
+     21,
+     381
+    ],
+    "note": "MiniPlayer's frame, its HStack padded 16: the accessory's content is laid out in the capsule less about 0.67 each side"
+   },
+   "note": "tabViewBottomAccessory: a glass capsule 48 tall, 7.67 above the tab bar, as wide as the widest bar (20.33 from each edge); with it the bar stretches to that width whatever its tabs, a search tab's too. The page ends at the capsule's top."
+  },
+  "spacers": {
+   "fixedTop": {
+    "groups": [
+     [
+      230,
+      330.33
+     ],
+     [
+      341.33,
+      386.33
+     ]
+    ],
+    "y": [
+     62,
+     106
+    ],
+    "gap": 11
+   },
+   "flexibleBottom": {
+    "groups": [
+     [
+      27.33,
+      76.33
+     ],
+     [
+      265.33,
+      314.33
+     ],
+     [
+      325.33,
+      374.33
+     ]
+    ],
+    "y": [
+     798,
+     846
+    ],
+    "gap": 11
+   },
+   "note": "ToolbarSpacer(.fixed) splits the items around it into two glass capsules 11 apart (outer rim to outer rim), in the top bar and the bottom bar. ToolbarSpacer(.flexible), the default, pushes the groups apart as a Spacer does: Filter at the leading edge, Share and Add at the trailing one, a fixed spacer between them."
+  },
+  "defaultSearch": {
+   "alone": {
+    "field": [
+     27.33,
+     374.33
+    ],
+    "y": [
+     798,
+     846
+    ]
+   },
+   "withButtons": {
+    "filter": [
+     27.33,
+     76.33
+    ],
+    "field": [
+     87.33,
+     314.33
+    ],
+    "compose": [
+     325.33,
+     374.33
+    ],
+    "gap": 11
+   },
+   "top": "In .topBarTrailing iOS 27.0 draws an empty glass capsule (146 to 386, 62 to 106), with no field or icon in it.",
+   "note": "DefaultToolbarItem(kind: .search, placement: .bottomBar) puts the .searchable field in the bottom bar: alone it spans the bar, 28 in from the edges; between items it takes the space left, 11 from each, flexible spacers beside it shrinking to that. No field is drawn in the title's drawer."
+  },
+  "subtitle": {
+   "inline": {
+    "title": {
+     "ink": {
+      "x": [
+       182.33,
+       220.33
+      ],
+      "y": [
+       71,
+       82.67
+      ]
+     }
+    },
+    "subtitle": {
+     "ink": {
+      "x": [
+       176.33,
+       224.67
+      ],
+      "y": [
+       88.33,
+       97.67
+      ]
+     },
+     "color": "secondary"
+    },
+    "plainTitle": {
+     "ink": {
+      "y": [
+       77.67,
+       90.67
+      ]
+     },
+     "note": "Places, inline with no subtitle"
+    },
+    "row": {
+     "y": 166.83
+    }
+   },
+   "large": {
+    "title": {
+     "ink": {
+      "x": [
+       18,
+       102
+      ],
+      "y": [
+       131,
+       155.67
+      ]
+     }
+    },
+    "plainTitle": {
+     "ink": {
+      "y": [
+       128,
+       152.67
+      ]
+     },
+     "note": "Notes, large with no subtitle"
+    },
+    "subtitle": {
+     "ink": {
+      "x": [
+       16.33,
+       62.67
+      ],
+      "y": [
+       163,
+       171.67
+      ]
+     },
+     "color": "secondary"
+    },
+    "row": {
+     "y": 203.17,
+     "without": 183.83
+    }
+   },
+   "note": "navigationSubtitle: inline, the title shrinks to about 16 pt semibold over a 12 pt secondary line, the two centred together on the bar's row, where the content stays; large, a 12 pt secondary line under the large title, which moves down 3, and the content 19.33."
+  },
+  "placements": {
+   "navigation": {
+    "x": [
+     15.33,
+     60.33
+    ],
+    "y": [
+     62,
+     106
+    ]
+   },
+   "primaryWithSecondary": {
+    "x": [
+     286,
+     386.33
+    ],
+    "note": "primaryAction's + then an ellipsis button for the two secondaryAction items, in one capsule"
+   },
+   "confirmation": {
+    "cancel": [
+     15.33,
+     101
+    ],
+    "done": [
+     311.67,
+     386.33
+    ],
+    "doneWeight": "semibold",
+    "note": "cancellationAction leading, confirmationAction trailing, its title semibold, in the same plain glass as any other item"
+   },
+   "primary": {
+    "save": [
+     316.33,
+     386.33
+    ]
+   },
+   "status": {
+    "capsule": [
+     145.67,
+     256
+    ],
+    "textInk": [
+     152.33,
+     250
+    ],
+    "compose": [
+     27.33,
+     76.33
+    ],
+    "y": [
+     798,
+     846
+    ],
+    "note": "ToolbarItem(placement: .status) is centred in the bottom bar in a glass capsule of its own, 48 tall, hugging its text; a .bottomBar item beside it goes to the leading edge"
+   },
+   "note": ".navigation is leading, .primaryAction trailing, .secondaryAction an ellipsis menu button after the trailing items"
+  },
+  "popover": {
+   "top": {
+    "source": [
+     175,
+     182,
+     52,
+     20.33
+    ],
+    "content": [
+     119,
+     92.33,
+     164,
+     76.67
+    ],
+    "arrowTip": 182,
+    "side": "above"
+   },
+   "bottom": {
+    "source": [
+     175,
+     699.67,
+     52,
+     20.33
+    ],
+    "content": [
+     119,
+     610,
+     164,
+     76.67
+    ],
+    "arrowTip": 699.67,
+    "side": "above"
+   },
+   "below": {
+    "source": [
+     175,
+     70,
+     52,
+     20.33
+    ],
+    "content": [
+     119,
+     103.33,
+     164,
+     76.67
+    ],
+    "arrowTip": 90.33,
+    "side": "below"
+   },
+   "bubble": {
+    "radius": 28,
+    "arrowHeight": 13,
+    "arrowWidth": 26,
+    "fill": [
+     255,
+     255,
+     255
+    ]
+   },
+   "note": ".presentationCompactAdaptation(.popover): a white bubble exactly its content's size, centred on the source, with an arrow 13 tall whose tip touches the source's middle; above the source when it fits under the safe area's top, otherwise below. Nothing dims behind it."
+  },
+  "beside": {
+   "floatingButton": {
+    "stack": [
+     0,
+     62,
+     402,
+     778
+    ],
+    "button": [
+     326,
+     764,
+     56,
+     56
+    ],
+    "padded": [
+     306,
+     744,
+     96,
+     96
+    ],
+    "row": 183.83
+   },
+   "navPlayer": {
+    "stack": [
+     0,
+     62,
+     402,
+     714
+    ],
+    "player": {
+     "y": [
+      776,
+      840
+     ]
+    },
+    "row": 183.83
+   },
+   "navToast": {
+    "toast": [
+     161.5,
+     62,
+     79,
+     36.33
+    ],
+    "row": 183.83
+   },
+   "tabsPlayer": {
+    "tabs": [
+     0,
+     62,
+     402,
+     714
+    ],
+    "page": [
+     0,
+     62,
+     402,
+     631
+    ],
+    "bar": {
+     "y": [
+      693,
+      755.5
+     ]
+    },
+    "player": {
+     "y": [
+      776,
+      840
+     ]
+    }
+   },
+   "tabsCapsule": {
+    "tabs": [
+     0,
+     62,
+     402,
+     778
+    ],
+    "capsule": [
+     159.67,
+     703.67,
+     82.67,
+     36.33
+    ],
+    "bar": {
+     "y": [
+      791,
+      853.33
+     ]
+    }
+   },
+   "note": "A ZStack sibling of a NavigationStack or a TabView is laid out in the safe area and drawn over the bars; a VStack sibling takes its height out of the container, whose screen is laid out in what is left, a tab bar staying 20.5 above that space's bottom (the page shrinks by the same 98); an .overlay on a NavigationStack is aligned in the stack's frame, the safe area, over its bar."
+  },
+  "glassEffectContainer": {
+   "bare": [
+    172,
+    397.67,
+    58,
+    42.67
+   ],
+   "first": [
+    184.33,
+    397.67,
+    33.33,
+    20.33
+   ],
+   "second": [
+    172,
+    420,
+    58,
+    20.33
+   ],
+   "stacked": [
+    147,
+    460.33,
+    108,
+    44
+   ],
+   "note": "GlassEffectContainer lays out views written straight in it as a centred VStack does; its spacing: is how close glass shapes merge, not a layout spacing (the HStack inside, spacing 20, is 108 wide for two 44s)"
+  }
+ }
+}

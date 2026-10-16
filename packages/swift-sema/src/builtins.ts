@@ -51,6 +51,8 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   'MagnificationGesture', 'MagnifyGesture', 'RotationGesture', 'RotateGesture',
   // structure
   'EmptyView', 'WindowGroup', 'ToolbarItem', 'ToolbarItemGroup',
+  // Liquid Glass and the iOS 26 toolbar (Wave 6c): a DefaultToolbarItem is drawn as the bottom search field alone
+  'GlassEffectContainer', 'ToolbarSpacer', 'DefaultToolbarItem',
 ])
 
 /** Modifiers the preview applies. */
@@ -91,6 +93,8 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'presentationDetents',
   'presentationCornerRadius', 'presentationDragIndicator', 'presentationBackground', 'interactiveDismissDisabled',
   'popover', 'tabItem', 'tag', 'tabViewStyle', 'indexViewStyle',
+  // iOS 26 chrome (Wave 6c): a compact adaptation is drawn as a popover's bubble, or as the sheet it is anyway
+  'navigationSubtitle', 'tabViewBottomAccessory', 'presentationCompactAdaptation',
   // lists
   'listStyle', 'listRowBackground', 'listRowSpacing', 'listSectionSpacing', 'scrollContentBackground',
   // interaction
@@ -208,8 +212,6 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   'Table', 'TableColumn', 'OutlineGroup', 'MultiDatePicker',
   // charts, and what an axis is drawn with
   'Chart', ...CHART_MARKS, 'AxisMarks', 'AxisGridLine', 'AxisTick', 'AxisValueLabel',
-  // Liquid Glass and the iOS 26 toolbar
-  'GlassEffectContainer', 'ToolbarSpacer', 'DefaultToolbarItem',
   // platform surfaces a browser has no analogue for
   'Map', 'Marker', 'Annotation', 'VideoPlayer', 'SceneView', 'PhotosPicker',
   // scenes other than the one WindowGroup the preview shows
@@ -332,9 +334,9 @@ export const OTHER_APPLE_MODIFIERS: ReadonlySet<string> = new Set([
   'hoverEffect', 'hoverEffectDisabled', 'privacySensitive', 'headerProminence', 'badgeProminence',
   'listSectionSeparatorTint', 'invalidatableContent', 'backgroundExtensionEffect', 'glassEffectID',
   'glassEffectUnion', 'glassEffectTransition', 'buttonSizing', 'labelsHidden', 'scrollIndicatorsFlash', 'scrollEdgeEffectStyle',
-  'scrollEdgeEffectHidden', 'navigationViewStyle', 'navigationSubtitle', 'toolbarColorScheme', 'toolbarBackgroundVisibility',
-  'toolbarVisibility', 'toolbarTitleDisplayMode', 'toolbarRole', 'persistentSystemOverlays', 'statusBar', 'tabViewBottomAccessory',
-  'tabBarMinimizeBehavior', 'searchToolbarBehavior', 'presentationCompactAdaptation', 'presentationContentInteraction', 'presentationSizing', 'tableStyle',
+  'scrollEdgeEffectHidden', 'navigationViewStyle', 'toolbarColorScheme', 'toolbarBackgroundVisibility',
+  'toolbarVisibility', 'toolbarTitleDisplayMode', 'toolbarRole', 'persistentSystemOverlays', 'statusBar',
+  'tabBarMinimizeBehavior', 'searchToolbarBehavior', 'presentationContentInteraction', 'presentationSizing', 'tableStyle',
   'formStyle', 'groupBoxStyle', 'disclosureGroupStyle', 'controlGroupStyle', 'navigationSplitViewStyle',
   'labeledContentStyle', 'textEditorStyle', 'menuIndicator', 'menuOrder', 'tipBackground', 'tipViewStyle', 'widgetAccentable',
   'backgroundPreferenceValue', 'overlayPreferenceValue',

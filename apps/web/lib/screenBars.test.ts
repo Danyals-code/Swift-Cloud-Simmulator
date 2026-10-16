@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildAuthoringModel } from '@studio/swift-sema'
 import type { ScreenBars } from '@studio/shared'
-import { sheetSettings, toolbarGroups } from './screenBars'
+import { searchTabScreen, sheetSettings, toolbarGroups } from './screenBars'
 
 const model = (modifiers: string) => {
   const text = `import SwiftUI
@@ -50,6 +50,21 @@ describe('a screen’s toolbar items in the Bars section', () => {
     ])
   })
 
+  it('list items where a menu button goes and at the bottom bar’s status under Navigation and Status, before where iOS puts them (Wave 6c)', () => {
+    const bars: ScreenBars = { items: [
+      { node: node('ToolbarItem', 0), placement: 'status', label: 'Add' },
+      { node: node('ToolbarItem', 2), placement: 'navigation', label: 'Cancel' },
+      { node: node('Button', 3), placement: 'automatic', label: 'Share' },
+      { node: node('ToolbarItem', 1), placement: 'bottom', label: 'Custom' },
+    ] }
+    expect(listed(toolbarGroups(snapshot, bars))).toEqual([
+      ['Bottom', [['ToolbarItem', 'Custom']]],
+      ['Navigation', [['ToolbarItem', 'Cancel']]],
+      ['Status', [['ToolbarItem', 'Add']]],
+      ['Automatic', [['Button', 'Share']]],
+    ])
+  })
+
   it('leave out an item whose layer is gone, and are none when the screen has no toolbar', () => {
     expect(listed(toolbarGroups(snapshot, { items: [{ node: 'gone', placement: 'trailing', label: 'Add' }] }))).toEqual([])
     expect(toolbarGroups(snapshot, undefined)).toEqual([])
@@ -68,6 +83,78 @@ describe('a screen’s toolbar items in the Bars section', () => {
       ['Title', [['ToolbarItem', 'Custom']]],
       ['Bottom', [['ToolbarItemGroup', 'Archive, Flag']]],
     ])
+  })
+
+  it('read .navigation and .status from the code into their own groups, no longer Set in code (Wave 6c)', () => {
+    const { snapshot: written, definition } = model(`
+        .toolbar {
+          ToolbarItem(placement: .navigation) { Button("Menu", systemImage: "line.3.horizontal") { } }
+          ToolbarItem(placement: .status) { Text("Updated just now") }
+        }`)
+    expect(listed(toolbarGroups(written, definition.bars))).toEqual([
+      ['Navigation', [['ToolbarItem', 'Menu']]],
+      ['Status', [['ToolbarItem', 'Updated just now']]],
+    ])
+  })
+})
+
+/**
+ * The Search tab switch (Wave 6c). The screen holding the app's tabs is never a screen of its
+ * own in Design, since its tabs are, so the switch shows in the Bars of each tab's first
+ * screen and writes the screen holding them.
+ */
+describe('the screen a Search tab switch writes', () => {
+  /** The app, its TabView written alone or, by `around`, with views beside it. */
+  const tabs = (search = '', around = (tabView: string) => tabView) => buildAuthoringModel({ projectId: 'p', revision: 1, files: [{ id: 'App.swift', text: `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { HomeScreen() } } }
+struct HomeScreen: View {
+  var body: some View {
+    ${around(`TabView {
+      Tab("Inbox", systemImage: "tray") { InboxScreen() }
+      Tab("Sent", systemImage: "paperplane") { SentScreen() }${search}
+    }`)}
+  }
+}
+struct InboxScreen: View { var body: some View { NavigationStack { List { Text("Groceries") }.navigationTitle("Inbox") } } }
+struct SentScreen: View { var body: some View { NavigationStack { Text("Nothing sent").navigationTitle("Sent") } } }` }] })
+  const definition = (snapshot: ReturnType<typeof tabs>, name: string) => snapshot.nodes.find(node => node.kind === 'definition' && node.name === name)
+
+  it('is the screen holding the tabs, from a tab’s first screen, with the switch off until it has one', () => {
+    const snapshot = tabs()
+    const holder = searchTabScreen(snapshot, definition(snapshot, 'InboxScreen'), true)
+    expect(holder?.name).toBe('HomeScreen')
+    expect(holder?.bars?.searchTab).toEqual({ on: false })
+  })
+
+  it('is on, with the layer it selects, once the tabs have a search tab', () => {
+    const snapshot = tabs(`
+      Tab(role: .search) { Text("Search") }`)
+    const searchTab = searchTabScreen(snapshot, definition(snapshot, 'SentScreen'), true)?.bars?.searchTab
+    expect(searchTab?.on).toBe(true)
+    expect(snapshot.nodes.find(node => node.id === searchTab?.node)?.name).toBe('Tab')
+  })
+
+  it('is the screen holding the tabs when a floating button or a mini player is beside its TabView', () => {
+    const floating = tabs('', tabView => `ZStack(alignment: .bottomTrailing) {
+      ${tabView}
+      Button("Add", systemImage: "plus") { }
+    }`)
+    expect(searchTabScreen(floating, definition(floating, 'InboxScreen'), true)?.bars?.searchTab).toEqual({ on: false })
+    const player = tabs(`
+      Tab(role: .search) { Text("Search") }`, tabView => `VStack(spacing: 0) {
+      ${tabView}
+      Text("Now Playing")
+    }`)
+    const holder = searchTabScreen(player, definition(player, 'SentScreen'), true)
+    expect(holder?.name).toBe('HomeScreen')
+    expect(holder?.bars?.searchTab?.on).toBe(true)
+  })
+
+  it('is none on a screen pushed from a tab, or in an app without tabs', () => {
+    const snapshot = tabs()
+    expect(searchTabScreen(snapshot, definition(snapshot, 'InboxScreen'), false)).toBeUndefined()
+    const { snapshot: stack, definition: home } = model('')
+    expect(searchTabScreen(stack, home, true)).toBeUndefined()
   })
 })
 

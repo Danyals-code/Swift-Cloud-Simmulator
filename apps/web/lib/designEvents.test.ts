@@ -104,6 +104,8 @@ const EVERY_KIND: { readonly [K in Operation['kind']]: Extract<Operation, { kind
   'toolbar-item-add': { kind: 'toolbar-item-add', placement: 'trailing', snippet: `Button("${S}") { }` },
   'searchable-add': { kind: 'searchable-add', prompt: S },
   'searchable-remove': { kind: 'searchable-remove' },
+  'search-tab-add': { kind: 'search-tab-add' },
+  'search-tab-remove': { kind: 'search-tab-remove' },
   'visibility': { kind: 'visibility', when: { input: S, is: S }, create: { name: S, value: true } },
   'animate-action': { kind: 'animate-action', animation: { style: 'linear', duration: 0.4 } },
 }
@@ -149,6 +151,11 @@ describe('design edits in the event log', () => {
   it('name the hidden view Show brings back, when it is one the library offers', () => {
     expect(designEvent({ kind: 'show' }, hidden('Text'))).toEqual({ type: 'design', op: 'show', layer: 'Text' })
     expect(designEvent({ kind: 'show' }, hidden('SecretCard'))).toEqual({ type: 'design', op: 'show', layer: 'other' })
+  })
+
+  it('log a search tab switched on or off on the screen whose tabs it joins, as the search field is (Wave 6c)', () => {
+    expect(designEvent({ kind: 'search-tab-add' }, screen)).toEqual({ type: 'design', op: 'search-tab-add', layer: 'definition' })
+    expect(designEvent({ kind: 'search-tab-remove' }, screen)).toEqual({ type: 'design', op: 'search-tab-remove', layer: 'definition' })
   })
 
   it('give no layer to an edit of the whole project: its tokens and the app’s navigation', () => {
