@@ -356,6 +356,35 @@ export interface GradientPayload {
   readonly shadow?: ShadowStylePayload
 }
 
+/**
+ * `MeshGradient(width:height:points:colors:smoothsColors:)` (Wave 6d), a ShapeStyle like a
+ * gradient: its grid of `width` by `height` points and their colours, row by row.
+ */
+export interface MeshPayload {
+  readonly kind: 'mesh'
+  readonly opacity?: number
+  readonly width: number
+  readonly height: number
+  readonly points: readonly (readonly [number, number])[]
+  readonly colors: readonly SwiftValue[]
+  readonly smooth: boolean
+  readonly shadow?: ShadowStylePayload
+}
+
+/**
+ * Which parts of a date a `DatePicker` shows, from `displayedComponents:`, a set whose members
+ * that matter are `.date` and `.hourAndMinute` (Wave 6d). Omitted, SwiftUI shows both.
+ */
+export type DateParts = 'date' | 'time' | 'both'
+
+export function datePickerParts(view: ViewValue): DateParts {
+  const components = view.args.find(arg => arg.label === 'displayedComponents')?.value
+  if (!components) return 'both'
+  const names = (components.kind === 'array' ? components.elements : [components]).map(part => payloadOf<TokenPayload>(part, TOKEN_TYPE)?.name)
+  const date = names.includes('date'), time = names.includes('hourAndMinute')
+  return date === time ? 'both' : date ? 'date' : 'time'
+}
+
 /** A `GeometryProxy`, as `GeometryReader`'s closure receives it. */
 export const GEOMETRY_TYPE = 'GeometryProxy'
 

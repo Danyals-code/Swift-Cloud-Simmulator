@@ -89,6 +89,7 @@ import {
   type EdgeInsetsPayload,
   type GeometryPayload,
   type GradientPayload,
+  type MeshPayload,
   type ModifierValue,
   type StrokeStylePayload,
   type TokenPayload,
@@ -929,6 +930,9 @@ export class SwiftUIHost implements InterpreterHost {
     if (name === 'GridItem') return this.makeGridItem(call)
     if (name === 'Gradient') return opaque('Gradient', this.gradientStops(call))
     if (name === 'Gradient.Stop') return this.gradientStop(call)
+    if (name === 'MeshGradient') return this.makeMesh(call)
+    // `SIMD2<Float>(x, y)`, a mesh point, is the pair it holds, as `[x, y]` is.
+    if (name === 'SIMD2') return array(call.args.map(arg => arg.value))
 
     if (name === 'Angle') {
       const arg = call.args.find(a => a.label === 'degrees' || a.label === 'radians')
@@ -2230,6 +2234,23 @@ export class SwiftUIHost implements InterpreterHost {
       endAngle: call.args.some(a => a.label === 'endAngle') ? angleOf(call.args.find(a => a.label === 'endAngle')?.value) : angleOf(call.args.find(a => a.label === 'angle')?.value) + 360,
       startPoint: pointValue('startPoint'), endPoint: pointValue('endPoint'),
     } satisfies GradientPayload)
+  }
+
+  /**
+   * `MeshGradient(width:height:points:colors:smoothsColors:)` (iOS 18), a style like any
+   * gradient, so it draws as a view and as a background (Wave 6d). Each point is written
+   * `[x, y]` or `SIMD2(x, y)`; `background:` and `colorSpace:` change nothing the preview draws.
+   */
+  private makeMesh(call: HostCall): SwiftValue {
+    const arg = (label: string) => call.args.find(a => a.label === label)?.value
+    const list = (label: string) => { const value = arg(label); return value?.kind === 'array' ? value.elements : [] }
+    const points = list('points').map(point => point.kind === 'array' ? point.elements.map(numberOf) : [])
+    return opaque(STYLE_TYPE, {
+      kind: 'mesh', colors: list('colors'),
+      width: numberOf(arg('width')) ?? 0, height: numberOf(arg('height')) ?? 0,
+      points: points.map(([x, y]) => [x ?? NaN, y ?? NaN] as const),
+      smooth: arg('smoothsColors')?.kind !== 'bool' || truthy(arg('smoothsColors')!),
+    } satisfies MeshPayload)
   }
 
   /**

@@ -1,5 +1,5 @@
 import { stackGaps } from './spacing'
-import { symbolMetrics, textLineHeight } from '@studio/shared'
+import { stopsOf, symbolMetrics, textLineHeight } from '@studio/shared'
 import type {
   PlaceholderPayload,
   TransformSpec,
@@ -131,6 +131,7 @@ export type PaintSpec =
       readonly content: Size
       readonly showsIndicators: boolean
       readonly paging?: boolean
+      readonly snaps?: readonly number[]
     }
   | { readonly kind: 'placeholder'; readonly placeholder: PlaceholderPayload }
   | { readonly kind: 'hit' }
@@ -290,6 +291,8 @@ export class LayoutEngine {
    * measurements places every text it did not change at the width it had last time.
    */
   private texts = new Map<TextElement, Map<string, TextMeasurement>>()
+  /** Where the views of the view-aligned scroll view being placed start, along its axis (Wave 6d). */
+  private snaps: number[] | null = null
 
   constructor(private readonly metrics: FontMetricsTable = new FontMetricsTable()) {}
 
@@ -1052,6 +1055,9 @@ export class LayoutEngine {
     }
     // A ScrollView that pages, `.scrollTargetBehavior(.paging)`, says so to the renderer (Wave 4c).
     if (element.paging) paint.paging = true
+    // One aligned to its views collects where they start as its content is placed (Wave 6d).
+    const outerSnaps = this.snaps
+    this.snaps = element.snapInset === undefined ? null : []
     out.push({
       id: element.id,
       frame: bounds,
@@ -1065,7 +1071,7 @@ export class LayoutEngine {
       ...(element.origin ? { origin: element.origin } : {}),
     })
 
-    return this.place(
+    const next = this.place(
       element.content,
       // An intrinsic child keeps its measured cross-axis size and is centred across (a
       // padded VStack, for one). Along the axis it keeps its own length at the top, as
@@ -1080,6 +1086,9 @@ export class LayoutEngine {
       z + 1,
       element.id,
     )
+    if (this.snaps?.length) paint.snaps = this.snaps.map(start => start - element.snapInset!)
+    this.snaps = outerSnaps
+    return next
   }
 
   /**
@@ -1304,6 +1313,7 @@ export class LayoutEngine {
     // Raised children are placed once every frame is known, in the order they paint.
     const order = paintOrder(element.children)
     const placed: Rect[] | null = order && []
+    const snaps = element.snapTargets ? this.snaps : null
 
     for (let i = 0; i < element.children.length; i++) {
       const size = sizes[i]!
@@ -1319,6 +1329,7 @@ export class LayoutEngine {
         ? { x: bounds.x + crossOffset, y: bounds.y + offset, width: size.width, height: size.height }
         : { x: bounds.x + offset, y: bounds.y + crossOffset, width: size.width, height: size.height }
 
+      snaps?.push(vertical ? childBounds.y : childBounds.x)
       if (placed) placed.push(childBounds)
       else next = this.place(element.children[i]!, childBounds, env, out, next, parent)
       offset += (vertical ? size.height : size.width) + (gaps[i] ?? 0)
@@ -2360,5 +2371,6 @@ function gradientKeptTo(content: LayoutElement, view: Rect, reach: Rect): Layout
  */
 function foregroundStroke(stroke: ShapeStroke, color: RGBA, fill: Fill | undefined): ShapeStroke {
   if (!stroke.usesForeground) return stroke
-  return fill && fill.kind !== 'solid' ? { ...stroke, color: fill.stops[0]?.color ?? color, fill } : { ...stroke, color }
+  const stops = fill && stopsOf(fill)
+  return stops ? { ...stroke, color: stops[0]?.color ?? color, fill } : { ...stroke, color }
 }

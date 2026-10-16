@@ -21,6 +21,7 @@ import {
   TOKEN_TYPE,
   type ColorPayload,
   type GradientPayload,
+  type MeshPayload,
   type TokenPayload,
 } from './view-value'
 
@@ -287,7 +288,8 @@ export function resolveFillArg(
   }
 
   if (value.typeName === STYLE_TYPE) {
-    const gradient = value.payload as GradientPayload
+    const gradient = value.payload as GradientPayload | MeshPayload
+    if (gradient.kind === 'mesh') return meshFill(gradient, scheme, tint)
     const values = gradient.stops ?? gradient.colors.map((color, index) => ({ color, location: gradient.colors.length < 2 ? 0 : index / (gradient.colors.length - 1) }))
     const stops = values.flatMap(stop => {
       const color = resolveColorArg(stop.color, scheme, tint)
@@ -306,6 +308,19 @@ export function resolveFillArg(
 
   const color = resolveColorArg(value, scheme, tint)
   return color ? { kind: 'solid', color } : null
+}
+
+/**
+ * A `MeshGradient` as a fill (Wave 6d), or null when its grid can't be read: a point or a
+ * colour short, or one that isn't a number, which a preview mustn't guess at.
+ */
+function meshFill(mesh: MeshPayload, scheme: ColorScheme, tint: RGBA | undefined): Fill | null {
+  const count = mesh.width * mesh.height
+  const colors = mesh.colors.map(color => resolveColorArg(color, scheme, tint))
+  if (mesh.width < 2 || mesh.height < 2 || mesh.points.length !== count || colors.length !== count) return null
+  if (colors.some(color => !color) || mesh.points.some(([x, y]) => !Number.isFinite(x) || !Number.isFinite(y))) return null
+  const opacity = mesh.opacity ?? 1
+  return { kind: 'mesh', width: mesh.width, height: mesh.height, points: mesh.points, colors: colors.map(color => opacity === 1 ? color! : { ...color!, a: color!.a * opacity }), smooth: mesh.smooth }
 }
 
 /**
@@ -337,7 +352,9 @@ export function resolveStrokePaint(
 ): { readonly color: RGBA; readonly fill?: Fill } | null {
   const fill = resolveFillArg(value, scheme, tint)
   if (!fill) return null
-  return fill.kind === 'solid' ? { color: fill.color } : { color: fill.stops[0]!.color, fill }
+  if (fill.kind === 'solid') return { color: fill.color }
+  // A mesh strokes in its first colour: a canvas paints it only where it fills a view (Wave 6d).
+  return fill.kind === 'mesh' ? { color: fill.colors[0]! } : { color: fill.stops[0]!.color, fill }
 }
 
 /**

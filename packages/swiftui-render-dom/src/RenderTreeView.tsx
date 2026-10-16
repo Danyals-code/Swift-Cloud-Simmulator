@@ -1,6 +1,7 @@
 import { createContext, useContext, useId, useState, useRef, useLayoutEffect, useEffect, useCallback, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react'
 import { ScrollIndicator } from './ScrollIndicator'
 import { ShapeView, VectorPathView } from './ShapeView'
+import { MeshCanvas } from './mesh'
 import { SliderView, ControlStyles } from './SliderView'
 import { inlineSymbolBox, placeholderWords, symbolLayerColors, symbolLayerStyles, symbolMetrics, shapePath, type Point, type Size, type SymbolLayerStyle } from '@studio/shared'
 import { memo, useMemo, type CSSProperties, type ReactNode } from 'react'
@@ -586,7 +587,7 @@ function RenderNodeView({
           // iOS scrollers do not capture a page scroll once they hit their end.
           overscrollBehavior: 'contain',
           // A ScrollView that pages comes to rest on a page (Wave 4c): see `ScrollContent`.
-          scrollSnapType: scroll.paging ? scroll.axis === 'horizontal' ? 'x mandatory' : 'y mandatory' : undefined,
+          scrollSnapType: scroll.paging || scroll.snaps ? scroll.axis === 'horizontal' ? 'x mandatory' : 'y mandatory' : undefined,
         }
       : {}),
     ...(node.border
@@ -649,6 +650,7 @@ function RenderNodeView({
   const content: ReactNode = (
     <>
       {node.background && node.cornerStyle === 'continuous' ? <ShapeView shape={{ shape: 'roundedRectangle', cornerRadius: node.cornerRadius, cornerStyle: node.cornerStyle, fill: node.background }} width={node.frame.width} height={node.frame.height} /> : null}
+      {node.background?.kind === 'mesh' && node.cornerStyle !== 'continuous' ? <MeshCanvas mesh={node.background} /> : null}
       {node.slider ? <SliderView slider={node.slider} width={node.frame.width} height={node.frame.height} /> : null}
       {redacted ? <RedactedBar /> : null}
       {!redacted && node.kind === 'text' && node.text ? <TextContent node={node} animate={animate && !exiting} /> : null}
@@ -859,7 +861,8 @@ function tapBeneath(layer: HTMLElement, at: { clientX: number; clientY: number }
  *
  * A scroll view that pages, `.scrollTargetBehavior(.paging)`, comes to rest a whole scroll
  * view's width or height on, one page a swipe, as iOS's does (Wave 4c). The browser snaps to
- * an empty mark at each page's start; the last one it can't reach, it rests at the end.
+ * an empty mark at each page's start; the last one it can't reach, it rests at the end. One
+ * aligned to its views, `.viewAligned`, rests with the nearest at its leading margin (Wave 6d).
  */
 function ScrollContent({ node, children }: { node: RenderNode; children: ReactNode }) {
   if (!node.scroll) return <>{children}</>
@@ -874,11 +877,11 @@ function ScrollContent({ node, children }: { node: RenderNode; children: ReactNo
         height: node.scroll.content.height,
       }}
     >
-      {Array.from({ length: pages }, (_, index) => (
+      {(node.scroll.snaps ?? Array.from({ length: pages }, (_, index) => index * page)).map((offset, index) => (
         <div
           key={`page-${index}`}
           aria-hidden
-          style={{ position: 'absolute', left: horizontal ? index * page : 0, top: horizontal ? 0 : index * page, width: 1, height: 1, pointerEvents: 'none', scrollSnapAlign: 'start', scrollSnapStop: 'always' }}
+          style={{ position: 'absolute', left: horizontal ? offset : 0, top: horizontal ? 0 : offset, width: 1, height: 1, pointerEvents: 'none', scrollSnapAlign: 'start', scrollSnapStop: node.scroll!.paging ? 'always' : undefined }}
         />
       ))}
       {children}

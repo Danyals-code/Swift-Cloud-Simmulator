@@ -62,6 +62,7 @@ import {
   type LayoutModifier,
   type SafeAreaEdges,
   type ScrollElement,
+  type StackElement,
   type TextRunSpec,
   type VerticalAlignment,
 } from '@studio/swiftui-layout'
@@ -116,11 +117,13 @@ import {
   NAMESPACE_TYPE,
   NUMERIC_TEXT_TYPE,
   asView,
+  datePickerParts,
   handlerIdFor,
   payloadOf,
   stopped,
   type AnimationPayload,
   type ColorPayload,
+  type DateParts,
   type EdgeInsetsPayload,
   type ModifierValue,
   type PageDots,
@@ -509,9 +512,16 @@ interface ControlStyles {
   readonly bottomBar?: boolean
   /** Whether these views are a button's label, which take the button's colour, grey when it is disabled. */
   readonly buttonLabel?: boolean
+  /** `.datePickerStyle` (Wave 6d). */
+  readonly datePicker?: 'automatic' | 'compact' | 'graphical' | 'wheel'
+  /** `.contentMargins` for the scroll views inside, by placement (Wave 6d). */
+  readonly margins?: { readonly auto?: Margins; readonly content?: Margins }
 }
 
-const STYLE_MODIFIERS: readonly (readonly [string, keyof ControlStyles])[] = [
+/** The edges a `.contentMargins` sets, each by its own length. */
+export type Margins = { readonly [Edge in keyof EdgeInsets]?: number }
+
+const STYLE_MODIFIERS: ReadonlyMap<string, keyof ControlStyles> = new Map([
   ['scrollIndicators', 'scrollIndicators'],
   ['imageScale', 'imageScale'],
   ['buttonStyle', 'button'],
@@ -524,7 +534,26 @@ const STYLE_MODIFIERS: readonly (readonly [string, keyof ControlStyles])[] = [
   ['controlSize', 'controlSize'],
   ['buttonBorderShape', 'buttonBorderShape'],
   ['symbolVariant', 'symbolVariant'],
-]
+  ['datePickerStyle', 'datePicker'],
+])
+
+const EDGES = ['top', 'leading', 'bottom', 'trailing'] as const
+
+/**
+ * `.contentMargins` over the margins around it (Wave 6d). A margin for `.scrollIndicators`
+ * moves nothing the preview draws; one for `.scrollContent` replaces the automatic ones
+ * where it is read, as iOS 27 does, so the two are kept apart.
+ */
+function withMargins(outer: ControlStyles['margins'], args: readonly ViewArg[]): ControlStyles['margins'] {
+  const placement = tokenName(labelled(args, 'for'))
+  if (placement === 'scrollIndicators') return outer
+  const first = positional(args, 0), second = positional(args, 1)
+  const all = numberArg(first), explicit = payloadOf<EdgeInsetsPayload>(second, EDGE_INSETS_TYPE)
+  const edges = edgeSet(all === null ? first : undefined), length = numberArg(second) ?? IOS_27.metrics.padding
+  const set: { -readonly [Edge in keyof EdgeInsets]?: number } = {}
+  for (const edge of EDGES) if (edges[edge]) set[edge] = all ?? (explicit ? explicit[edge] : length)
+  return placement === 'scrollContent' ? { ...outer, content: { ...outer?.content, ...set } } : { ...outer, auto: { ...outer?.auto, ...set } }
+}
 
 function withStyles(outer: ControlStyles, view: ViewValue, scheme: ColorScheme): ControlStyles {
   let next = view.name === 'List' ? { ...outer, container: 'list' as const }
@@ -543,9 +572,13 @@ function withStyles(outer: ControlStyles, view: ViewValue, scheme: ColorScheme):
   const category = tokenName(modifierArg(view, 'dynamicTypeSize', 0) ?? typeEnvironment)
   if (isDynamicTypeSize(category)) next = { ...next, dynamicTypeSize: category }
   scheme = next.colorScheme ?? scheme
-  for (const [modifier, key] of STYLE_MODIFIERS) {
-    const name = tokenName(modifierArg(view, modifier, 0))
-    if (name !== null) next = { ...next, [key]: name }
+  // One pass from the outermost modifier in, so the innermost of each kind wins, as in SwiftUI.
+  for (let index = view.modifiers.length - 1; index >= 0; index--) {
+    const modifier = view.modifiers[index]!
+    const key = STYLE_MODIFIERS.get(modifier.name)
+    const name = key ? tokenName(positional(modifier.args, 0)) : null
+    if (name !== null) next = { ...next, [key!]: name }
+    else if (modifier.name === 'contentMargins') next = { ...next, margins: withMargins(next.margins, modifier.args) }
   }
   const mode = tokenName(modifierArg(view, 'symbolRenderingMode', 0)) ?? undefined
   if (isSymbolRenderingMode(mode)) next = { ...next, symbolMode: mode }
@@ -607,8 +640,64 @@ function sectionChildren(view: ViewValue, path: string): ViewValue[] {
   return [...accessory('header'), ...view.children, ...accessory('footer')].map(child => ({ ...child, modifiers: [...child.modifiers, ...view.modifiers] }))
 }
 
+/** The margins a scroll view takes from around it: those for `.scrollContent` in place of the automatic ones (Wave 6d). */
+function contentMargins(styles: ControlStyles): Margins | undefined {
+  const margins = styles.margins
+  return margins?.content && Object.keys(margins.content).length ? margins.content : margins?.auto
+}
+
+/** The views `.safeAreaPadding` insets the content of, rather than padding (Wave 6d). */
+const SCROLLERS: ReadonlySet<string> = new Set(['ScrollView', 'List', 'Form'])
+
 /** The weekday initials over a calendar. Not localised; neither is the rest of the chrome. */
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+
+/** The weekdays over a graphical DatePicker's month, and the days and months its wheel names (Wave 6d). */
+const WEEKDAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+/** How far a wheel's rows one, two and three away sit from the chosen one, and how flat they are drawn. */
+const WHEEL_OFFSETS = [0, 31.33, 58.33, 77.33]
+const WHEEL_SQUASH = [1, 0.93, 0.73, 0.43]
+
+/** The hues around a ColorPicker's swatch, from the top and clockwise, as iOS 27 draws them. */
+const HUE_RING = [[227, 226, 76], [232, 186, 75], [232, 138, 74], [232, 71, 70], [201, 72, 165], [163, 71, 217], [109, 72, 231], [86, 159, 231], [75, 208, 203], [77, 231, 142], [122, 233, 95], [170, 229, 78], [227, 226, 76]]
+  .map(([r, g, b], i) => ({ color: rgba(r!, g!, b!), location: i / 12 }))
+
+/**
+ * A wheel's columns for a date (Wave 6d): seven rows each, the chosen value in the middle,
+ * each column as wide as measured in iOS 27 and aligned as it draws it. Both parts show the
+ * day, hour, minute and period; the date alone the month, day and year; the time alone the
+ * hour, minute and period.
+ */
+function wheelColumns(date: Date, parts: DateParts): { width: number; before?: number; align: 'leading' | 'center' | 'trailing'; rows: string[] }[] {
+  const rows = (text: (turn: number) => string) => [-3, -2, -1, 0, 1, 2, 3].map(text)
+  const hour = date.getHours(), minute = date.getMinutes(), morning = hour < 12
+  const hours = rows(turn => String((hour + turn + 23) % 12 + 1))
+  const minutes = rows(turn => String((minute + turn + 60) % 60).padStart(2, '0'))
+  const period = rows(turn => turn === 0 ? morning ? 'AM' : 'PM' : turn === (morning ? 1 : -1) ? morning ? 'PM' : 'AM' : '')
+  if (parts === 'time') {
+    return [{ width: 98, align: 'trailing', rows: hours }, { before: 43, width: 50, align: 'leading', rows: minutes }, { before: 9.5, width: 55, align: 'leading', rows: period }]
+  }
+  if (parts === 'date') {
+    const days = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+    return [
+      { before: 28, width: 128, align: 'leading', rows: rows(turn => MONTH_NAMES[(date.getMonth() + turn + 12) % 12]!) },
+      { width: 50, align: 'center', rows: rows(turn => String((date.getDate() - 1 + turn + days) % days + 1)) },
+      { before: 18, width: 66, align: 'center', rows: rows(turn => String(date.getFullYear() + turn)) },
+    ]
+  }
+  const today = new Date().toDateString()
+  return [
+    { width: 133, align: 'trailing', rows: rows(turn => {
+      const day = new Date(date.getFullYear(), date.getMonth(), date.getDate() + turn)
+      return day.toDateString() === today ? 'Today' : `${DAY_NAMES[day.getDay()]} ${MONTH_NAMES[day.getMonth()]!.slice(0, 3)} ${day.getDate()}`
+    }) },
+    { width: 45, align: 'trailing', rows: hours },
+    { before: 36, width: 51, align: 'leading', rows: minutes },
+    { width: 55, align: 'leading', rows: period },
+  ]
+}
 
 class Converter {
   constructor(
@@ -1490,8 +1579,8 @@ class Converter {
     // outermost - tapping a button's padding must count, exactly as on iOS.
     // Segments own their hit areas. A full-size picker target would cover them.
     const segmented = view.name === 'Picker' && this.styles.picker === 'segmented'
-    // So does a Slider's track, drawn between its value labels.
-    const ownsTarget = segmented || view.name === 'Slider' && hasSliderValueLabels(view)
+    // So does a Slider's track, drawn between its value labels, and a graphical calendar's days.
+    const ownsTarget = segmented || view.name === 'Slider' && hasSliderValueLabels(view) || view.name === 'DatePicker' && this.styles.datePicker === 'graphical'
     if (view.intent) {
       if (isDisabled(view) && !this.greyedOut.has(path)) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
       if (!ownsTarget) element = this.withHitTarget(element, path, roleOf(view), labelOf(view), view, disabledBy(view))
@@ -1641,7 +1730,7 @@ class Converter {
       case 'LazyVStack':
       case 'LazyHStack': {
         const axis: Axis = view.name.endsWith('VStack') ? 'vertical' : 'horizontal'
-        return {
+        const stack: { -readonly [K in keyof StackElement]: StackElement[K] } = {
           kind: 'stack',
           id: path,
           axis,
@@ -1650,6 +1739,9 @@ class Converter {
           children: this.convertList(view.children, path, axis),
           ...origin,
         }
+        // `.scrollTargetLayout()` makes its views the ones a view-aligned scroll view rests on (Wave 6d).
+        if (view.modifiers.some(m => m.name === 'scrollTargetLayout')) stack.snapTargets = true
+        return stack
       }
 
       // Lays out what it holds as a centred VStack does, as iOS 27 does; its `spacing:` is how
@@ -1850,8 +1942,9 @@ class Converter {
         return this.asyncImage(view, path, origin)
 
       case 'DatePicker':
+        return this.datePicker(view, path, origin)
       case 'ColorPicker':
-        return this.picker(view, path, origin)
+        return this.colorPicker(view, path, origin)
 
       case 'TextEditor':
         return this.textField(view, path, origin)
@@ -2429,10 +2522,36 @@ class Converter {
             children,
           }
 
-    const scroll: { -readonly [K in keyof ScrollElement]: ScrollElement[K] } = { kind: 'scroll', id: path, axis, showsIndicators: indicators, content, ...origin }
+    const behavior = tokenName(modifierArg(view, 'scrollTargetBehavior', 0))
+    const inset = this.scrollContentInsets(view)
+    const scroll: { -readonly [K in keyof ScrollElement]: ScrollElement[K] } = { kind: 'scroll', id: path, axis, showsIndicators: indicators,
+      content: inset ? { kind: 'modified', id: `${path}margins`, modifier: { kind: 'padding', insets: inset }, child: content } : content, ...origin }
     // `.scrollTargetBehavior(.paging)` (iOS 17) snaps by the scroll view's size (Wave 4c).
-    if (tokenName(modifierArg(view, 'scrollTargetBehavior', 0)) === 'paging') scroll.paging = true
+    if (behavior === 'paging') scroll.paging = true
+    // `.viewAligned` (iOS 17) comes to rest on the views of a stack marked `.scrollTargetLayout()`,
+    // and without one scrolls freely, as iOS 27 does (Wave 6d).
+    if (behavior === 'viewAligned') scroll.snapInset = inset ? axis === 'horizontal' ? inset.leading : inset.top : 0
     return scroll
+  }
+
+  /**
+   * A scroll view's or a List's `.contentMargins`, those for `.scrollContent` in place of the
+   * automatic ones, and its own `.safeAreaPadding` (Wave 6d). Each is undefined when not written.
+   */
+  private scrollInsets(view: ViewValue): { margins?: Margins; padding?: EdgeInsets } {
+    const padding = view.modifiers.find(m => m.name === 'safeAreaPadding')
+    return { margins: contentMargins(this.styles), padding: padding && paddingInsets(padding.args, this.appearance.metrics.padding) }
+  }
+
+  /**
+   * How far a scroll view's content is inset (Wave 6d): its margins and its safe area padding
+   * on top, as iOS 27 draws them. Null when nothing insets it.
+   */
+  private scrollContentInsets(view: ViewValue): EdgeInsets | null {
+    const { margins, padding } = this.scrollInsets(view)
+    if (!margins && !padding) return null
+    const safe = padding ?? ZERO_INSETS
+    return insets((margins?.top ?? 0) + safe.top, (margins?.leading ?? 0) + safe.leading, (margins?.bottom ?? 0) + safe.bottom, (margins?.trailing ?? 0) + safe.trailing)
   }
 
   /**
@@ -2459,6 +2578,7 @@ class Converter {
       captionFont: fontForToken('footnote', this.typeScale)!,
       headerFont: fontForToken('headline', this.typeScale)!,
       separatorHeight: 1,
+      ...this.scrollInsets(view),
       convert: (v, id) => this.convert(v, id, 'horizontal'),
       swipe: (v, content, id) => this.swipeableRow(v, content, id),
       text: (id, text, style, color, weight) => this.styledText(id, text, style, color, weight),
@@ -3239,29 +3359,15 @@ class Converter {
   private picker(view: ViewValue, path: string, origin: object): LayoutElement {
     const { text: title, label } = titleOf(view)
     const titleId = label[0]?.path ?? `${path}label`
-    const selection = bindingValue(labelled(view.args, 'selection'))
-    // A `DatePicker` shows a *formatted* date, which is the whole point of the row.
-    // `displayValue` on a Date gives `2025-06-15 15:06:40 +0000` - a plausible-looking
-    // string no date picker on iOS has ever shown - and `displayedComponents:` says
-    // which halves of it to draw.
-    const date = view.name === 'DatePicker' ? asDate(selection ?? undefined) : null
-    const selectedOption = view.name === 'Picker' ? view.children.find(child => boolArg(labelled(child.args, 'selected'))) : undefined
+    const selectedOption = view.children.find(child => boolArg(labelled(child.args, 'selected')))
     // A Picker shows the chosen row's content, and nothing when no row's tag matches
     // its selection, as iOS 27 does: never the raw value, which isn't what iOS draws.
-    const value = selectedOption ? textIn(selectedOption).join(' ') : date
-      ? dateText(date.epochSeconds, datePickerStyleFor(view))
-      : selection && view.name !== 'Picker'
-        ? displayValue(selection)
-        : ''
+    const value = selectedOption ? textIn(selectedOption).join(' ') : ''
 
-    // Only a real `Picker` has options to draw inline; `DatePicker`, `ColorPicker` and
-    // `Menu` come through here too and have none.
-    if (view.name === 'Picker') {
-      const style = this.styles.picker
-      if (style === 'segmented') return this.segmentedPicker(view, path, origin)
-      if (style === 'inline' || style === 'wheel') {
-        return this.inlinePicker(view, path, origin, style === 'wheel')
-      }
+    const style = this.styles.picker
+    if (style === 'segmented') return this.segmentedPicker(view, path, origin)
+    if (style === 'inline' || style === 'wheel') {
+      return this.inlinePicker(view, path, origin, style === 'wheel')
     }
 
     return {
@@ -3291,6 +3397,195 @@ class Converter {
         },
       ],
       ...origin,
+    }
+  }
+
+  /**
+   * A `DatePicker`, in the style around it (Wave 6d), as iOS 27 draws each
+   * (docs/parity/native/iphone18pro-controls/measurements-6d.json):
+   * - compact, the default: the date and the time on grey capsules at the trailing edge;
+   * - `.graphical`: the month in place, without the title, and the time below it;
+   * - `.wheel`: spinning columns beside the title, or under it in a Form.
+   * Pressing a capsule or a wheel opens the calendar, as before.
+   */
+  private datePicker(view: ViewValue, path: string, origin: object): LayoutElement {
+    const { text: title, label } = titleOf(view)
+    const titleId = label[0]?.path ?? `${path}label`
+    const seconds = asDate(bindingValue(labelled(view.args, 'selection')) ?? undefined)?.epochSeconds ?? null
+    const parts = datePickerParts(view)
+    const style = this.styles.datePicker
+    if (style === 'graphical') return this.graphicalDatePicker(view, path, origin, seconds, parts !== 'date')
+    const value: LayoutElement = style === 'wheel'
+      ? this.dateWheel(path, seconds ?? Date.now() / 1000, parts)
+      : {
+          kind: 'stack', id: `${path}value`, axis: 'horizontal', spacing: 4, alignment: CENTER,
+          children: [
+            ...parts !== 'time' ? [this.datePill(`${path}date`, pickedText(seconds, 'date'), parts === 'date')] : [],
+            ...parts !== 'date' ? [this.datePill(`${path}time`, pickedText(seconds, 'time'), false)] : [],
+          ],
+        }
+    const name: LayoutElement = { kind: 'text', id: titleId, text: title }
+    // A wheel in a Form goes under its title, at the leading edge.
+    if (style === 'wheel' && (this.styles.container === 'form' || this.styles.container === 'list')) {
+      return { kind: 'stack', id: path, axis: 'vertical', spacing: 4, alignment: { horizontal: 'leading', vertical: 'center' }, children: [name, value], ...origin }
+    }
+    // A wheel takes all but 50 of a row's width, which its title has to itself.
+    const gap = style === 'wheel' ? 0 : 8
+    return {
+      kind: 'stack', id: path, axis: 'horizontal', spacing: gap, alignment: CENTER, ...origin,
+      children: [name, { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: gap }, value],
+    }
+  }
+
+  /** One of a compact DatePicker's capsules: its value with 12 at each side, 36 tall, or 34.33 for a date alone. */
+  private datePill(id: string, text: string, dateOnly: boolean): LayoutElement {
+    const height = dateOnly ? 34.33 : 36
+    const sized: LayoutElement = {
+      kind: 'modified', id: `${id}size`, modifier: { kind: 'frame', minHeight: height, alignment: CENTER },
+      child: { kind: 'modified', id: `${id}pad`, modifier: { kind: 'padding', insets: insets(0, 12, 0, 12) }, child: this.styledText(`${id}text`, text, 'body', 'label') },
+    }
+    return this.background(sized, `${id}pill`, this.color('tertiarySystemFill'), height / 2, 'circular')
+  }
+
+  /**
+   * A graphical DatePicker: the month the resolver laid out, in place, at the size iOS 27
+   * draws it whatever the month, and a row with the time on a capsule when it shows one.
+   * Its title isn't drawn, as in iOS. Each day chooses itself; the capsule opens the editor.
+   */
+  private graphicalDatePicker(view: ViewValue, path: string, origin: object, seconds: number | null, withTime: boolean): LayoutElement {
+    const written = labelled(view.args, '_calendar'), calendar = written && asView(written)
+    const parts: LayoutElement[] = calendar ? [this.inlineCalendar(calendar, `${path}cal`, withTime)] : []
+    if (withTime) {
+      const pill = this.withHitTarget(this.datePill(`${path}time`, pickedText(seconds, 'time'), false), path, 'button', labelOf(view), view, disabledBy(view))
+      parts.push({
+        kind: 'modified', id: `${path}timepad`, modifier: { kind: 'padding', insets: insets(5.67, 16, 30.67, 16) },
+        child: { kind: 'stack', id: `${path}timerow`, axis: 'horizontal', spacing: 8, alignment: CENTER, children: [
+          this.styledText(`${path}timetitle`, 'Time', 'body', 'label', 600),
+          { kind: 'spacer', id: `${path}timegap`, axis: 'horizontal', minLength: 8 },
+          pill,
+        ] },
+      })
+    }
+    return { kind: 'stack', id: `${path}graphical`, axis: 'vertical', spacing: 0, alignment: CENTER, children: parts, ...origin }
+  }
+
+  /**
+   * The month of a graphical DatePicker: its name and arrows 70 tall, the weekdays, then its
+   * weeks sharing 258.33 between them, 51.67 a row for five and 43.06 for six, with 9.67 below
+   * unless the time follows. The chosen day is on a disc in the label colour.
+   */
+  private inlineCalendar(calendar: ViewValue, path: string, withTime: boolean): LayoutElement {
+    const title = stringArg(labelled(calendar.args, 'title')) ?? ''
+    const [back, forward, ...days] = calendar.children
+    const arrowFont = { ...fontForToken('title2', this.typeScale)!, weight: 500 }
+    const arrow = (cell: ViewValue | undefined, symbol: string, name: string): LayoutElement => {
+      const drawn: LayoutElement = {
+        kind: 'modified', id: `${path}${symbol}f`, modifier: { kind: 'frame', width: 30, height: 44, alignment: CENTER },
+        child: { kind: 'modified', id: `${path}${symbol}c`, modifier: { kind: 'foregroundStyle', color: this.color(cell?.intent ? 'accentColor' : 'tertiaryLabel') },
+          child: { kind: 'modified', id: `${path}${symbol}t`, modifier: { kind: 'font', font: arrowFont }, child: this.symbolImage(`${path}${symbol}`, symbol) } },
+      }
+      return cell?.intent && cell.path ? this.withHitTarget(drawn, cell.path, 'button', name) : drawn
+    }
+    const header: LayoutElement = {
+      kind: 'modified', id: `${path}hdrf`, modifier: { kind: 'frame', height: 70, alignment: CENTER },
+      child: { kind: 'stack', id: `${path}hdr`, axis: 'horizontal', spacing: 0, alignment: CENTER, children: [
+        { kind: 'modified', id: `${path}monthpad`, modifier: { kind: 'padding', insets: insets(0, 20, 0, 0) }, child: {
+          kind: 'stack', id: `${path}month`, axis: 'horizontal', spacing: 7.33, alignment: CENTER, children: [
+            this.styledText(`${path}monthtitle`, title, 'headline', 'label'),
+            { kind: 'modified', id: `${path}monthmore`, modifier: { kind: 'foregroundStyle', color: this.color('accentColor') },
+              child: { kind: 'modified', id: `${path}monthmoref`, modifier: { kind: 'font', font: fontForToken('headline', this.typeScale)! }, child: this.symbolImage(`${path}monthchev`, 'chevron.right') } },
+          ] } },
+        { kind: 'spacer', id: `${path}hdrgap`, axis: 'horizontal', minLength: 8 },
+        arrow(back, 'chevron.left', 'Previous Month'),
+        { kind: 'modified', id: `${path}arrowgap`, modifier: { kind: 'frame', width: 15.67, height: 1, alignment: CENTER }, child: { kind: 'empty', id: `${path}arrowgapx` } },
+        arrow(forward, 'chevron.right', 'Next Month'),
+      ] },
+    }
+    const row = (id: string, height: number, cells: LayoutElement[]): LayoutElement => ({
+      kind: 'modified', id: `${id}pad`, modifier: { kind: 'padding', insets: insets(0, 8, 0, 0) },
+      child: { kind: 'stack', id, axis: 'horizontal', spacing: 0, alignment: CENTER, children: cells.map((cell, i) => ({
+        kind: 'modified' as const, id: `${id}c${i}`, modifier: { kind: 'frame' as const, maxWidth: Number.POSITIVE_INFINITY, height, alignment: CENTER }, child: cell,
+      })) },
+    })
+    const weekdayFont = { ...fontForToken('footnote', this.typeScale)!, weight: 600 }
+    const weekdays = row(`${path}dow`, 16.33, WEEKDAY_NAMES.map((name, i) => ({
+      kind: 'modified', id: `${path}dow${i}f`, modifier: { kind: 'font', font: weekdayFont }, child: this.styledText(`${path}dow${i}`, name, 'footnote', 'secondaryLabel'),
+    })))
+    const weeks = Math.ceil(days.length / 7), height = 258.33 / weeks
+    const rows: LayoutElement[] = []
+    for (let start = 0; start < days.length; start += 7) {
+      rows.push(row(`${path}w${start}`, height, days.slice(start, start + 7).map((day, i) => this.calendarDay(day, `${path}w${start}d${i}`))))
+    }
+    return {
+      kind: 'modified', id: `${path}pad`, modifier: { kind: 'padding', insets: insets(0, 0, withTime ? 0 : 9.67, 0) },
+      child: { kind: 'stack', id: path, axis: 'vertical', spacing: 0, alignment: CENTER, children: [header, weekdays, ...rows] },
+    }
+  }
+
+  /** One day of a graphical calendar: its number at 20 pt, on a 43.67 disc when it is chosen. */
+  private calendarDay(day: ViewValue, path: string): LayoutElement {
+    const label = stringArg(labelled(day.args, 'label')) ?? ''
+    if (!label) return { kind: 'empty', id: path }
+    const selected = truthyBinding(labelled(day.args, 'selected'))
+    const text = this.styledText(`${path}t`, label, 'title3', selected ? 'systemBackground' : day.intent ? 'label' : 'tertiaryLabel', selected ? 600 : undefined)
+    const drawn = selected
+      ? this.background({ kind: 'modified', id: `${path}disc`, modifier: { kind: 'frame', width: 43.67, height: 43.67, alignment: CENTER }, child: text }, `${path}bg`, this.color('label'), 21.83, 'circular')
+      : text
+    // The whole cell takes the press, as in iOS.
+    const cell: LayoutElement = { kind: 'modified', id: `${path}cell`, modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, maxHeight: Number.POSITIVE_INFINITY, alignment: CENTER }, child: drawn }
+    return day.intent && day.path ? this.withHitTarget(cell, day.path, 'button', label) : cell
+  }
+
+  /**
+   * A wheel DatePicker's columns, 320 x 216: the chosen row on a band, three rows above and
+   * below it, smaller and fainter as they turn away on the cylinder, at the heights and
+   * places measured in iOS 27. A still drawing of a spinner, so it is drawn and not spun.
+   */
+  private dateWheel(path: string, seconds: number, parts: DateParts): LayoutElement {
+    const font = { ...fontForToken('body', this.typeScale)!, size: 23.5, lineHeight: 28 }
+    const columns = wheelColumns(new Date(seconds * 1000), parts).map((column, c): LayoutElement => {
+      const rows = column.rows.map((text, r): LayoutElement => {
+        const turn = r - 3, depth = Math.abs(turn)
+        const drawn: LayoutElement = { kind: 'modified', id: `${path}w${c}r${r}f`, modifier: { kind: 'font', font }, child: { kind: 'modified', id: `${path}w${c}r${r}c`,
+          modifier: { kind: 'foregroundStyle', color: this.color(depth ? 'secondaryLabel' : 'label') }, child: { kind: 'text', id: `${path}w${c}r${r}`, text } } }
+        if (!depth) return drawn
+        const squashed: LayoutElement = { kind: 'modified', id: `${path}w${c}r${r}s`, modifier: { kind: 'scale', x: 1, y: WHEEL_SQUASH[depth]! }, child: drawn }
+        return { kind: 'modified', id: `${path}w${c}r${r}o`, modifier: { kind: 'offset', x: 0, y: Math.sign(turn) * WHEEL_OFFSETS[depth]! },
+          child: { kind: 'modified', id: `${path}w${c}r${r}a`, modifier: { kind: 'opacity', value: depth === 3 ? 0.4 : 0.77 }, child: squashed } }
+      })
+      const framed: LayoutElement = { kind: 'modified', id: `${path}w${c}`, modifier: { kind: 'frame', width: column.width, height: 216, alignment: { horizontal: column.align, vertical: 'center' } },
+        child: { kind: 'zstack', id: `${path}w${c}z`, alignment: { horizontal: column.align, vertical: 'center' }, children: rows } }
+      return column.before ? { kind: 'modified', id: `${path}w${c}p`, modifier: { kind: 'padding', insets: insets(0, column.before, 0, 0) }, child: framed } : framed
+    })
+    const band: LayoutElement = this.background({ kind: 'modified', id: `${path}bandf`, modifier: { kind: 'frame', width: 302, height: 34, alignment: CENTER }, child: { kind: 'empty', id: `${path}bandx` } },
+      `${path}band`, rgba(118, 118, 128, this.scheme === 'dark' ? 0.18 : 0.08), 17, 'circular')
+    return {
+      kind: 'modified', id: `${path}wheel`, modifier: { kind: 'frame', width: 320, height: 216, alignment: CENTER },
+      child: { kind: 'zstack', id: `${path}wheelz`, alignment: CENTER, children: [band, {
+        kind: 'modified', id: `${path}colsf`, modifier: { kind: 'frame', width: 320, alignment: { horizontal: 'leading', vertical: 'center' } },
+        child: { kind: 'stack', id: `${path}cols`, axis: 'horizontal', spacing: 0, alignment: CENTER, children: columns },
+      }] },
+    }
+  }
+
+  /**
+   * A `ColorPicker`: its title, and its colour on an 18 pt disc inside a ring of hues 3 wide,
+   * 2 apart, 28 across, as iOS 27 draws the swatch (Wave 6d). Pressing it opens the palette.
+   */
+  private colorPicker(view: ViewValue, path: string, origin: object): LayoutElement {
+    const { text: title, label } = titleOf(view)
+    const colour = resolveColorArg(bindingValue(labelled(view.args, 'selection')) ?? undefined, this.scheme, this.styles.tint) ?? rgba(0, 0, 0, 0)
+    const ring: LayoutElement = { kind: 'shape', id: `${path}ring`, shape: 'circle', fill: { kind: 'solid', color: rgba(0, 0, 0, 0) },
+      stroke: { color: HUE_RING[0]!.color, fill: { kind: 'angularGradient', stops: HUE_RING, center: { x: 0.5, y: 0.5 }, startAngle: -90, endAngle: 270 }, width: 3, placement: 'inside' } }
+    const dot: LayoutElement = { kind: 'modified', id: `${path}dotf`, modifier: { kind: 'frame', width: 18, height: 18, alignment: CENTER },
+      child: { kind: 'shape', id: `${path}dot`, shape: 'circle', fill: { kind: 'solid', color: colour } } }
+    return {
+      kind: 'stack', id: path, axis: 'horizontal', spacing: 8, alignment: CENTER, ...origin,
+      children: [
+        { kind: 'text', id: label[0]?.path ?? `${path}label`, text: title },
+        { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 },
+        { kind: 'modified', id: `${path}swatch`, modifier: { kind: 'frame', width: 28, height: 28, alignment: CENTER }, child: { kind: 'zstack', id: `${path}swatchz`, alignment: CENTER, children: [ring, dot] } },
+      ],
     }
   }
 
@@ -4299,6 +4594,10 @@ class Converter {
       case 'contextMenu':
       case 'badge':
       case 'gridColumnAlignment':
+      case 'datePickerStyle':
+      case 'contentMargins':
+      case 'scrollTargetBehavior':
+      case 'scrollTargetLayout':
         // Recognised, and either read elsewhere or deliberately inert. Recorded as
         // applied rather than as a coverage gap, because the code *is* honoured -
         // just not by a wrapper around this view.
@@ -4306,6 +4605,11 @@ class Converter {
 
       case 'monospaced':
         return { kind: 'font', font: monospacedFont(this.typeScale) }
+
+      // On a scroll view it insets the content, where the scroll view is built; on any
+      // other view it pads, as iOS 27 draws it (Wave 6d).
+      case 'safeAreaPadding':
+        return SCROLLERS.has(view.name) ? null : { kind: 'padding', insets: paddingInsets(args, this.appearance.metrics.padding) }
 
 
 
@@ -4879,27 +5183,9 @@ function displayValue(value: SwiftValue): string {
  * The absolute ones are the browser's locale formatting, so the separators and the
  * order are the platform's real ones.
  */
-/**
- * Which halves of a date a `DatePicker` row shows.
- *
- * `displayedComponents:` is a set, and the two members that matter are `.date` and
- * `.hourAndMinute`. Omitted, SwiftUI shows both - which is why the default here is
- * neither of the single-part styles.
- */
-function datePickerStyleFor(view: ViewValue): string | null {
-  const components = labelled(view.args, 'displayedComponents')
-  if (!components) return null
-
-  const names =
-    components.kind === 'array'
-      ? components.elements.map((e) => tokenName(e) ?? '')
-      : [tokenName(components) ?? '']
-
-  const wantsDate = names.includes('date')
-  const wantsTime = names.includes('hourAndMinute')
-  if (wantsDate && !wantsTime) return 'date'
-  if (wantsTime && !wantsDate) return 'time'
-  return null
+/** A DatePicker's date or time as its capsule shows it, or nothing when it has no value (Wave 6d). */
+function pickedText(seconds: number | null, part: 'date' | 'time'): string {
+  return seconds === null ? '' : dateText(seconds, part)
 }
 
 function dateText(epochSeconds: number, style: string | null): string {

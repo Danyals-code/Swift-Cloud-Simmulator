@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
 import { RenderTreeView } from '@studio/swiftui-render-dom'
-import { SERIF_FAMILY, MEASURED_FAMILIES, type AuthoringNode, type DesignEditRequest } from '@studio/shared'
+import { SERIF_FAMILY, MEASURED_FAMILIES, stopsOf, type AuthoringNode, type DesignEditRequest } from '@studio/shared'
 import { screenOverrideModifier } from '../apps/web/lib/screens'
 
 beforeEach(resetPipelineState)
@@ -69,7 +69,7 @@ it.each(gradients)('F02 edits %s opacity in Design, Swift and the painted fill',
   const kind = name[0]!.toLowerCase() + name.slice(1)
   const fill = render(text).nodes.find(n => n.background?.kind === kind)?.background
   expect(fill?.kind).toBe(kind)
-  if (fill && fill.kind !== 'solid') expect(fill.stops.map(s => s.color.a)).toEqual([0.4, 0.4])
+  expect(fill && stopsOf(fill)?.map(s => s.color.a)).toEqual([0.4, 0.4])
 })
 it('F02 preserves nested ShapeStyle alpha in fill/background values and material blur', () => {
   const gradient = render(source(`Rectangle().fill(${gradients[0][1]}.opacity(0.5).opacity(0.5))`)).nodes.find(n => n.shape?.fill?.kind === 'linearGradient')?.shape?.fill

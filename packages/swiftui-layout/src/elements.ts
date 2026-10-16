@@ -82,6 +82,8 @@ export interface StackElement extends ElementBase {
   readonly spacing: number | null
   readonly alignment: Alignment
   readonly children: readonly LayoutElement[]
+  /** The views a `.scrollTargetBehavior(.viewAligned)` scroll view comes to rest on (Wave 6d). */
+  readonly snapTargets?: boolean
 }
 
 export interface ZStackElement extends ElementBase {
@@ -223,6 +225,8 @@ export interface ScrollElement extends ElementBase {
   readonly showsIndicators: boolean
   /** `.scrollTargetBehavior(.paging)`: a scroll comes to rest a whole scroll view's size on (Wave 4c). */
   readonly paging?: boolean
+  /** `.scrollTargetBehavior(.viewAligned)`: its views come to rest this far in, its leading margin (Wave 6d). */
+  readonly snapInset?: number
   readonly content: LayoutElement
 }
 

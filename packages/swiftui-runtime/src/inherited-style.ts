@@ -8,6 +8,8 @@ const INHERITED = new Set([
   'disabled', 'allowsHitTesting', 'foregroundStyle', 'foregroundColor', 'imageScale', 'environment', 'dynamicTypeSize',
   // A pager's dots take the style written on it or above it (Wave 4c).
   'indexViewStyle',
+  // A DatePicker is drawn in the style written on it or above it (Wave 6d).
+  'datePickerStyle',
 ])
 
 function keyOf(modifier: ModifierValue): string {

@@ -6,7 +6,7 @@ const INTRODUCED: Readonly<Record<string, number>> = {
   DisclosureGroup: 14, ControlGroup: 15, TimelineView: 15, Canvas: 15, AsyncImage: 15,
   Grid: 16, GridRow: 16, ViewThatFits: 16, NavigationSplitView: 16, ShareLink: 16,
   Gauge: 16, UnevenRoundedRectangle: 16, ContentUnavailableView: 17, PhaseAnimator: 17, KeyframeAnimator: 17,
-  TabSection: 18,
+  TabSection: 18, MeshGradient: 18,
 }
 
 /**
@@ -16,7 +16,7 @@ const INTRODUCED: Readonly<Record<string, number>> = {
  */
 const PLACEHOLDERS: Readonly<Record<string, number>> = {
   Chart: 16, Map: 14, PhotosPicker: 16, VideoPlayer: 14, Table: 16, MultiDatePicker: 16, OutlineGroup: 14,
-  EditButton: 13, PasteButton: 16, RenameButton: 16, AnyShape: 16, MeshGradient: 18, SceneView: 13, EquatableView: 13,
+  EditButton: 13, PasteButton: 16, RenameButton: 16, AnyShape: 16, SceneView: 13, EquatableView: 13,
 }
 
 /**
