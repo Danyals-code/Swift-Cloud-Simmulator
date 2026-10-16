@@ -1,6 +1,6 @@
 import { isNonView, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type DesignControl, type PreviewColorAsset, type SourceFile } from '@studio/shared'
 import { collectionFor, addCollectionField, bindField, convertCollection, emptyState, enclosingCollection, recordsSwift, validateRecords } from './authoring-collections'
-import { componentRecipes, componentSettings, extractComponent, insertComponent, applyComponentVariant, exposeComponentInput } from './authoring-components'
+import { componentRecipes, componentSettings, extractComponent, insertComponent, applyComponentVariant, exposeComponentInput, exposable } from './authoring-components'
 import { behaviorSettings, configureAction, configureBinding, stateInputs } from './authoring-behavior'
 import { applyPatches, callOf, hasComments, patch, type FeatureContext, type SourcePatch } from './authoring-context'
 import { animateAction, configureTransition, motionControls, motionEdit } from './authoring-motion'
@@ -15,6 +15,8 @@ import { customizeCard } from './authoring-card'
 import { makeTappable, structureEdit, unwrapEdit } from './authoring-structure'
 import { barsEdit, screenBars } from './authoring-bars'
 import { visibilityEdit, visibilitySettings } from './authoring-visibility'
+import { variantEdit, variantsOf } from './authoring-variants'
+import { instanceEdit, instanceSettings } from './authoring-instance-settings'
 
 export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot): AuthoringSnapshot {
   // A file with an error keeps its own views plain, and what is declared in it gives no settings: a
@@ -35,7 +37,7 @@ export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot
     const parent = sound(enclosingCollection(ctx, node), c => c.source.file)
     // A copy of a component can be made tappable as any view can (D16).
     const behavior = ['view', 'collection', 'component'].includes(node.kind) && !isNonView(node) ? behaviorSettings(ctx, node) : undefined
-    return { ...node, navigation: navigationSettings(ctx, node), styles: styleProperties(ctx, node), collection, component, behavior, visibility: visibilitySettings(ctx, node), bars: node.kind === 'definition' ? screenBars(ctx, node) : undefined, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: withMotion((component ? [...component.controls, ...(node.controls ?? [])] : node.controls)?.map(c => constrainNumericControl(c, node.name, behavior?.binding?.type)), motionControls(ctx, node)) }
+    return { ...node, navigation: navigationSettings(ctx, node), styles: styleProperties(ctx, node), collection, component, instance: component && instanceSettings(ctx, node), behavior, visibility: visibilitySettings(ctx, node), variants: variantsOf(ctx, node), bars: node.kind === 'definition' ? screenBars(ctx, node) : undefined, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: withMotion(exposable(ctx, node, (component ? [...component.controls, ...(node.controls ?? [])] : node.controls)?.map(c => constrainNumericControl(c, node.name, behavior?.binding?.type))), motionControls(ctx, node)) }
   }
 }
 /** A view's controls with its Visibility group's motion settings after them, when it has any (Wave 5a). */
@@ -44,8 +46,10 @@ const withMotion = (controls: DesignControl[] | undefined, motion: readonly Desi
 export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation: AuthoringOperation | { kind: 'property'; control: string; value: string }): { files: SourceFile[]; offset: number; colors?: PreviewColorAsset[]; removes?: string } {
   let patches: SourcePatch[] = [], files: SourceFile[] = [], colors: PreviewColorAsset[] | undefined, removed: readonly string[] = []
   switch (operation.kind) {
-    case 'component-expose': return exposeComponentInput(ctx, node, operation.control, operation.name)
+    case 'component-expose': { const result = exposeComponentInput(ctx, node, operation.control, operation.name, operation.as); if ('files' in result) return result; patches = result; break }
+    case 'component-variant-add': case 'component-differs': patches = variantEdit(ctx, node, operation); break
     case 'component-insert': return insertComponent(ctx, node, operation.component)
+    case 'instance-swap': case 'instance-detach': return instanceEdit(ctx, node, operation)
     case 'component-variant': return applyComponentVariant(ctx, node, operation.variant)
     case 'guided-action': return guidedAction(ctx, node, operation)
     case 'screen-create': case 'screen-duplicate': case 'screen-remove': { const result = screenEdit(ctx, node, operation); patches = result.patches; files = result.files ?? []; removed = result.removed ?? []; break }

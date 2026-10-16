@@ -159,7 +159,7 @@ describe('Phase 5: component scope, extraction and interfaces', () => {
     source = edit(source, 'Card', { kind: 'property', control: 'component:featured', value: 'true' })
     source = edit(source, 'Card', { kind: 'property', control: 'component:amount', value: '3' })
     source = edit(source, 'Card', { kind: 'property', control: 'component:emphasis', value: 'loud' })
-    expect(source[0]!.text).toContain('Card(title: "First", amount: 3, featured: true, emphasis: Emphasis.loud)')
+    expect(source[0]!.text).toContain('Card(title: "First", amount: 3, featured: true, emphasis: .loud)')
     expect(source[0]!.text).toContain('Card(title: "Second")')
     const result = texts(render(source))
     expect(result.filter(t => t === 'Featured')).toHaveLength(1)

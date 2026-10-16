@@ -1,7 +1,8 @@
-import { MODIFIER_SLOTS, NEW_SWITCH_NAME, PRESENTATION_PARTS, isHelperDefinition, isNonView, type AuthoringNode, type AuthoringOperation, type SourceFile, type StateInput, type ViewVisibility, type VisibilityOption, type VisibilityWhen } from '@studio/shared'
+import { MODIFIER_SLOTS, NEW_SWITCH_NAME, PRESENTATION_PARTS, isHelperDefinition, isNonView, swiftIdentifier, type AuthoringNode, type AuthoringOperation, type SourceFile, type StateInput, type ViewVisibility, type VisibilityOption, type VisibilityWhen } from '@studio/shared'
 import { unwrapIf, wrapInIf, type Expr, type IfStmt } from '@studio/swift-syntax'
-import { applyPatches, declarationsNamed, ifStatementOf, layerById, lineIndent, namedStruct, raw, type FeatureContext, type SourcePatch } from './authoring-context'
+import { applyPatches, declarationsNamed, ifStatementOf, insertStoredMember, layerById, lineIndent, namedStruct, raw, shadowsMember, type FeatureContext, type SourcePatch } from './authoring-context'
 import { createScreenValue } from './authoring-screens'
+import { isComponent } from './authoring-components'
 import { branchDraws, conditionAsks, conditionText, designerName, screenValues } from './authoring-states'
 
 /**
@@ -74,7 +75,8 @@ function screenChoices(ctx: FeatureContext, owner: string): ScreenChoices | null
     // The new switch's name, numbered past any name the screen or the project has.
     let newName = NEW_SWITCH_NAME
     for (let suffix = 2; decl.members.some(m => 'name' in m && m.name === newName) || declarationsNamed(ctx, newName).length; suffix++) newName = `${NEW_SWITCH_NAME}${suffix}`
-    found = { options, choices, definition, always: { options, newName, editable: true } }
+    // In a Main, a new switch is a property each copy sets (Wave 5b).
+    found = { options, choices, definition, always: isComponent(ctx, owner) ? { options, newName, property: true, editable: true } : { options, newName, editable: true } }
   }
   cache.screens.set(owner, found)
   return found
@@ -153,15 +155,14 @@ export function visibilitySettings(ctx: FeatureContext, node: AuthoringNode): Vi
   if (node.argument || node.textRun || isNonView(node) || node.kind !== 'view' && node.kind !== 'component' && node.kind !== 'collection') return undefined
   const screen = screenChoices(ctx, node.owner)
   if (!screen) return undefined
-  const parent = layerById(ctx, node.parentId), { options, newName } = screen.always
-  const problem = siteProblem(parent)
-  if (problem || !parent) return { options, newName, editable: false, problem }
+  const parent = layerById(ctx, node.parentId), problem = siteProblem(parent)
+  if (problem || !parent) return readOnly(screen, problem)
   if (showsOne(parent)) return parent.name === 'Condition' ? conditionBranch(ctx, screen, parent) : otherBranch(ctx, screen, parent)
   // A view inside one a branch shows is shown with it, and that view's condition is set on it (Wave 5a).
   const holder = heldBy(ctx, parent), around = holder && heldVisibility(ctx, holder)
   if (around?.condition === undefined) return screen.always
   const { condition, label, hiddenWhile, shows } = around
-  return { options, newName, condition, ...label ? { label } : {}, ...hiddenWhile ? { hiddenWhile } : {}, ...shows ? { shows } : {}, editable: false, problem: `This view is in the ${holder!.name} shown when ${condition}. ${around.editable ? 'Set it there.' : 'Change it in Code.'}` }
+  return readOnly(screen, `This view is in the ${holder!.name} shown when ${condition}. ${around.editable ? 'Set it there.' : 'Change it in Code.'}`, { condition, ...label ? { label } : {}, ...hiddenWhile ? { hiddenWhile } : {}, ...shows ? { shows } : {} })
 }
 
 const heldCache = new WeakMap<FeatureContext, Map<string, ViewVisibility | undefined>>()
@@ -173,12 +174,15 @@ function heldVisibility(ctx: FeatureContext, holder: AuthoringNode): ViewVisibil
   return known.get(holder.id)
 }
 
+/** What a view Shown when can't set says: its screen's choices, the condition it is shown by when there is one, and why (Wave 5b). */
+const readOnly = (screen: ScreenChoices, problem: string | undefined, read?: Partial<ViewVisibility>): ViewVisibility => ({ ...screen.always, ...read, editable: false, problem })
+
 /** A view in an `if`: editable when it is the `if`'s only view and its one value is one of the screen's choices. */
 function conditionBranch(ctx: FeatureContext, screen: ScreenChoices, branch: AuthoringNode): ViewVisibility {
-  const { options, newName } = screen.always, stmt = ifStatementOf(ctx, branch)
-  if (!stmt) return { options, newName, editable: false, problem: 'This condition is written in a form Shown when can’t read. Change it in Code.' }
+  const stmt = ifStatementOf(ctx, branch)
+  if (!stmt) return readOnly(screen, 'This condition is written in a form Shown when can’t read. Change it in Code.')
   const drawn = drawnWhen(ctx, branch, true), shows = branchDraws(ctx, screen.definition, branch, true)
-  const read = { options, newName, condition: drawn.text, ...shows ? { shows } : {}, editable: false as const }
+  const read = readOnly(screen, undefined, { condition: drawn.text, ...shows ? { shows } : {} })
   if (drawn.above) return { ...read, problem: `This view is in an else if, shown only while ${drawn.above === 1 ? 'the condition above it is' : 'the conditions above it are'} false. Change it in Code.` }
   const others = stmt.then.statements.length - 1
   if (others > 0) return { ...read, problem: `This view shares its condition with ${others === 1 ? 'another view' : `${others} others`}. Change it in Code.` }
@@ -195,13 +199,13 @@ function conditionBranch(ctx: FeatureContext, screen: ScreenChoices, branch: Aut
 
 /** A view in an `if`'s else or in a case of a switch: shown by code, read as it is written. */
 function otherBranch(ctx: FeatureContext, screen: ScreenChoices, branch: AuthoringNode): ViewVisibility {
-  const { options, newName } = screen.always, owner = layerById(ctx, branch.parentId)
+  const owner = layerById(ctx, branch.parentId)
   if (owner?.name === 'Switch') {
     const subject = owner.properties.find(property => property.name === 'condition')?.expression ?? ''
-    return { options, newName, condition: `${subject} ${branch.name.startsWith('Case ') ? branch.name.replace(/^Case /, 'is ') : 'is none of the cases above'}`, editable: false, problem: 'This view is one case of a switch. Change it in Code.' }
+    return readOnly(screen, 'This view is one case of a switch. Change it in Code.', { condition: `${subject} ${branch.name.startsWith('Case ') ? branch.name.replace(/^Case /, 'is ') : 'is none of the cases above'}` })
   }
   const drawn = owner && drawnWhen(ctx, owner, false), shows = owner && branchDraws(ctx, screen.definition, owner, false)
-  return { options, newName, condition: drawn?.text ?? '', editable: false, problem: `This view is shown when ${drawn && drawn.above > 1 ? 'the conditions above it are' : 'the condition above it is'} false. Change it in Code.`, ...shows ? { shows } : {} }
+  return readOnly(screen, `This view is shown when ${drawn && drawn.above > 1 ? 'the conditions above it are' : 'the condition above it is'} false. Change it in Code.`, { condition: drawn?.text ?? '', ...shows ? { shows } : {} })
 }
 
 /** The Swift of a Shown when choice on `node`'s screen, or undefined when its screen offers none such. */
@@ -224,7 +228,12 @@ export function visibilityEdit(ctx: FeatureContext, node: AuthoringNode, operati
   let condition: string | undefined
   if (create) {
     if (!when || when.input !== create.name || typeof when.is !== 'boolean' || typeof create.value !== 'boolean') throw new Error('Give the new switch a name and whether it starts on or off, and show the view while it is on or off.')
-    patches.push(...createScreenValue(ctx, node, create.name, create.value, true))
+    // In a Main, a property each copy sets, which the copies there leave on as they were (Wave 5b).
+    if (settings.property) {
+      const owner = namedStruct(ctx, node.owner)!
+      if (!swiftIdentifier(create.name) || owner.members.some(m => 'name' in m && m.name === create.name) || shadowsMember(ctx, node, create.name)) throw new Error(`${node.owner} already has something called “${create.name}”.`)
+      patches.push(insertStoredMember(ctx, owner, `var ${create.name}: Bool = ${create.value}`))
+    } else patches.push(...createScreenValue(ctx, node, create.name, create.value, true))
     condition = when.is ? create.name : `!${create.name}`
   } else if (when) {
     condition = visibilitySwift(ctx, node, when)

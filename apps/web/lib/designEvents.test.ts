@@ -71,6 +71,10 @@ const EVERY_KIND: { readonly [K in Operation['kind']]: Extract<Operation, { kind
   'tab-remove': { kind: 'tab-remove', index: 0 },
   'tab-move': { kind: 'tab-move', index: 0, toIndex: 1 },
   'component-expose': { kind: 'component-expose', control: S, name: S },
+  'component-variant-add': { kind: 'component-variant-add', name: S, cases: [S, S] },
+  'component-differs': { kind: 'component-differs', control: `component:${S}`, property: S },
+  'instance-swap': { kind: 'instance-swap', component: S },
+  'instance-detach': { kind: 'instance-detach' },
   'component-insert': { kind: 'component-insert', component: S },
   'component-variant': { kind: 'component-variant', variant: { owner: S, signature: S, name: S, values: [{ control: S, value: S }] } },
   'screen-create': { kind: 'screen-create', name: S, title: S, layout: 'VStack' },
@@ -106,7 +110,8 @@ const EVERY_KIND: { readonly [K in Operation['kind']]: Extract<Operation, { kind
 
 describe('design edits in the event log', () => {
   it('never carry a name, text or value the designer typed, whatever the edit and wherever it lands', () => {
-    for (const operation of Object.values(EVERY_KIND)) {
+    // An input of a kind other than text is a second form of component-expose (Wave 5b).
+    for (const operation of [...Object.values(EVERY_KIND), { kind: 'component-expose', control: S, name: S, as: 'symbol' } as const]) {
       for (const node of [text, card, screen, hidden('SecretCard'), undefined]) {
         const event = designEvent(operation, node)
         expect(event).toMatchObject({ type: 'design', op: operation.kind })
@@ -130,6 +135,10 @@ describe('design edits in the event log', () => {
     expect(designEvent({ kind: 'delete' })).toEqual({ type: 'design', op: 'delete' })
     // The Visibility group's controls are the studio's own (Wave 5a).
     expect(designEvent({ kind: 'property', control: 'motion:rolls-digits', value: 'true' }, text)).toEqual({ type: 'design', op: 'property', layer: 'Text', control: 'motion:rolls-digits' })
+    // What a copy can change, and which field differs by a variant, are the studio's words; the names are the designer's (Wave 5b).
+    expect(designEvent({ kind: 'component-expose', control: control('Font size'), name: S, as: 'color' }, text)).toEqual({ type: 'design', op: 'component-expose', layer: 'Text', control: 'as:color' })
+    expect(designEvent({ kind: 'component-expose', control: control('Font size'), name: S }, text)).toEqual({ type: 'design', op: 'component-expose', layer: 'Text' })
+    expect(designEvent({ kind: 'component-differs', control: control('padding'), property: S }, text)).toEqual({ type: 'design', op: 'component-differs', layer: 'Text', control: 'modifier' })
   })
 
   it('log a refused copy or paste as a refused edit is, on what kind of layer and nothing more (C7)', () => {

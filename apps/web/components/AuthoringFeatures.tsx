@@ -11,6 +11,7 @@ import { repeatsOverRange, settingsVisualChildren } from '../lib/authoringSettin
 import { sourceLayerLabel } from '../lib/sourceLayers'
 import styles from './AuthoringInspector.module.css'
 import { ComponentVariants } from './ComponentVariants'
+import { ChangeablePerCopy, CopyActions, Variants } from './ComponentParts'
 import { MakeComponent, type CopySearch } from './MakeComponent'
 
 export type FeatureChange = (operation: AuthoringOperation | { kind: 'insert'; snippet: string }) => Promise<string | null>
@@ -45,7 +46,6 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
   const [name, setName] = useState('CardView'), [collectionName, setCollectionName] = useState('items'), [recordType, setRecordType] = useState('ItemRecord')
   const [emptyText, setEmptyText] = useState('No items yet'), [field, setField] = useState(node.fields?.[0] ?? '')
   const [shared, setShared] = useState(false)
-  const [inputName, setInputName] = useState('label')
   const [records, setRecords] = useState<readonly DesignRecord[]>(() => { const preview = previewInputs?.find(i => i.owner === node.collection?.owner && i.name === node.collection?.name && i.signature === node.collection?.signature)?.value; return Array.isArray(preview) ? preview as readonly DesignRecord[] : node.collection?.records ?? [] })
   const [newField, setNewField] = useState('price'), [fieldType, setFieldType] = useState<RecordField['type']>('Double'), [fieldDefault, setFieldDefault] = useState('0'), [optional, setOptional] = useState(false)
   const [recordScope, setRecordScope] = useState<'preview' | 'app'>('preview')
@@ -58,7 +58,6 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
   const callSites = snapshot?.nodes.filter(n => n.definitionId === node.id) ?? []
   const helper = isHelperDefinition(node)
   const reusableOwner = snapshot?.nodes.some(n => n.kind === 'component' && n.name === node.owner && snapshot.nodes.find(parent => parent.id === n.parentId)?.name !== 'WindowGroup')
-  const textInput = node.controls?.find(c => ['content', 'title'].includes(c.id) && c.kind === 'text')
   const icon = node.controls?.find(c => c.id === 'icon')
   // Text rows written alike, or the library's Repeat over a range, become records (D13).
   const collectionForm = <details><summary>Use a collection</summary><p>Text rows written alike, or a Repeat over a range, can become a typed collection: one record for each row. Rows that differ stay static.</p><label>Collection name<input value={collectionName} onChange={e => setCollectionName(e.target.value)} /></label><label>Record type<input value={recordType} onChange={e => setRecordType(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'collection-convert', name: collectionName, recordType })}>Convert to collection</button></details>
@@ -79,12 +78,15 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
     {section === 'basics' && node.component && <section><h3>Copy of {node.name}</h3><p>The fields above change only this copy. Everything else comes from its Main.</p>
       <button type="button" aria-expanded={shared} onClick={() => setShared(!shared)}>Edit the Main…</button>
       {shared && <div><p>Editing the Main changes all {node.component.callSites.length} copies, including repeated rows:</p><ul>{snapshot?.nodes.filter(n => n.definitionId === node.component!.definitionId).map((site, index) => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · copy {index + 1}</button></li>)}</ul><button type="button" onClick={() => { const definition = snapshot?.nodes.find(n => n.id === node.component!.definitionId); if (definition) onSelect?.(definition); else setError('The Main for this copy is not in the project any more. Open it in Code.') }}>Open the Main</button></div>}
+      <CopyActions node={node} busy={busy} command={command} />
     </section>}
-    {section === 'advanced' && node.component && <section><h3>Saved inputs</h3>
+    {section === 'advanced' && node.component && <section><h3>This copy’s inputs</h3>
       {onSaveVariant && onDeleteVariant && <ComponentVariants node={node} variants={variants ?? []} onSave={onSaveVariant} onDelete={onDeleteVariant} onApply={async variant => { await command({ kind: 'component-variant', variant }) }} busy={busy} />}
       {onDescribe && <ComponentDescriptionEditor node={node} descriptions={descriptions} onSave={onDescribe} />}
     </section>}
-    {section === 'basics' && reusableOwner && textInput && <details><summary>Changeable per copy</summary><p>Let each copy set its own text. Copies that exist now keep “{textInput.value}”.</p><label>Field name<input aria-label="Component input name" value={inputName} onChange={e => setInputName(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'component-expose', control: textInput.id, name: inputName })}>Make text changeable per copy</button></details>}
+    {section === 'basics' && reusableOwner && node.kind !== 'definition' && <ChangeablePerCopy node={node} busy={busy} command={command} />}
+    {/* Variants are Swift, an enum each copy picks a case of; Saved inputs are the studio's presets (Wave 5b). */}
+    {section === 'basics' && node.variants && <Variants node={node} variants={node.variants} busy={busy} command={command} />}
     {/* A helper is no component: its views are drawn where it is called, which is what it says (Wave 3a). */}
     {section === 'basics' && node.kind === 'definition' && (helper
       ? !!callSites.length && <section><h3>Where it is used</h3><details><summary>Places</summary><ul>{callSites.map((site, index) => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · place {index + 1}</button></li>)}</ul></details></section>

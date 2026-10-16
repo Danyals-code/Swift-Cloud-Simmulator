@@ -1,10 +1,11 @@
-import { Fragment, type ReactNode } from 'react'
-import { helperPlaces, isConditional, type ColorValue, type Conditional, type Length, type TokenLength } from '@studio/shared'
+import { Fragment, createContext, useContext, type ReactNode } from 'react'
+import { helperPlaces, isConditional, type ColorValue, type Conditional, type Length, type TokenLength, type VariantProperty } from '@studio/shared'
 import { ColorField } from '../controls/ColorField'
 import { NumberField } from '../controls/NumberField'
 import { TokenChip, type TokenActions } from '../controls/TokenChip'
 import { Icon, type IconName } from '../ui/Icon'
 import type { SectionProps } from './section'
+import { variantCases } from '../../lib/componentInputs'
 import styles from './LayerSection.module.css'
 
 /** A length as a field takes it: the number, or none for a token, which the field shows as a chip over it. */
@@ -69,14 +70,19 @@ export function LengthField(props: LengthFieldProps) {
 /** What each case of a condition is called: for assistive tech, as its caption, and as its title. */
 export interface CaseNames { readonly label: string; readonly caption: string; readonly title: string }
 
+/** The variant properties of the Main the layer is in (Wave 5b), which name a value's two sides by their cases. */
+export const VariantsContext = createContext<readonly VariantProperty[] | undefined>(undefined)
+
 /**
  * The two values a condition chooses between, `selected ? 16 : 8` (Wave 3b), each a field of
  * its own in one group named for the condition, which stays as written: the field `If`, when
- * it is true, and `Else`, otherwise. `label` names the value; each case's names add to it.
+ * it is true, and `Else`, otherwise; a variant's, `style == .primary`, by its cases, When
+ * Primary and When Secondary (Wave 5b). `label` names the value; each case's names add to it.
  */
 export function Cases<T>({ label, value, field }: { label: string; value: Conditional<T>; field: (which: 'then' | 'otherwise', names: CaseNames) => ReactNode }) {
-  const names = (which: 'then' | 'otherwise'): CaseNames => which === 'then'
-    ? { label: `${label}, when ${value.condition} is true`, caption: 'If', title: `When ${value.condition} is true` }
+  const cases = variantCases(value.condition, useContext(VariantsContext))
+  const names = (which: 'then' | 'otherwise'): CaseNames => cases ? { label: `${label}, when ${cases[which]}`, caption: cases[which], title: `When ${cases[which]}` }
+    : which === 'then' ? { label: `${label}, when ${value.condition} is true`, caption: 'If', title: `When ${value.condition} is true` }
     : { label: `${label}, otherwise`, caption: 'Else', title: 'Otherwise' }
   return <div className={styles.branches} role="group" aria-label={`${label}, set by ${value.condition}`}>
     {(['then', 'otherwise'] as const).map(which => <Fragment key={which}>{field(which, names(which))}</Fragment>)}

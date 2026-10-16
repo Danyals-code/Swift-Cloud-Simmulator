@@ -1,4 +1,4 @@
-import type { AuthoringOperation, ComponentDescription } from './authoring-features'
+import type { AuthoringOperation, ComponentDescription, ComponentInputKind } from './authoring-features'
 import type { AuthoringSnapshot } from './authoring'
 import type { PreviewColorAsset, SourceFile, ViewEdit } from './protocol'
 import type { SourceSpan } from './source'
@@ -25,6 +25,18 @@ export interface DesignControl {
   readonly step?: number
   /** A select's choices; for a number, the words it takes besides numbers, such as a stack's Spacing `auto` (D4). */
   readonly options?: readonly string[]
+  /**
+   * What a copy's input is to its Main (Wave 5b), for the picker it takes: a symbol's name, an
+   * asset's name, or a colour as a system name (`red`), `#RRGGBB` or `#RRGGBBAA`, or a token as
+   * written (`Color.brand`, `.brand`). Absent for any other input.
+   */
+  readonly inputKind?: 'symbol' | 'image' | 'color'
+  /**
+   * On a view's control in a Main (Wave 5b): the kind of input each copy can set that this value
+   * can become, as `component-expose`'s `as`, for a value written plainly where it is read.
+   * Absent anywhere else, and for a value Changeable per copy can't take.
+   */
+  readonly exposeAs?: Exclude<ComponentInputKind, 'shown'>
   /** A visible control that cannot currently be changed safely. */
   readonly disabledReason?: string
   readonly min?: number

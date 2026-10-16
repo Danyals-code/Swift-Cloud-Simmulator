@@ -5,6 +5,7 @@ import { isHelperDefinition, isStructuralLayer, layoutParentOf, offersWhenTapped
 import { AuthoringFeatures, type FeatureProps } from './AuthoringFeatures'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
 import { VisibilityGroup } from './VisibilityGroup'
+import { CopyInput } from './CopyInput'
 import { LayoutGuide } from './LayoutGuide'
 import { ModifierStack } from './ModifierStack'
 import { LayerSections } from './layer/LayerSections'
@@ -142,7 +143,9 @@ export function AuthoringInspector({ node, drawn, hiddenView, stale, onReveal, o
         {['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack'].includes(selected.name) && <LayoutGuide node={selected} />}
         {valueFields(selected, basics, basicProperties).map(field => field.style
           ? <TokenField key={`${field.style.property}:${field.style.token ?? field.style.value}`} field={field} tokens={tokens} busy={stale} onChange={onChange} onCommand={resource} />
-          : field.control && onChange ? <PropertyControl key={`${selected.id}:${field.control.id}:${field.control.value}`} control={field.control} onChange={onChange} /> : null)}
+          // A copy's symbol, image or colour input is drawn as one, not as a name to type (Wave 5b).
+          : field.control && onChange ? field.control.inputKind ? <CopyInput key={`${selected.id}:${field.control.id}:${field.control.value}`} control={field.control} assets={features?.assets} tokens={tokens} onChange={onChange} />
+            : <PropertyControl key={`${selected.id}:${field.control.id}:${field.control.value}`} control={field.control} onChange={onChange} /> : null)}
         {/* A slot is where views go, which is what Add does with it selected (Wave 4a). */}
         {sourceLayerSlot(selected) ? <p className={styles.note}>{sourceLayerOpens(selected) ? 'Drawn open on the canvas while it, or a view in it, is selected. ' : ''}Add puts a view in it, after its last.</p>
           : !basics.length && !selected.component && !['definition', 'template'].includes(selected.kind) && !interaction && <p className={styles.note}>{selected.properties.some(property => property.valueKind === 'data-binding' || property.valueKind === 'component-argument') ? 'Its content comes from data.' : 'Nothing to set when it is created.'}</p>}
