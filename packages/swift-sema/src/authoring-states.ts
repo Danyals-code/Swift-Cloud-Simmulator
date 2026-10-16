@@ -1,6 +1,6 @@
 import { forEachChild, type Decl, type Expr, type IfStmt, type Node, type StructDecl, type TypeRef, type VarDecl } from '@studio/swift-syntax'
-import type { AuthoringNode, DesignValue, PreviewInput, SourceSpan, StateChoice, StateInput, StateKind, SuggestedState } from '@studio/shared'
-import { declarationsNamed, enumCases, extensionsNamed, layerById, literal, namedStruct, ownerOf, raw, scalarType, signature, type FeatureContext } from './authoring-context'
+import type { AuthoringNode, DesignValue, PreviewInput, StateChoice, StateInput, StateKind, SuggestedState, VisibilityWhen } from '@studio/shared'
+import { declarationsNamed, enumCases, extensionsNamed, ifStatementOf, layerById, literal, namedStruct, ownerOf, raw, scalarType, signature, type FeatureContext } from './authoring-context'
 
 /**
  * The states a screen's conditions draw (Wave 3b): for each branch of an `if` the screen
@@ -29,7 +29,13 @@ interface Fact { readonly slot: Slot; readonly value: DesignValue; readonly labe
 interface Missing { readonly slot: Slot; readonly label: string; readonly problem: string }
 /** The values that make a condition true or false: none it can be (null), or one missing. */
 type Outcome = readonly Fact[] | Missing | null
-type ConditionReading = { readonly when: (truth: boolean) => Outcome } | { readonly problem: string }
+/**
+ * The one value a condition asks for and what it holds, when that is all it asks, as Shown
+ * when writes it (Wave 5a): `x`, `!x`, `x == .case`, `x != nil`, `items.isEmpty`; and what
+ * its other side asks, when that is one choice too.
+ */
+interface Asks { readonly when: VisibilityWhen; readonly not?: VisibilityWhen }
+type ConditionReading = { readonly when: (truth: boolean) => Outcome; readonly asks?: Asks } | { readonly problem: string }
 /** Whose members a name reads: the screen's own, or a model's it reaches through `via`. */
 interface Scope {
   readonly decl: StructDecl
@@ -41,9 +47,10 @@ interface Scope {
 interface Screen {
   readonly ctx: FeatureContext
   readonly owner: string
-  readonly plain: ReadonlyMap<string, StateInput>
   readonly slots: Map<string, Slot>
   readonly depth: number
+  /** Set when only what each value is matters, not a sample of it (Wave 5a): its samples are then never looked for. */
+  readonly kindsOnly?: true
 }
 
 /** Why the preview can't set what a condition reads, in a designer's words. */
@@ -68,7 +75,7 @@ const article = (type: string) => (/^[AEIO]/.test(type) ? 'an ' : 'a ') + type
 /** The words of a Swift name: `isURLValid` is is, URL, valid. */
 const words = (name: string) => (name.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+/g) ?? [name]).map(word => word.length > 1 && word === word.toUpperCase() ? word : word.toLowerCase())
 /** A member's name as a designer reads it: `isSignedIn` is "Signed in", `errorMessage` "Error message". */
-function prettyName(name: string): string {
+export function designerName(name: string): string {
   const parts = words(name)
   if (parts.length > 1 && parts[0] === 'is') parts.shift()
   const text = parts.join(' ')
@@ -107,9 +114,6 @@ function conditionsOf(ctx: FeatureContext, owner: string): readonly AuthoringNod
   }
   return byOwner.get(owner) ?? []
 }
-/** A span as a key: its offsets first, as a file name may hold any character. */
-const spanKey = (span: SourceSpan) => `${span.start}:${span.end}:${span.file}`
-
 /** Every member and statement of a type's own code, and its extensions'. */
 const codeOf = (ctx: FeatureContext, decl: StructDecl, name: string): readonly Decl[] => [...decl.members, ...extensionsNamed(ctx, name).flatMap(e => e.members)]
 /** The member `name` or `self.name` reads, written in the type's own code. */
@@ -228,7 +232,7 @@ function sampleOf(ctx: FeatureContext, scope: Scope, type: string, member: strin
 
 /** A stored member a condition reads, as a slot a state sets: or why it can't be. */
 function slotOf(scope: Scope, decl: VarDecl): Slot | { readonly problem: string } {
-  const { ctx, slots, plain } = scope.screen
+  const { ctx, slots } = scope.screen
   const path = scope.prefix + decl.name
   const known = slots.get(path)
   if (known) return known
@@ -249,9 +253,8 @@ function slotOf(scope: Scope, decl: VarDecl): Slot | { readonly problem: string 
   const sig = onScreen ? signature(ctx, decl) : JSON.stringify([signature(ctx, scope.via!), scope.typeName, signature(ctx, decl)])
   const base = { owner: scope.screen.owner, name: path, signature: sig, source: initial?.span ?? decl.nameSpan, held: { type: scope.typeName, member: decl.name }, kind }
   let input: StateInput, sample: Slot['sample']
-  const reused = onScreen ? plain.get(decl.name) : undefined
   if (kind === 'list') {
-    const items = itemsOf(ctx, scope, decl, type.element)
+    const items = scope.screen.kindsOnly ? undefined : itemsOf(ctx, scope, decl, type.element)
     const choices: StateChoice[] = [{ value: 'empty', label: 'No items', swift: '[]' }, ...(items ? [{ value: 'items', label: 'With items', swift: items }] : [])]
     input = { ...base, type: type.text, value: initial?.kind === 'arrayLiteral' ? initial.elements.length ? 'items' : 'empty' : null, choices }
     sample = items ? 'items' : { problem: WHY.items(decl.name) }
@@ -261,21 +264,21 @@ function slotOf(scope: Scope, decl: VarDecl): Slot | { readonly problem: string 
     const declared = declarationsNamed(ctx, type.name)
     const anyError = /^\(?\s*(?:any\s+)?(?:Error|LocalizedError)\s*\)?$/.test(type.text)
     const ownError = !anyError && declared.length === 1 && 'inherits' in declared[0]! && declared[0].inherits.some(t => /Error$/.test(t.name))
-    const swift = anyError ? !declarationsNamed(ctx, PREVIEW_ERROR).length ? `${PREVIEW_ERROR}(errorDescription: "${SAMPLE_ERROR}")` : undefined
+    const swift = scope.screen.kindsOnly ? undefined : anyError ? !declarationsNamed(ctx, PREVIEW_ERROR).length ? `${PREVIEW_ERROR}(errorDescription: "${SAMPLE_ERROR}")` : undefined
       : ownError ? undefined : sampleOf(ctx, scope, type.name, decl.name)
     input = { ...base, type: type.text, optional: true, value: !initial || initial.kind === 'nilLiteral' ? 'none' : null, choices: [{ value: 'none', label: 'None', swift: 'nil' }, ...(swift ? [{ value: 'sample', label: 'A sample', swift }] : [])] }
     sample = swift ? 'sample' : { problem: anyError || ownError ? WHY.error(decl.name, anyError ? 'Error' : type.text) : WHY.sample(decl.name, type.text) }
   } else if (kind === 'case') {
     // Written with its type, as a model's member may have none to give a bare `.loading` one.
-    input = reused ?? { ...base, type: type.text, value: initial?.kind === 'memberAccess' && cases!.includes(initial.member) ? initial.member : null, choices: cases!.map(name => ({ value: name, label: prettyName(name), swift: `${type.name}.${name}` })) }
+    input = { ...base, type: type.text, value: initial?.kind === 'memberAccess' && cases!.includes(initial.member) ? initial.member : null, choices: cases!.map(name => ({ value: name, label: designerName(name), swift: `${type.name}.${name}` })) }
     sample = cases![0]!
   } else {
-    input = reused ?? { ...base, type: type.name, value: initial ? literal(ctx, initial) ?? null : null, ...(type.optional ? { optional: true } : {}) }
-    const said = assignments(ctx, scope.decl, scope.typeName).get(decl.name)?.map(value => literal(ctx, value)).find((value): value is string => typeof value === 'string' && value.length > 0)
+    input = { ...base, type: type.name, value: initial ? literal(ctx, initial) ?? null : null, ...(type.optional ? { optional: true } : {}) }
+    const said = scope.screen.kindsOnly ? undefined : assignments(ctx, scope.decl, scope.typeName).get(decl.name)?.map(value => literal(ctx, value)).find((value): value is string => typeof value === 'string' && value.length > 0)
     const current = typeof input.value === 'string' && input.value ? input.value : undefined
-    sample = kind === 'flag' ? true : type.name === 'String' ? current ?? said ?? (ERRORISH.test(decl.name) ? SAMPLE_ERROR : prettyName(decl.name)) : type.name === 'Bool' ? true : 1
+    sample = kind === 'flag' ? true : type.name === 'String' ? current ?? said ?? (ERRORISH.test(decl.name) ? SAMPLE_ERROR : designerName(decl.name)) : type.name === 'Bool' ? true : 1
   }
-  const slot: Slot = { input: reused ? { ...reused, held: base.held, kind } : input, member: decl.name, kind, sample }
+  const slot: Slot = { input, member: decl.name, kind, sample }
   slots.set(path, slot)
   return slot
 }
@@ -336,11 +339,15 @@ function read(scope: Scope, expr: Expr): ConditionReading {
   // `items.isEmpty` of a list, unless the model has an `isEmpty` of its own.
   if (expr.kind === 'memberAccess' && expr.member === 'isEmpty' && expr.base && 'problem' in found) return empty(scope, expr.base)
   if ('problem' in found) return found
-  if ('computed' in found) return found.scope.screen.depth > 4 ? { problem: WHY.computed(text) } : read({ ...found.scope, screen: { ...found.scope.screen, depth: found.scope.screen.depth + 1 } }, found.computed)
+  if ('computed' in found) {
+    // What a computed value reads is drawn, but Shown when says the value as the code names it (Wave 5a).
+    const inner = found.scope.screen.depth > 4 ? { problem: WHY.computed(text) } : read({ ...found.scope, screen: { ...found.scope.screen, depth: found.scope.screen.depth + 1 } }, found.computed)
+    return 'problem' in inner ? inner : { when: inner.when }
+  }
   const slot = found.slot
   if (slot.kind !== 'flag') return { problem: WHY.runtime(text) }
-  const loading = LOADINGISH.test(slot.member), name = prettyName(slot.member)
-  return { when: truth => [{ slot, value: truth, label: truth ? loading ? 'Loading' : name : loading ? 'Loaded' : negated(name) }] }
+  const loading = LOADINGISH.test(slot.member), name = designerName(slot.member), input = slot.input.name
+  return { when: truth => [{ slot, value: truth, label: truth ? loading ? 'Loading' : name : loading ? 'Loaded' : negated(name) }], asks: { when: { input, is: true }, not: { input, is: false } } }
 }
 /** A name, `self.name` or `model.name`: what it reads. */
 function resolve(scope: Scope, expr: Expr): { readonly slot: Slot } | { readonly computed: Expr; readonly scope: Scope } | { readonly problem: string } {
@@ -361,9 +368,9 @@ function present(scope: Scope, expr: Expr): ConditionReading {
   const found = resolve(scope, expr)
   if ('problem' in found) return found
   if ('computed' in found || found.slot.kind !== 'optional' && !(found.slot.kind === 'scalar' && found.slot.input.optional)) return { problem: WHY.computed(raw(scope.screen.ctx, expr.span)) }
-  const slot = found.slot, errorish = ERRORISH.test(slot.member) || ERRORISH.test(slot.input.type), name = prettyName(slot.member)
+  const slot = found.slot, errorish = ERRORISH.test(slot.member) || ERRORISH.test(slot.input.type), name = designerName(slot.member)
   const label = errorish ? 'Error' : name
-  return { when: truth => truth
+  return { asks: { when: { input: slot.input.name, is: 'some' }, not: { input: slot.input.name, is: 'none' } }, when: truth => truth
     ? typeof slot.sample === 'object' && slot.sample ? { slot, label, problem: slot.sample.problem } : [{ slot, value: slot.sample as DesignValue, label }]
     : [{ slot, value: slot.kind === 'optional' ? 'none' : null, label: errorish ? 'No error' : absent(name) }] }
 }
@@ -388,7 +395,7 @@ function listOf(scope: Scope, expr: Expr, depth = 0): { readonly slot: Slot; rea
 function empty(scope: Scope, expr: Expr): ConditionReading {
   const found = resolve(scope, expr)
   if ('slot' in found && found.slot.kind === 'text') {
-    const slot = found.slot, name = prettyName(slot.member)
+    const slot = found.slot, name = designerName(slot.member)
     return { when: truth => [{ slot, value: truth ? '' : slot.sample as string, label: truth ? absent(name) : name }] }
   }
   const list = listOf(scope, expr)
@@ -396,7 +403,8 @@ function empty(scope: Scope, expr: Expr): ConditionReading {
   const slot = list.slot, text = raw(scope.screen.ctx, expr.span)
   // Emptying the list a filtered one is worked out from empties it too; which items it shows is the code's.
   const items = list.derived ? { problem: WHY.derived(text.length > 32 ? slot.member : text, slot.member) } : typeof slot.sample === 'object' && slot.sample ? slot.sample : undefined
-  return { when: truth => truth ? [{ slot, value: 'empty', label: 'Empty' }]
+  const asks: Asks | undefined = list.derived ? undefined : { when: { input: slot.input.name, is: 'empty' }, not: { input: slot.input.name, is: 'items' } }
+  return { asks, when: truth => truth ? [{ slot, value: 'empty', label: 'Empty' }]
     : items ? { slot, label: 'Has items', problem: items.problem } : [{ slot, value: 'items', label: 'Has items' }] }
 }
 /** `value == .case`, of a project enum without payloads. */
@@ -406,13 +414,15 @@ function isCase(scope: Scope, expr: Expr, name: string): ConditionReading {
   const slot = 'slot' in found ? found.slot : undefined, options = slot?.input.options ?? slot?.input.choices?.map(c => c.value)
   if (!slot || slot.kind !== 'case' || !options?.includes(name)) return { problem: WHY.computed(raw(scope.screen.ctx, expr.span)) }
   const other = options.find(option => option !== name)
-  return { when: truth => truth ? [{ slot, value: name, label: prettyName(name) }] : other ? [{ slot, value: other, label: prettyName(other), not: name }] : null }
+  return { asks: { when: { input: slot.input.name, is: name } }, when: truth => truth ? [{ slot, value: name, label: designerName(name) }] : other ? [{ slot, value: other, label: designerName(other), not: name }] : null }
 }
 
 /** A condition that asks nothing, as the start of a list of them. */
 const ALWAYS: ConditionReading = { when: truth => truth ? [] : null }
 function not(reading: ConditionReading): ConditionReading {
-  return 'problem' in reading ? reading : { when: truth => reading.when(!truth) }
+  if ('problem' in reading) return reading
+  const asks = reading.asks?.not && { when: reading.asks.not, not: reading.asks.when }
+  return { when: truth => reading.when(!truth), ...asks ? { asks } : {} }
 }
 function both(a: ConditionReading, b: ConditionReading): ConditionReading {
   if ('problem' in a) return a
@@ -436,9 +446,116 @@ function joined(a: Outcome, b: Outcome): Outcome {
   return facts
 }
 
-/** What an `if` asks: each of its conditions, `if let` as a value being there. */
+/** What an `if` asks: each of its conditions, `if let` as a value being there, and `if case .loading = phase` as `phase == .loading` (Wave 5a). */
 function readIf(scope: Scope, stmt: IfStmt): ConditionReading {
-  return stmt.conditions.map((condition): ConditionReading => condition.kind === 'expr' ? read(scope, condition.expr) : condition.kind === 'optionalBinding' ? present(scope, condition.value) : { problem: WHY.runtime(raw(scope.screen.ctx, condition.value.span)) }).reduce(both, ALWAYS)
+  const readings = stmt.conditions.map((condition): ConditionReading => {
+    if (condition.kind === 'expr') return read(scope, condition.expr)
+    if (condition.kind === 'optionalBinding') return present(scope, condition.value)
+    const { pattern } = condition
+    return pattern.kind === 'enumCase' && !pattern.bindings.length ? isCase(scope, condition.value, pattern.caseName) : { problem: WHY.runtime(raw(scope.screen.ctx, condition.value.span)) }
+  })
+  return readings.length === 1 ? readings[0]! : readings.reduce(both, ALWAYS)
+}
+
+/**
+ * What a screen's conditions are read with (Wave 5a), made once for each screen whoever asks
+ * first: its States, or a view asking what draws it. Every condition is read as it is made,
+ * outermost first and in the order written, so the values come out in the one order.
+ */
+interface Reader {
+  readonly screen: Screen
+  readonly conditions: readonly AuthoringNode[]
+  readonly readingOf: (node: AuthoringNode) => ConditionReading | undefined
+}
+const readerCache = new WeakMap<FeatureContext, Map<string, Reader | null>>()
+function readerOf(ctx: FeatureContext, definition: AuthoringNode): Reader | undefined {
+  let byOwner = readerCache.get(ctx)
+  if (!byOwner) readerCache.set(ctx, byOwner = new Map())
+  const known = byOwner.get(definition.owner)
+  if (known !== undefined) return known ?? undefined
+  const conditions = conditionsOf(ctx, definition.owner), decl = conditions.length ? ownerOf(ctx, definition) : undefined
+  if (!decl) { byOwner.set(definition.owner, null); return undefined }
+  const screen: Screen = { ctx, owner: definition.owner, slots: new Map(), depth: 0 }
+  const scope: Scope = { decl, typeName: definition.owner, prefix: '', screen }
+  const readings = new Map<string, ConditionReading | undefined>()
+  const readingOf = (node: AuthoringNode) => {
+    if (!readings.has(node.id)) { const stmt = ifStatementOf(ctx, node); readings.set(node.id, stmt && readIf(scope, stmt)) }
+    return readings.get(node.id)
+  }
+  const reader: Reader = { screen, conditions, readingOf }
+  byOwner.set(definition.owner, reader)
+  for (const node of conditions) { contextOf(reader, ctx, node); readingOf(node) }
+  return reader
+}
+
+/**
+ * What the branches around a Condition ask, as each must be drawn for it to be, outermost
+ * first; undefined when one of them is in a row of a list, which changes with the row, or in
+ * a switch, which changes with what it switches on, or can't be read.
+ */
+function contextOf(reader: Reader, ctx: FeatureContext, node: AuthoringNode): Outcome | undefined {
+  const around: Outcome[] = []
+  for (let child = node, parent = layerById(ctx, node.parentId); parent && parent.kind !== 'definition'; child = parent, parent = layerById(ctx, parent.parentId)) {
+    if (parent.kind === 'template' || parent.kind === 'branch' && (parent.name === 'Switch' || parent.name.startsWith('Case '))) return undefined
+    if (parent.kind !== 'branch' || parent.name !== 'Condition') continue
+    const outer = reader.readingOf(parent)
+    if (!outer || 'problem' in outer) return undefined
+    around.push(outer.when(!(child.kind === 'branch' && child.name === 'Otherwise')))
+  }
+  return around.reduceRight<Outcome>((all, outcome) => joined(all, outcome), [])
+}
+
+/**
+ * The preview inputs that draw the `truth` side of a Condition of the screen `definition`
+ * (Wave 5a): its own condition then, joined with what the conditions around it ask, as a
+ * suggested state's are. Undefined when the preview can't set them.
+ */
+export function branchDraws(ctx: FeatureContext, definition: AuthoringNode, branch: AuthoringNode, truth: boolean): PreviewInput[] | undefined {
+  const reader = readerOf(ctx, definition), own = reader?.readingOf(branch)
+  if (!reader || !own || 'problem' in own) return undefined
+  const context = contextOf(reader, ctx, branch), outcome = own.when(truth)
+  const facts = Array.isArray(context) && Array.isArray(outcome) ? joined(outcome, context) : null
+  return Array.isArray(facts) ? facts.map(f => ({ owner: f.slot.input.owner, name: f.slot.input.name, signature: f.slot.input.signature, value: f.value })) : undefined
+}
+
+/**
+ * What the `if` of a Condition asks, as Shown when writes it (Wave 5a): the one value and what
+ * it holds, when that is all; nothing when it asks more or otherwise; or why the preview can't
+ * set what it reads. Undefined when the `if` can't be read.
+ */
+export function conditionAsks(ctx: FeatureContext, definition: AuthoringNode, branch: AuthoringNode): { readonly when?: VisibilityWhen } | { readonly problem: string } | undefined {
+  const reading = readerOf(ctx, definition)?.readingOf(branch)
+  return reading && ('problem' in reading ? reading : reading.asks ? { when: reading.asks.when } : {})
+}
+
+/** The condition of an `if` as written (Wave 5a): `showDetails`, `let user = user`; one in brackets, `if (a)`, as `a`, which is all the parser keeps of it. */
+export function conditionText(ctx: FeatureContext, stmt: IfStmt): string {
+  const [only, more] = stmt.conditions
+  return only?.kind === 'expr' && !more ? raw(ctx, only.expr.span) : raw(ctx, { file: stmt.span.file, start: stmt.span.start, end: stmt.then.span.start }).replace(/^if\s+/, '').trim()
+}
+
+/**
+ * Every value of a screen a condition can read and a state can set (Wave 5a), whether a
+ * condition reads it yet or not: its own stored values, and the stored members of a model it
+ * holds, as `store.isLoading`, in the order written.
+ */
+export function screenValues(ctx: FeatureContext, definition: AuthoringNode, decl: StructDecl): StateInput[] {
+  // A number or words, written as one, is no value a condition shows a view by (Wave 5a).
+  const stored = (members: readonly Decl[]) => members.filter((m): m is VarDecl => {
+    if (m.kind !== 'varDecl' || m.accessor || m.name === 'body' || m.modifiers.some(x => x.name === 'static')) return false
+    const plain = scalarType(m.typeAnnotation, m.initializer)
+    return !plain || plain.type === 'Bool' || plain.optional
+  })
+  const members = stored(codeOf(ctx, decl, definition.owner))
+  if (!members.length) return []
+  const screen: Screen = { ctx, owner: definition.owner, slots: new Map(), depth: 0, kindsOnly: true }
+  const scope: Scope = { decl, typeName: definition.owner, prefix: '', screen }
+  for (const member of members) {
+    if (!('problem' in slotOf(scope, member))) continue
+    const model = modelScope(scope, member.name, member.name)
+    if (!('problem' in model)) for (const inner of stored(codeOf(ctx, model.decl, model.typeName))) slotOf(model, inner)
+  }
+  return [...screen.slots.values()].map(slot => slot.input)
 }
 
 /**
@@ -447,43 +564,20 @@ function readIf(scope: Scope, stmt: IfStmt): ConditionReading {
  * the preview can't set, with why.
  */
 export function screenStateInputs(ctx: FeatureContext, definition: AuthoringNode, plain: readonly StateInput[]): StateInput[] {
-  const conditions = conditionsOf(ctx, definition.owner), decl = conditions.length ? ownerOf(ctx, definition) : undefined
-  if (!decl) return [...plain]
-  const screen: Screen = { ctx, owner: definition.owner, plain: new Map(plain.map(input => [input.name, input])), slots: new Map(), depth: 0 }
-  const scope: Scope = { decl, typeName: definition.owner, prefix: '', screen }
-  // The `if`s of the screen's own code and its extensions, by where they are written.
-  const ifs = new Map<string, IfStmt>()
-  const visit = (node: Node) => { if (node.kind === 'ifStmt') ifs.set(spanKey(node.span), node); forEachChild(node, visit) }
-  ;[decl, ...extensionsNamed(ctx, decl.name)].forEach(visit)
-  const readings = new Map<string, ConditionReading | undefined>()
-  const readingOf = (node: AuthoringNode) => {
-    if (!readings.has(node.id)) { const stmt = ifs.get(spanKey(node.source)); readings.set(node.id, stmt && readIf(scope, stmt)) }
-    return readings.get(node.id)
-  }
+  const reader = readerOf(ctx, definition)
+  if (!reader) return [...plain]
   const states: { readonly slot: Slot; readonly state: SuggestedState; readonly key: string }[] = [], problems = new Map<string, StateInput>()
-  for (const node of conditions) {
-    const stmt = ifs.get(spanKey(node.source))
+  for (const node of reader.conditions) {
+    const stmt = ifStatementOf(ctx, node)
     if (!stmt) continue
-    // What the branches around it ask, as each must be drawn for this one to be. One in a
-    // row of a list changes with the row, and one in a switch with what it switches on.
-    const around: Outcome[] = []
-    let child = node, parent = layerById(ctx, node.parentId), skipped = false
-    for (; parent && parent.kind !== 'definition'; child = parent, parent = layerById(ctx, parent.parentId)) {
-      if (parent.kind === 'template' || parent.kind === 'branch' && (parent.name === 'Switch' || parent.name.startsWith('Case '))) { skipped = true; break }
-      if (parent.kind !== 'branch' || parent.name !== 'Condition') continue
-      const outer = readingOf(parent)
-      if (!outer || 'problem' in outer) { skipped = true; break }
-      around.push(outer.when(!(child.kind === 'branch' && child.name === 'Otherwise')))
-    }
-    const own = readingOf(node)
-    if (skipped || !own) continue
+    const context = contextOf(reader, ctx, node)
+    const own = reader.readingOf(node)
+    if (context === undefined || !own) continue
     if ('problem' in own) {
-      const text = raw(ctx, { file: stmt.span.file, start: stmt.span.start, end: stmt.then.span.start }).replace(/^if\s+/, '').trim()
+      const text = conditionText(ctx, stmt)
       if (!problems.has(text)) problems.set(text, { owner: definition.owner, name: text, signature: '', type: 'Bool', value: null, source: stmt.span, problem: own.problem })
       continue
     }
-    // Outermost first, as the code reads.
-    const context = around.reduceRight<Outcome>((all, outcome) => joined(all, outcome), [])
     if (!Array.isArray(context)) continue
     for (const truth of stmt.else?.kind === 'block' ? [true, false] : [true]) {
       const outcome = own.when(truth)
@@ -512,7 +606,12 @@ export function screenStateInputs(ctx: FeatureContext, definition: AuthoringNode
     if (list) list.push(named)
     else attached.set(slot, [named])
   }
-  const values = [...screen.slots.values()].map(slot => { const states = attached.get(slot); return states ? { ...slot.input, states } : slot.input })
+  // A value of the screen's own is the one its controls set too, read where the condition reads it (Wave 5a).
+  const own = new Map(plain.map(input => [input.name, input]))
+  const values = [...reader.screen.slots.values()].map(slot => {
+    const states = attached.get(slot), reused = own.get(slot.input.name), input = reused ? { ...reused, held: slot.input.held, kind: slot.kind } : slot.input
+    return states ? { ...input, states } : input
+  })
   const byName = new Map(values.map(input => [input.name, input]))
-  return [...plain.map(input => byName.get(input.name) ?? input), ...values.filter(input => !screen.plain.has(input.name)), ...problems.values()]
+  return [...plain.map(input => byName.get(input.name) ?? input), ...values.filter(input => !own.has(input.name)), ...problems.values()]
 }

@@ -1,6 +1,6 @@
 import { validDesignValue } from '@studio/shared'
 import type { AuthoringNode, ComponentDescription, DesignValue, PreviewColorAsset, RecordField, SourceFile, SourceSpan } from '@studio/shared'
-import { forEachChild, Lexer, type CallExpr, type Decl, type Expr, type ExtensionDecl, type Node, type SourceFileNode, type StructDecl, type TypeRef, type VarDecl } from '@studio/swift-syntax'
+import { forEachChild, Lexer, type CallExpr, type Decl, type Expr, type ExtensionDecl, type IfStmt, type Node, type SourceFileNode, type StructDecl, type TypeRef, type VarDecl } from '@studio/swift-syntax'
 import { isViewBase, literalText, swiftString, viewCallChain } from './design-controls'
 
 export interface SourcePatch { readonly file: string; readonly start: number; readonly end: number; readonly text: string }
@@ -38,6 +38,8 @@ export function modifierIndent(ctx: FeatureContext, node: AuthoringNode): string
 }
 const declarationCache = new WeakMap<FeatureContext, Decl[]>()
 const expressionCache = new WeakMap<FeatureContext, Map<string, Expr>>()
+/** Each file's `if` statements by where they are written (Wave 5a). */
+const ifCache = new WeakMap<FeatureContext, Map<string, Map<string, IfStmt>>>()
 
 export function allDeclarations(ctx: FeatureContext): Decl[] {
   const cached = declarationCache.get(ctx)
@@ -114,6 +116,19 @@ export function expressionOf(ctx: FeatureContext, node: AuthoringNode): Expr | u
   }
   return expressions.get(spanKey(node.source))
 }
+/** The `if` a Condition layer is, by its span (Wave 5a): its file's `if`s found once, and only once a Condition asks. */
+export function ifStatementOf(ctx: FeatureContext, node: AuthoringNode): IfStmt | undefined {
+  let byFile = ifCache.get(ctx)
+  if (!byFile) ifCache.set(ctx, byFile = new Map())
+  let ifs = byFile.get(node.source.file)
+  if (!ifs) {
+    const found = ifs = new Map<string, IfStmt>()
+    const visit = (n: Node) => { if (n.kind === 'ifStmt') found.set(spanKey(n.span), n); forEachChild(n, visit) }
+    ctx.ast.filter(file => file.span.file === node.source.file).forEach(visit)
+    byFile.set(node.source.file, ifs)
+  }
+  return ifs.get(spanKey(node.source))
+}
 export function callOf(ctx: FeatureContext, node: AuthoringNode): CallExpr | undefined { const e = expressionOf(ctx, node); return e ? viewCallChain(e)?.base : undefined }
 export function namedStruct(ctx: FeatureContext, name: string): StructDecl | undefined {
   const index = indexOf(ctx)
@@ -178,7 +193,6 @@ export function literal(ctx: FeatureContext, expr: Expr | null): DesignValue | u
 export const validScalar = validDesignValue
 
 export function swiftValue(value: DesignValue): string { return value === null ? 'nil' : typeof value === 'string' ? swiftString(value) : String(value) }
-export function identifier(value: string): boolean { return /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(value) && !new Set(['self', 'Self', 'body', 'init', 'deinit', 'class', 'struct', 'enum', 'var', 'let', 'func', 'if', 'else', 'return', 'true', 'false', 'nil', 'switch', 'case', 'default', 'in', 'for', 'while', 'import', 'some', 'any', 'Type', 'where', 'extension', 'protocol', 'private', 'public', 'static', 'repeat', 'try', 'throw', 'throws', 'async', 'await']).has(value) }
 export function signature(ctx: FeatureContext, decl: StructDecl | VarDecl): string {
   const text = decl.kind === 'structDecl' ? decl.members.filter((m): m is VarDecl => m.kind === 'varDecl' && !m.accessor).map(m => [m.name, m.isLet, m.typeAnnotation && raw(ctx, m.typeAnnotation.span), m.attributes.map(a => a.name), m.initializer && raw(ctx, m.initializer.span)]) : [decl.name, decl.typeAnnotation && raw(ctx, decl.typeAnnotation.span), decl.attributes.map(a => a.name)]
   return JSON.stringify(text)
@@ -225,6 +239,20 @@ export function insertMember(ctx: FeatureContext, owner: StructDecl, text: strin
   const at = member?.span.start ?? owner.span.end - 1
   const eol = ctx.files.find(f => f.id === owner.span.file)?.text.includes('\r\n') ? '\r\n' : '\n'
   return { file: owner.span.file, start: at, end: at, text: text.replaceAll('\n', eol) + eol + '    ' }
+}
+/**
+ * A declaration added with the stored values a type declares before its body (Wave 5a), on a
+ * line of its own after the last of them, so a blank line before `var body` stays; just before
+ * the body, as `insertMember` writes it, when there are none.
+ */
+export function insertStoredMember(ctx: FeatureContext, owner: StructDecl, text: string): SourcePatch {
+  const body = owner.members.findIndex(m => m.kind === 'varDecl' && m.name === 'body')
+  const last = owner.members.slice(0, body < 0 ? undefined : body).filter(m => m.kind === 'varDecl' && !m.accessor && !m.modifiers.some(x => x.name === 'static')).at(-1)
+  const file = ctx.files.find(f => f.id === owner.span.file)?.text ?? ''
+  if (!last) return insertMember(ctx, owner, text)
+  const eol = file.includes('\r\n') ? '\r\n' : '\n', { indent } = lineIndent(ctx, owner.span.file, last.span.start)
+  const end = file.indexOf('\n', last.span.end), at = end < 0 ? file.length : file[end - 1] === '\r' ? end - 1 : end
+  return { file: owner.span.file, start: at, end: at, text: eol + indent + text.replaceAll('\n', eol + indent) }
 }
 export function insertArgument(ctx: FeatureContext, call: CallExpr, label: string, value: string, order: readonly string[]): SourcePatch | undefined {
   const existing = call.args.find(a => a.label === label)

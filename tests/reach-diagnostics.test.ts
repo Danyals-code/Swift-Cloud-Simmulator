@@ -15,11 +15,18 @@ const warnings = (body: string, members = '') => draw([
 it.each([
   ['.sensoryFeedback', 'Text("A").sensoryFeedback(.success, trigger: tapped)'],
   ['.labelsHidden', 'Toggle("A", isOn: $tapped).labelsHidden()'],
-  ['.contentTransition', 'Text("A").contentTransition(.numericText())'],
 ])('names %s as recognized but not drawn', (name, body) => {
   const said = warnings(body, '    @State private var tapped = false\n').join('\n')
   expect(said).toContain(`'${name}' is recognized but not applied by the preview`)
   expect(said).not.toContain('does not recognise')
+})
+
+it.each([
+  ['.contentTransition', 'Text("A").contentTransition(.numericText())', ''],
+  ['.matchedGeometryEffect and @Namespace', 'Text("A").matchedGeometryEffect(id: "a", in: space)', '    @Namespace private var space\n'],
+  ['a Namespace.ID handed to a view', 'Text("A").matchedGeometryEffect(id: "a", in: space)', '    let space: Namespace.ID\n'],
+])('says nothing of %s, which the preview draws (Wave 5a)', (_, body, members) => {
+  expect(warnings(body, members)).toEqual([])
 })
 
 it('still says a name no SwiftUI view has is unknown', () => {

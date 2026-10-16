@@ -73,6 +73,8 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'minimumScaleFactor', 'truncationMode', 'allowsTightening', 'monospacedDigit',
   // transforms, filters and motion
   'scaleEffect', 'rotationEffect', 'rotation3DEffect', 'animation', 'transition',
+  // numbers that roll and views that move between states (Wave 5a)
+  'contentTransition', 'matchedGeometryEffect',
   'blur', 'saturation', 'brightness', 'contrast', 'grayscale',
   'hueRotation', 'colorMultiply', 'blendMode', 'redacted', 'unredacted',
   // drawing styles
@@ -226,7 +228,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   // symbols and images
   'symbolRenderingMode', 'symbolVariant', 'symbolEffect', 'interpolation',
   // motion
-  'matchedGeometryEffect', 'phaseAnimator', 'keyframeAnimator',
+  'phaseAnimator', 'keyframeAnimator',
   // scrolling and lists
   'refreshable', 'scrollDismissesKeyboard', 'scrollPosition', 'scrollTransition',
   'scrollDisabled', 'listSectionSeparator',
@@ -507,6 +509,8 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Color', 'UIColor', 'Font', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment',
   'Edge', 'EdgeInsets', 'Angle', 'UnitPoint', 'CGFloat', 'CGSize', 'CGPoint', 'CGRect',
   'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent', 'Visibility',
+  // `let namespace: Namespace.ID`, a `@Namespace` handed to the view that matches with it (Wave 5a).
+  'Namespace',
   'Material', 'StrokeStyle', 'GeometryProxy', 'ScrollViewProxy', 'Gradient', 'AnyShapeStyle', 'Glass',
   'RectangleCornerRadii',
   'ToolbarItemPlacement', 'ToolbarContent', 'Binding', 'NavigationPath', 'Alert', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet', 'Scanner', 'CharacterSet',
@@ -570,6 +574,8 @@ export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean }> = ne
   // A size that scales with the reader's text size, along the curve of the style it names.
   ['ScaledMetric', { supported: true }],
   ['GestureState', { supported: true }],
+  // An id `.matchedGeometryEffect` names views by, one for each copy of the view (Wave 5a).
+  ['Namespace', { supported: true }],
 ])
 
 /**

@@ -1,9 +1,10 @@
 import { objectControls } from './design-object-controls'
-import { authoringCapability, type AuthoringNode, type SourceSpan } from '@studio/shared'
+import { ANIMATION_STYLES, ANIMATION_STYLE_WORDS, authoringCapability, takesDuration, type AnimationStyle, type AuthoringNode, type SourceSpan } from '@studio/shared'
 import { Lexer, type CallExpr, type Expr } from '@studio/swift-syntax'
 import { controlKind, type ControlKind, type ControlRecipe } from './design-controls'
 import { EDGE_SET_MEMBERS } from './structural-check'
 import { isAppleCall } from './builtins'
+import { animationOf, animationSwift, leftToCode, readTransition, transitionNamed, transitionSettings, transitionSwift, type Transition } from './motion-values'
 
 const anchors = ['center', 'topLeading', 'top', 'topTrailing', 'leading', 'trailing', 'bottomLeading', 'bottom', 'bottomTrailing']
 const edges = EDGE_SET_MEMBERS
@@ -117,6 +118,24 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
       fill(name, style, id + ':0')
     }
     if (!capability || target < Number.parseFloat(capability.minimumIOS)) continue
+    // A transition's and an animation's cards (Wave 5a): their style, edge, Fades too and duration, as the Visibility group and When tapped name them.
+    const motion = m.args[0]?.value
+    if (name === 'transition' && motion && safe(motion.span)) {
+      const current = readTransition(motion), write = (next: Partial<Transition>) => ({ ...motion.span, text: transitionSwift({ ...current, ...next }) })
+      const change = { transition: (words: string) => write({ kind: transitionNamed(words) }), edge: (edge: string) => write({ edge }), fades: (fades: string) => write({ fades: fades === 'true' }) }
+      if (!leftToCode(current)) for (const setting of transitionSettings(current, target, false)) add(`${id}:${setting.part}`, setting.label, setting.kind, setting.value, change[setting.part], setting.options, undefined, undefined, setting.description)
+    }
+    if (name === 'animation' && motion && safe(motion.span)) {
+      const { style, duration } = animationOf(motion), words = ANIMATION_STYLE_WORDS
+      const write = (next: AnimationStyle | undefined, seconds?: number) => {
+        if (!next) throw new Error('Choose an animation this card offers.')
+        return { ...motion.span, text: animationSwift(seconds === undefined ? { style: next } : { style: next, duration: seconds }) || '.default' }
+      }
+      if (style) {
+        add(id + ':animation', 'Animation', 'select', words[style], word => write(ANIMATION_STYLES.find(s => words[s] === word)), ANIMATION_STYLES.map(s => words[s]))
+        if (takesDuration(style)) add(id + ':duration', 'Duration', 'number', duration === undefined ? '' : String(duration), seconds => write(style, Number(seconds)), undefined, 0.01, 10, 'In seconds.')
+      }
+    }
     if (name === 'padding') {
       const first = m.args[0]?.value
       // Only `Edge.Set`'s own members are edges: `.space16` or `Layout.padding` there is the amount, a token or constant.

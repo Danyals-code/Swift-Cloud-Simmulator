@@ -124,8 +124,13 @@ const KB = 1024
  *              rows, a paging carousel and the missing Add palette views,
  *              estimated at 25 to 34 KB over three PRs. Raised to 880 KB by
  *              decision, for all of Wave 4.
+ *   States, motion and components - 858.0 KB actual after Wave 4. Wave 5
+ *              adds Shown when, Animate this change, transitions, numeric
+ *              text, matched geometry, and component props, variants, swap
+ *              and detach, estimated at 15 to 24 KB over two PRs. Raised to
+ *              900 KB by decision, for Wave 5.
  */
-const BUDGET_KB = 880
+const BUDGET_KB = 900
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.

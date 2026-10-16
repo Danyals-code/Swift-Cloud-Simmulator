@@ -1,4 +1,4 @@
-import { alignmentOf, alignmentSides, type Alignment9, type Point, type CornerRadii, type CornerStyle, type PlaceholderPayload, type Rect, type ShapeOutline, type ShapeStroke, type ShapeTrim, type SliderPayload, type FilterSpec, type Fill, type ResolvedFont, type RGBA, type ShapeKind, type Size, type SourceSpan } from '@studio/shared'
+import { alignmentOf, alignmentSides, type Alignment9, type Point, type CornerRadii, type CornerStyle, type PlaceholderPayload, type Rect, type ShapeOutline, type ShapeStroke, type ShapeTrim, type SliderPayload, type FilterSpec, type Fill, type ResolvedFont, type RGBA, type ShapeKind, type Size, type SourceSpan, type TransitionSpec, type ContentTransitionSpec, type MatchedGeometry } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -544,10 +544,12 @@ export type LayoutModifier =
     }
   /** Carried through to the renderer, which animates the change with CSS. */
   | { readonly kind: 'animate'; readonly hint: AnimationHint }
-  /** Retain transition timing even before a value-driven animation is armed. */
-  | { readonly kind: 'transitionTiming'; readonly hint: AnimationHint }
   /** `.transition(…)` - how this subtree enters and leaves. */
   | { readonly kind: 'transition'; readonly spec: TransitionHint }
+  /** `.contentTransition(…)` - how the words of the texts in this subtree change (Wave 5a). */
+  | { readonly kind: 'contentTransition'; readonly spec: ContentTransitionSpec }
+  /** `.matchedGeometryEffect(id:in:)` - which view this subtree is across a change (Wave 5a). */
+  | { readonly kind: 'matched'; readonly spec: MatchedGeometry }
   | {
       readonly kind: 'hitTarget'
       readonly step?: number
@@ -604,11 +606,8 @@ export interface AnimationHint {
   readonly bounce?: number
 }
 
-export interface TransitionHint {
-  readonly kind: 'opacity' | 'slide' | 'scale' | 'move'
-  readonly edge?: 'top' | 'bottom' | 'leading' | 'trailing'
-  readonly duration: number
-}
+/** How a view comes and goes, as the render tree carries it (`TransitionSpec`, Wave 5a). */
+export type TransitionHint = TransitionSpec
 
 /** Which of a view's edges may reach into the safe area. */
 export interface SafeAreaEdges {
@@ -658,9 +657,12 @@ export interface LayoutEnvironment {
    * frame does not contain, such as a background's fill.
    */
   readonly animation?: AnimationHint
-  readonly transitionTiming?: AnimationHint
   /** Inherited: `.transition` on a container applies to what appears inside it. */
   readonly transition?: TransitionHint
+  /** Inherited, as SwiftUI's environment value is (Wave 5a). */
+  readonly contentTransition?: ContentTransitionSpec
+  /** Everything a matched view draws is matched with it (Wave 5a). */
+  readonly matched?: MatchedGeometry
   /**
    * A weight or slant set independently of the face.
    *
@@ -764,11 +766,13 @@ export function childEnvironment(
     case 'opacity':
       return { ...env, opacity: env.opacity * modifier.value }
     case 'animate':
-      return { ...env, animation: modifier.hint, transitionTiming: modifier.hint }
-    case 'transitionTiming':
-      return { ...env, transitionTiming: modifier.hint }
+      return { ...env, animation: modifier.hint }
     case 'transition':
       return { ...env, transition: modifier.spec }
+    case 'contentTransition':
+      return { ...env, contentTransition: modifier.spec }
+    case 'matched':
+      return { ...env, matched: modifier.spec }
     case 'blendMode':
       return { ...env, blendMode: modifier.mode }
     case 'redacted':

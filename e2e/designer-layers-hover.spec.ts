@@ -129,8 +129,10 @@ test('primary Layers keeps shared designs compact and collection/navigation sett
   const navigate = inspector.getByTestId('navigate-to')
   await expect(navigate).toContainText('Navigate to · Push')
   await expect(navigate.getByRole('combobox', { name: 'How it opens', exact: true })).toBeEnabled()
+  // A conditional view not drawn now stays where the code has it, dimmed and hidden by its condition (Wave 5a).
   const extra = row(page, 'Text').filter({ hasText: 'Extra detail' })
-  await expect(extra).toHaveCount(0)
+  await expect(extra).toHaveAttribute('data-inactive', 'true')
+  await expect(extra).toHaveAttribute('aria-label', 'Extra detail, Text, hidden while Show extra is off')
   await expect(row(page, 'BookRow')).toHaveAttribute('data-shared-design', 'true')
   await assertSource(page, SOURCE.replace('title: "First book"', 'title: "Edited book"'))
 })
@@ -188,17 +190,24 @@ test('a repeated visual component highlights every rendered row and either row r
   await assertSource(page, SOURCE)
 })
 
-test('hover clears when filtering Layers and unrendered conditional views stay out of the tree', async ({ page }) => {
+test('hover clears when filtering Layers, and a conditional view not drawn now is found dimmed, hidden by its condition', async ({ page }) => {
   await open(page)
   await title(page).hover()
   await expect(highlights(page)).toHaveCount(1)
   // Layers are filtered from the navigator's "Find a screen or layer" field.
   const search = page.getByTestId('design-search')
   await search.fill('Extra detail')
+  // The view its condition hides now is still listed, dimmed, and says why (Wave 5a)...
   const extra = row(page, 'Text').filter({ hasText: 'Extra detail' })
-  await expect(extra).toHaveCount(0)
-  await expect(layers(page)).toContainText('No matching layers.')
+  await expect(extra).toHaveAttribute('data-inactive', 'true')
+  await expect(extra).toHaveAttribute('aria-label', 'Extra detail, Text, hidden while Show extra is off')
   await expect(highlights(page)).toHaveCount(0)
+  // ...and pointing at it outlines nothing, since none of it is drawn (Wave 5a).
+  await extra.hover()
+  await expect(highlights(page)).toHaveCount(0)
+  await search.fill('Missing layer')
+  await expect(layers(page)).toContainText('No matching layers.')
+  await expect(hovered(page)).toHaveCount(0)
   await search.press('Escape')
   await expect(search).toHaveValue('')
   await title(page).hover()

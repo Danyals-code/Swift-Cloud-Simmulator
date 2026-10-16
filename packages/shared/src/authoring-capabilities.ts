@@ -181,6 +181,11 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('rotationEffect', 'modifier', [[null], [null, 'anchor']]), capability('scaleEffect', 'modifier', [[null], [null, 'anchor'], ['x', 'y'], ['x', 'y', 'anchor']]),
   capability('disabled', 'modifier', [[null]]),
   capability('navigationBarTitleDisplayMode', 'modifier', [[null]], false, '14.0'),
+  // Motion (Wave 5a): a view's transition, the animation of a value, digits that roll, and a view that moves with another.
+  capability('transition', 'modifier', [[null]]),
+  capability('animation', 'modifier', [[null, 'value']]),
+  capability('contentTransition', 'modifier', [[null]], false, '16.0'),
+  capability('matchedGeometryEffect', 'modifier', [['id', 'in']], false, '14.0'),
 ]
 
 /** The capabilities of each name, in the table's order: every view and modifier read asks, so the table is not searched whole. */

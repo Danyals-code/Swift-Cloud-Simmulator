@@ -24,7 +24,7 @@
 /* On the row the pointer is on, or the one that is selected. A column of eyes down
    a hierarchy is a column of noise, and the type each row *is* matters more. */
 .move { margin-left: auto; margin-right: -4px; display: flex; gap: 2px; flex-shrink: 0; visibility: hidden; }
-.row:hover .move, .row:focus-within .move, .row[aria-selected='true'] .move, .hiddenRow .move { visibility: visible; }
+.row:hover .move, .row:focus-within .move, .row[aria-selected='true'] .move, .hiddenRow .move, .row[data-inactive] .move { visibility: visible; }
 .move button { display: grid; place-items: center; width: var(--control-height-sm); height: var(--control-height-sm); border-radius: var(--radius-md); color: var(--color-xc-text-2); cursor: pointer; transition: background-color var(--duration-fast), color var(--duration-fast); }
 .move button:hover:not(:disabled), .move button[aria-expanded='true'] { background: var(--color-xc-fill); color: var(--color-xc-text); }
 .move button:disabled { opacity: 0.4; cursor: default; }

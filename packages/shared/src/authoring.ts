@@ -1,6 +1,6 @@
 import type { AuthoringModifier, ModifierCatalogEntry } from './authoring-modifiers'
 import type { SharedStyle, StyleProperty } from './design-resources'
-import type { AppNavigationModel, CollectionSettings, ComponentSettings, BehaviorSettings, NavigationSettings, ScreenBars, StateInput } from './authoring-features'
+import type { AppNavigationModel, CollectionSettings, ComponentSettings, BehaviorSettings, NavigationSettings, ScreenBars, StateInput, ViewVisibility } from './authoring-features'
 import type { Diagnostic } from './diagnostics'
 import type { SourceFile } from './protocol'
 import type { SourceSpan } from './source'
@@ -87,6 +87,8 @@ export interface AuthoringNode {
    * keeps a Text a Text.
    */
   readonly textRun?: true
+  /** When the view is shown (Wave 5a): always, or while an `if` around it holds; Shown when reads and sets it. */
+  readonly visibility?: ViewVisibility
 }
 
 /** A helper's own node (Wave 3a), which its views hang from: a definition the authoring model marks as one. */

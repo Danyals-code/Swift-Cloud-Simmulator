@@ -4,7 +4,7 @@ import { FOLIO_FILES } from '@studio/project-model/templates'
 import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
 import { hiddenViewsIn } from '@studio/swift-syntax'
 import type { AuthoringSnapshot } from '@studio/shared'
-import { rebaseSourceLayers, sourceDefinitionAround, sourceLayerDrawn, sourceLayerHelperReach, sourceLayerNames, sourceLayerHiddenOwner, sourceLayerHiddenInScope, sourceLayerLabel, sourceLayerNotShown, sourceLayerRevealing, sourceLayerRows, sourceLayerType, sourceLayerIsVisual, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from './sourceLayers'
+import { rebaseSourceLayers, sourceDefinitionAround, sourceLayerDrawn, sourceLayerHelperReach, sourceLayerHiddenBy, sourceLayerHiddenView, sourceLayerHiddenWords, sourceLayerNames, sourceLayerHiddenOwner, sourceLayerHiddenInScope, sourceLayerLabel, sourceLayerNotShown, sourceLayerRevealing, sourceLayerRows, sourceLayerType, sourceLayerIsVisual, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from './sourceLayers'
 
 const collection = 'ForEach(0..<3, id: \\.self) { i in Text("Row").padding(8) }'
 const source = `import SwiftUI
@@ -403,15 +403,39 @@ ${extra}`
     expect(rows.filter(row => sourceLayerNotShown(snapshot, row.node))).toEqual([])
   })
 
-  it('omits unrendered alternatives and separate pages from the parent phone', () => {
+  it('lists a view hidden in this state where the code has it, marked by the branch that hides it, and omits separate pages (Wave 5a)', () => {
     const { snapshot, layers, state } = run('VStack { Text("Main"); if false { Text("Unavailable") } else { Text("Ready") }; NavigationLink("Details", destination: Text("Detail page")) }.sheet(isPresented: .constant(false)) { Text("Add page") }')
     const rows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: layers }).rows
-    expect(rows.map(row => sourceLayerLabel(row.node))).toEqual(['Column', 'Main', 'Ready', 'Details'])
-    expect(rows.every(row => !sourceLayerNotShown(snapshot, row.node))).toBe(true)
+    expect(rows.map(row => sourceLayerLabel(row.node))).toEqual(['Column', 'Main', 'Unavailable', 'Ready', 'Details'])
+    const condition = snapshot.nodes.find(node => node.name === 'Condition')!
+    expect(rows.filter(row => row.hiddenBy).map(row => [sourceLayerLabel(row.node), row.hiddenBy])).toEqual([['Unavailable', condition.id]])
     const destination = snapshot.nodes.find(node => node.kind === 'branch' && node.name === 'Destination')!
     const separate = sourceLayerRows(snapshot, state, destination.id, '')
     expect(separate.entry?.id).toBe(destination.id)
     expect(separate.rows.map(row => sourceLayerLabel(row.node))).toEqual(['Detail page'])
+  })
+
+  it('marks the views inside a hidden view, and an else or a case that is not drawn, as hidden too (Wave 5a)', () => {
+    const { snapshot, layers, state } = run('VStack { if false { HStack { Text("A"); Text("B") } }; if true { Text("Yes") } else { Text("No") }; switch 2 { case 1: Text("One"); default: Text("Other") } }')
+    const rows = sourceLayerRows(snapshot, { ...state, opened: new Set(snapshot.nodes.map(node => node.id)) }, undefined, '', { runtimeLayers: layers }).rows
+    expect(rows.map(row => `${sourceLayerLabel(row.node)}${row.hiddenBy ? ' (hidden)' : ''}`)).toEqual(['Column', 'Row (hidden)', 'A (hidden)', 'B (hidden)', 'Yes', 'No (hidden)', 'One (hidden)', 'Other'])
+    const otherwise = snapshot.nodes.find(node => node.name === 'Otherwise' && node.parentId === snapshot.nodes.find(n => sourceLayerLabel(n) === 'Yes')!.parentId)!
+    expect(rows.find(row => sourceLayerLabel(row.node) === 'No')!.hiddenBy).toBe(otherwise.id)
+    // A view inside a hidden one shows with it: the view the branch holds says when.
+    const nodes = new Map(snapshot.nodes.map(node => [node.id, node])), a = rows.find(row => sourceLayerLabel(row.node) === 'A')!
+    expect(sourceLayerHiddenView(nodes, a.node, a.hiddenBy!).name).toBe('HStack')
+  })
+
+  it('says a view is hidden by the same branch Layers marks, so the Inspector and Layers never disagree (Wave 5a)', () => {
+    const { snapshot, layers, state } = run('VStack { if false { HStack { Text("A"); Text("B") } }; if true { Text("Yes") } else { Text("No") }; switch 2 { case 1: Text("One"); default: Text("Other") } }')
+    const rows = sourceLayerRows(snapshot, { ...state, opened: new Set(snapshot.nodes.map(node => node.id)) }, undefined, '', { runtimeLayers: layers }).rows
+    expect(rows.filter(row => row.hiddenBy)).toHaveLength(5)
+    for (const row of rows) expect(sourceLayerHiddenBy(snapshot, row.node, layers), sourceLayerLabel(row.node)).toBe(row.hiddenBy)
+    // A helper's views are listed under its one call, and hidden with it.
+    const helper = run('VStack { Text("Top"); if false { extra } }', 'extension ContentView { @ViewBuilder var extra: some View { HStack { Text("Helper") } } }')
+    const helperRows = sourceLayerRows(helper.snapshot, { ...helper.state, opened: new Set(helper.snapshot.nodes.map(node => node.id)) }, undefined, '', { runtimeLayers: helper.layers }).rows
+    expect(helperRows.map(row => `${sourceLayerLabel(row.node)}${row.hiddenBy ? ' (hidden)' : ''}`)).toEqual(['Column', 'Top', 'extra (hidden)', 'Row (hidden)', 'Helper (hidden)'])
+    for (const row of helperRows) expect(sourceLayerHiddenBy(helper.snapshot, row.node, helper.layers), sourceLayerLabel(row.node)).toBe(row.hiddenBy)
   })
 
   it('scopes the main hierarchy to one phone rather than showing all tabs', () => {
@@ -442,7 +466,8 @@ it('keeps Folio main and secondary phone layers separate using each page hierarc
   const main = result.pages!.find(page => page.kind === 'root' && page.name === 'Library')!
   expect(main).toBeDefined()
   const mainRows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: main.viewHierarchy }).rows
-  expect(mainRows.map(row => row.node.name)).toEqual(['List', 'BookRow', 'Button'])
+  // The shelf's empty message is hidden while it has books, and listed dimmed (Wave 5a).
+  expect(mainRows.map(row => `${row.node.name}${row.hiddenBy ? ' (hidden)' : ''}`)).toEqual(['List', 'BookRow', 'VStack (hidden)', 'Button'])
   expect(mainRows.find(row => row.node.name === 'BookRow')?.shared).toBe(true)
   for (const page of result.pages!.filter(page => page.parentId)) {
     const rows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: page.viewHierarchy }).rows
@@ -473,7 +498,7 @@ describe('live Folio phone layers', () => {
   }
   it('opens directly on the Library elements before entering Arrange', () => {
     const layers = rows(open())
-    expect(layers.map(row => row.node.name)).toEqual(['List', 'BookRow', 'Button'])
+    expect(layers.map(row => `${row.node.name}${row.hiddenBy ? ' (hidden)' : ''}`)).toEqual(['List', 'BookRow', 'VStack (hidden)', 'Button'])
     expect(layers.find(row => row.node.name === 'BookRow')?.shared).toBe(true)
     expect(layers.every(row => row.node.owner === 'LibraryView')).toBe(true)
   })
@@ -770,5 +795,29 @@ struct ContentView: View { var body: some View { List { Text("Inbox").swipeActio
 
   it('is not the row they belong to, nor a view anywhere else, such as a Toolbar’s', () => {
     expect(['List', 'Inbox', 'Drafts', 'Toolbar', 'Save'].filter(label => sourceLayerRevealing(snapshot, layer(label)))).toEqual([])
+  })
+})
+
+describe('why a view is not drawn in this state (Wave 5a)', () => {
+  const text = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    @State private var showExtra = false
+    var body: some View { VStack { Text("Top"); if showExtra { HStack { Text("Extra detail") } }; if 2 > 3 { Text("Never") } } }
+}`
+
+  it('says it in the words its condition gives, for the view the branch holds and the views inside it, and in this state when it has none', () => {
+    resetPipelineState()
+    const result = compile({ projectId: 'p', revision: 1, files: files(text), canvas: { width: 402, height: 874 }, colorScheme: 'light' })
+    const snapshot = result.authoring!, nodes = new Map(snapshot.nodes.map(node => [node.id, node]))
+    const words = (label: string) => {
+      const node = snapshot.nodes.find(item => item.kind !== 'definition' && sourceLayerLabel(item) === label)!
+      const by = sourceLayerHiddenBy(snapshot, node, result.viewHierarchy!)
+      return by ? sourceLayerHiddenWords(sourceLayerHiddenView(nodes, node, by)) : undefined
+    }
+    expect(words('Row')).toBe('Hidden while Show extra is off')
+    expect(words('Extra detail')).toBe('Hidden while Show extra is off')
+    expect(words('Never')).toBe('Hidden in this state')
+    expect(words('Top')).toBeUndefined()
   })
 })

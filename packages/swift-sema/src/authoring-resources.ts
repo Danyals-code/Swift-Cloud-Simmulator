@@ -1,8 +1,8 @@
-import { DEFAULT_DEPLOYMENT_TARGET, deploymentVersion, isAccentColorSetName } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, deploymentVersion, isAccentColorSetName, swiftIdentifier } from '@studio/shared'
 import type { AuthoringNode, FontTokenValue, PreviewColorAsset, ResourceOperation, ShadowTokenValue, SharedStyle, StyleKind, StyleProperty, SourceSpan, SourceFile, TokenDefinition } from '@studio/shared'
 import { Parser, forEachChild, type Decl, type Expr, type ExtensionDecl, type Node, type VarDecl } from '@studio/swift-syntax'
 import { AUTHORING_COLORS, SYSTEM_COLORS, AUTHORING_FONTS, swiftString } from './design-controls'
-import { allDeclarations, applyPatches, callOf, declarationsNamed, hasComments, identifier, patch, raw, shadowsMember, type FeatureContext, type SourcePatch } from './authoring-context'
+import { allDeclarations, applyPatches, callOf, declarationsNamed, hasComments, patch, raw, shadowsMember, type FeatureContext, type SourcePatch } from './authoring-context'
 import { constantNamed, constantNumber, literalNumber, type Constant } from './layer/tokens'
 
 /**
@@ -315,7 +315,7 @@ export function suggestTokenName(kind: StyleKind, name: string): string {
 /** Rejects names Swift or the preview would misread, with a name that would work. */
 export function tokenNameProblem(ctx: FeatureContext, kind: StyleKind, name: string, existing?: string): string | null {
   const suggestion = suggestTokenName(kind, name)
-  if (!identifier(name) || !/^[a-z]/.test(name)) return `Use letters and numbers, starting with a lowercase letter. Try ${/^[a-z]/.test(suggestion) ? suggestion : suggestion.charAt(0).toLowerCase() + suggestion.slice(1)}.`
+  if (!swiftIdentifier(name) || !/^[a-z]/.test(name)) return `Use letters and numbers, starting with a lowercase letter. Try ${/^[a-z]/.test(suggestion) ? suggestion : suggestion.charAt(0).toLowerCase() + suggestion.slice(1)}.`
   if (kind === 'spacing' && !name.startsWith('space')) return `Spacing tokens start with “space”, so they never mix with corner radii. Try ${suggestion}.`
   if (kind === 'radius' && !name.startsWith('radius')) return `Corner radius tokens start with “radius”. Try ${suggestion}.`
   if (FRAMEWORK_MEMBERS[kind].includes(name) || CONTEXTUAL.has(name)) return `“${name}” is already part of SwiftUI. Try ${suggestion}.`

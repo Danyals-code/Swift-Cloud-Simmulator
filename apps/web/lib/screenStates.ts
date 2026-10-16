@@ -1,4 +1,4 @@
-import type { PreviewInput, PreviewScenario, StateInput, SuggestedState } from '@studio/shared'
+import type { PreviewInput, PreviewScenario, StateInput, SuggestedState, ViewVisibility } from '@studio/shared'
 
 /**
  * What a state sets, in a few words: `model.isLoading: true`, `model.articles: No items`,
@@ -32,4 +32,31 @@ export function stateSuggestions(inputs: readonly StateInput[], saved: readonly 
     }
   }
   return { offered, refused }
+}
+
+/** What Show it does (Wave 5a): select a saved state, or Default as null; save one; or say why it can't. */
+export type ShowIt = { readonly select: PreviewScenario | null } | { readonly save: { readonly name: string; readonly inputs: readonly PreviewInput[] } } | { readonly problem: string }
+
+/** Whether `values` set `input` as it is: the same value of the same screen. */
+const sets = (values: readonly { owner: string; name: string; value: unknown }[] | undefined, input: PreviewInput) => !!values?.some(item => item.owner === input.owner && item.name === input.name && JSON.stringify(item.value) === JSON.stringify(input.value))
+
+/**
+ * The state that draws a view hidden in this one (Wave 5a), from the values that show it
+ * (`visibility.shows`), in the screen's `saved` states and `inputs`: a saved state that sets
+ * them all, Default when the screen starts with them and a state hides it, or else a state to
+ * save, named as the suggestion with the same values is, never over a saved one's name.
+ */
+export function stateShowing(visibility: Pick<ViewVisibility, 'shows' | 'label'>, saved: readonly PreviewScenario[], active: PreviewScenario | undefined, inputs: readonly StateInput[]): ShowIt {
+  const shows = visibility.shows
+  if (!shows?.length) return { problem: 'The preview can’t set what shows this view. Open it in Code to see its condition.' }
+  const current = active && saved.includes(active) ? active : undefined
+  const found = saved.find(state => state !== current && shows.every(input => sets(state.inputs, input)))
+  if (found) return { select: found }
+  if (current && shows.every(input => sets(inputs, input))) return { select: null }
+  const suggested = inputs.flatMap(input => input.states ?? []).find(state => state.inputs.length === shows.length && shows.every(input => sets(state.inputs, input)))
+  const base = suggested?.name ?? (visibility.label ? visibility.label.charAt(0).toUpperCase() + visibility.label.slice(1) : 'Shown')
+  const taken = new Set(saved.map(state => state.name.trim().toLowerCase()))
+  let name = base
+  for (let count = 2; taken.has(name.toLowerCase()); count++) name = `${base} ${count}`
+  return { save: { name, inputs: shows } }
 }

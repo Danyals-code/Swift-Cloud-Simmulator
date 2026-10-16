@@ -89,7 +89,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       return finish(request.files.map(f => f.id === file.id ? { ...f, text } : f), { file: file.id, offset: node.source.start })
     } catch (error) { return reject(error instanceof Error ? error.message : 'This modifier change could not be planned.') }
   }
-  if (node && (!['property', 'layer-set', 'delete', 'move', 'moveTo', 'insert', 'paste', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && operation.control.startsWith('component:'))) {
+  if (node && (!['property', 'layer-set', 'delete', 'move', 'moveTo', 'insert', 'paste', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && (operation.control.startsWith('component:') || operation.control.startsWith('motion:')))) {
     try {
       const result = featureEdit(context, node, operation as Parameters<typeof featureEdit>[2])
       const after = result.files.find(f => f.id === file.id)?.text

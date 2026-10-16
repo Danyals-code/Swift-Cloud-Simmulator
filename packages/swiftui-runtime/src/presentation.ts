@@ -231,6 +231,10 @@ export interface ResolvedUI {
   readonly handlers: ReadonlyMap<string, ViewIntent>
   /** Set when the last state change happened inside `withAnimation`. */
   readonly animation: AnimationPayload | null
+  /** The key of each view whose key isn't its path, by its path (Wave 5a): see `RenderNode.key`. */
+  readonly keys?: ReadonlyMap<string, string>
+  /** Each `.animation` that animates this frame, by the key of the view it is written on (Wave 5a). */
+  readonly armed?: readonly { readonly key: string; readonly animation: AnimationPayload }[]
   readonly lifecycle: readonly LifecycleHook[]
   /** What was written around the screen's containers and isn't drawn (see `notDrawn`). */
   readonly notDrawn?: readonly NotDrawn[]
@@ -643,6 +647,12 @@ class Resolver {
   private rootTabs: SourceSpan | undefined
   /** Whether a pager is drawn on another page than its own for the selection (Wave 4c). */
   private revealedPage = false
+  /** The key of each view whose key isn't its path, by its path (Wave 5a): see `RenderNode.key`. */
+  private readonly keys = new Map<string, string>()
+  /** The nearest view being stamped whose key isn't its path, which the views below it follow. */
+  private keyAt: { readonly from: string; readonly to: string } | null = null
+  /** Each `.animation` that animates this frame, by the key of the view it is written on (Wave 5a). */
+  private readonly armed: { readonly key: string; readonly animation: AnimationPayload }[] = []
 
   constructor(
     private readonly ctx: ResolveContext,
@@ -740,6 +750,8 @@ class Resolver {
       overlay,
       handlers: this.handlers,
       animation: this.ctx.animation,
+      ...(this.keys.size ? { keys: this.keys } : {}),
+      ...(this.armed.length ? { armed: this.armed } : {}),
       lifecycle: this.lifecycle,
       ...(this.notDrawn.length ? { notDrawn: this.notDrawn } : {}),
       ...(this.warnings.length ? { warnings: this.warnings } : {}),
@@ -932,8 +944,22 @@ class Resolver {
    */
   private stampList(views: readonly ViewValue[], prefix: string, inherited = this.visualStyle): ViewValue[] {
     const transitionOccurrences = new Map<string, number>()
+    // Keys (Wave 5a): a view a branch made is counted among that branch's views, and any
+    // other among the views no branch made, so a view keeps its key when an `if` before
+    // it opens. A view whose key isn't its path is noted, and what is below it follows.
+    const at = this.keyAt
+    const parent = this.keyOf(prefix)
+    let plain = 0
+    let branches: Map<string, number> | undefined
     return views.map((view, index) => {
       let segment = String(index)
+      let key: string
+      if (view.branch) {
+        branches ??= new Map()
+        const count = branches.get(view.branch) ?? 0
+        branches.set(view.branch, count + 1)
+        key = `#${view.branch}#${count}`
+      } else key = String(plain++)
       if (view.modifiers.some(modifier => modifier.name === 'transition')) {
         // An evaluated conditional removes a slot from this list. Its following
         // sibling must not inherit the disappearing view's identity, or presence
@@ -946,9 +972,28 @@ class Resolver {
       // `.id(x)`: a new x is a new view, so its hooks run as it appears and the old one's
       // as it goes, and the framework state kept by path starts over.
       const identity = view.modifiers.find((modifier) => modifier.name === 'id')?.args[0]?.value
-      if (identity !== undefined) segment = `${segment}@${encodeURIComponent(identityKey(identity, true))}`
-      return this.stamp(inheritVisualStyle(view, inherited), `${prefix}-${segment}`)
+      if (identity !== undefined) {
+        const given = `@${encodeURIComponent(identityKey(identity, true))}`
+        segment += given
+        key += given
+      }
+      const path = `${prefix}-${segment}`
+      if (key === segment) return this.stamp(inheritVisualStyle(view, inherited), path)
+      const to = `${parent}-${key}`
+      this.keys.set(path, to)
+      this.keyAt = { from: path, to }
+      try {
+        return this.stamp(inheritVisualStyle(view, inherited), path)
+      } finally {
+        this.keyAt = at
+      }
     })
+  }
+
+  /** The key of the view at `path`, as `stampList` gives it (Wave 5a). */
+  private keyOf(path: string): string {
+    const at = this.keyAt
+    return at && path.startsWith(at.from) ? at.to + path.slice(at.from.length) : path
   }
 
   private stamp(view: ViewValue, path: string, row?: RowActions): ViewValue {
@@ -1312,14 +1357,16 @@ class Resolver {
    * that outlives one render, and the resolver is the one stage that has it.
    */
   private gateAnimation(view: ViewValue, path: string): ViewValue {
-    const index = view.modifiers.findIndex(
-      (m) => m.name === 'animation' && m.args.some((a) => a.label === 'value'),
-    )
+    const index = view.modifiers.findIndex((m) => m.name === 'animation')
     if (index < 0) return view
 
     const modifier = view.modifiers[index]!
-    const gate = modifier.args.find((a) => a.label === 'value')!.value
-    const open = this.ctx.state.animationGateOpen(`${path}m${index}`, identityKey(gate, true))
+    const gate = modifier.args.find((a) => a.label === 'value')?.value
+    const open = gate === undefined || this.ctx.state.animationGateOpen(`${path}m${index}`, identityKey(gate, true))
+    // What it animates this frame is said by the view's key, for the views leaving it (Wave 5a).
+    const animation = open ? animationOf(modifier.args[0]?.value) : null
+    if (animation) this.armed.push({ key: this.keyOf(path), animation })
+    if (gate === undefined) return view
 
     const modifiers = [...view.modifiers]
     modifiers[index] = {
@@ -1921,6 +1968,8 @@ class Resolver {
         const bucket = placement === 'principal' ? principal ??= [] : placement === 'bottomBar' ? bottom ??= []
           : placement && LEADING_PLACEMENTS.has(placement) ? leading ??= [] : trailing ??= []
         contents.forEach((content, inner) => {
+          // A helper whose `if` drew nothing is an empty group, and no item (Wave 5a).
+          if (content.name === 'Group' && !content.children.length) return
           bucket.push(this.stamp(inheritVisualStyle(content, style), `${stackId}/tb-${at}-${inner}`))
         })
       }

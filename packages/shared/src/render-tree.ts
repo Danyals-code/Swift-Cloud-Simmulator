@@ -345,14 +345,75 @@ export interface AnimationSpec {
 }
 
 /**
- * How a node enters and leaves. The renderer retains a bounded, inert snapshot
- * for an exit and cancels it on reentry, reduced motion or a preview boundary.
+ * One transition, as iOS 27 plays it (measured in docs/parity/native/iphone18pro-motion):
+ * `move` by the view's own size towards `edge`; `push` the same, from `edge` and out the
+ * other way, fading; `slide` in from the leading edge and out to the trailing one; `scale`
+ * from `scale` (0 when not given) about its centre; `blur` from a 0.9 scale, blurred and
+ * faded. None of them fades unless it says so.
  */
-export interface TransitionSpec {
-  readonly kind: 'opacity' | 'slide' | 'scale' | 'move'
+export interface TransitionPart {
+  /** `identity` plays nothing: one side of an asymmetric transition, or a part combined with others. */
+  readonly kind: 'opacity' | 'slide' | 'scale' | 'move' | 'push' | 'blur' | 'identity'
   readonly edge?: 'top' | 'bottom' | 'leading' | 'trailing'
-  /** seconds */
-  readonly duration: number
+  /** `.scale(0.5)`: the size it comes from and goes to. */
+  readonly scale?: number
+  /** `.combined(with:)`: what plays at the same time, as "Fades too" adds `.opacity`. */
+  readonly also?: readonly TransitionPart[]
+}
+
+/**
+ * How a node enters and leaves. It plays only when the change that adds or removes the
+ * node is animated, with that animation's timing, as on iOS (Wave 5a). The renderer
+ * retains a bounded, inert snapshot for an exit and cancels it on reentry, reduced
+ * motion or a preview boundary.
+ */
+export interface TransitionSpec extends TransitionPart {
+  /** `.asymmetric(insertion:removal:)`: how it leaves, when that isn't how it comes. */
+  readonly removal?: TransitionPart
+}
+
+/**
+ * What animates the change to a tree (Wave 5a): `withAnimation`'s animation, which every
+ * view takes, and each `.animation(_:value:)` whose value changed, by the key of the view
+ * it is written on, which the views under it take. A view that leaves plays its exit
+ * only when one of these covers it; one that comes in carries its own `animation`.
+ */
+export interface TreeAnimation {
+  readonly all?: AnimationSpec
+  readonly under?: readonly { readonly key: string; readonly animation: AnimationSpec }[]
+}
+
+/**
+ * `.contentTransition`: how a Text's words change in an animated frame (Wave 5a). A number
+ * rolls each digit that changed, up as it grows, as `numericText(value:)` says by its
+ * value, or down for `countsDown`; `opacity` cross-fades the old words with the new.
+ */
+export type ContentTransitionSpec =
+  | { readonly kind: 'numeric'; readonly countsDown?: boolean; readonly value?: number }
+  | { readonly kind: 'opacity' }
+  | { readonly kind: 'identity' }
+
+/**
+ * `.matchedGeometryEffect(id:in:)` (Wave 5a): views with one `id`, which is the namespace's
+ * and the id's together, are one view across a change. One coming in moves from where the
+ * one that went was, as the frame (or only its `position` or `size`) did on iOS.
+ */
+export interface MatchedGeometry {
+  readonly id: string
+  readonly properties?: 'position' | 'size'
+  /** `isSource: false`: it takes the others' frame without lending its own. */
+  readonly isSource?: false
+}
+
+/**
+ * Whether the node or view `id` is the one at `path` or under it, as ids and keys nest
+ * (Wave 5a): it starts with `path` and doesn't go on with a digit, so `v-0-1-2` is under
+ * `v-0-1` and `v-0-10` isn't.
+ */
+export function isWithin(id: string, path: string): boolean {
+  if (!id.startsWith(path)) return false
+  const next = id.charCodeAt(path.length)
+  return !(next >= 48 && next <= 57)
 }
 
 /** A paint-time transform. Does not affect layout, exactly as in SwiftUI. */
@@ -446,6 +507,15 @@ export interface RenderNode {
    * reuse, `@State` box lookup, and FLIP animation. See docs/02-ARCHITECTURE.md §6.2.
    */
   readonly id: string
+  /**
+   * What the DOM keys this node by, when that isn't `id` (Wave 5a).
+   *
+   * `id` is a view's place in its list, which is what selection and Design address it by,
+   * so a view after an `if` gets a new id when the `if` opens. Its key follows the branch
+   * structure instead and stays the same, so the browser moves that view rather than
+   * morphing whatever now has its id. Absent where it would equal `id`.
+   */
+  readonly key?: string
   readonly kind: RenderNodeKind
   /** absolute, in device points, origin top-leading */
   readonly frame: Rect
@@ -484,6 +554,10 @@ export interface RenderNode {
   readonly transform?: TransformSpec
   readonly animation?: AnimationSpec
   readonly transition?: TransitionSpec
+  /** How its words change, on a text (Wave 5a). */
+  readonly contentTransition?: ContentTransitionSpec
+  /** What it is matched with across a change (Wave 5a). */
+  readonly matched?: MatchedGeometry
   readonly filter?: FilterSpec
   /** `.regularMaterial` and friends: a translucent, blurred backdrop. */
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
@@ -531,6 +605,8 @@ export interface RenderTree {
    * `span` is where the error it names is written, when an error in the code stops it.
    */
   readonly notice?: { readonly title: string; readonly detail: string; readonly span?: SourceSpan }
+  /** What animates the change to this tree, if anything does (Wave 5a). */
+  readonly animated?: TreeAnimation
 }
 
 export const EMPTY_RENDER_TREE: RenderTree = {
@@ -581,10 +657,10 @@ export function rectContains(r: Rect, p: Point): boolean {
 /**
  * The CSS timing function for an animation curve.
  *
- * Springs are the interesting case: CSS has no spring, so the bounce is approximated
- * with an overshooting cubic-bezier. Recognisably springy rather than physically
- * identical - and the README says so, because a motion curve that looks right but is
- * not is exactly the kind of quiet inaccuracy this project refuses to ship silently.
+ * A spring is drawn where it is: CSS has no spring, but `linear()` takes the curve as
+ * points, so a spring of SwiftUI's duration and bounce (damping 1 - bounce) is sampled
+ * across `cssSeconds`, the time it takes to come to rest. That matches the frames the
+ * simulator draws for `.smooth` and `.bouncy` (docs/parity/native/iphone18pro-motion).
  */
 export function cssEasing(spec: AnimationSpec): string {
   switch (spec.curve) {
@@ -597,18 +673,66 @@ export function cssEasing(spec: AnimationSpec): string {
     case 'easeInOut':
       return 'cubic-bezier(0.42, 0, 0.58, 1)'
     case 'spring': {
-      const bounce = spec.bounce ?? 0.25
-      return `cubic-bezier(0.34, ${(1.2 + bounce * 1.6).toFixed(2)}, 0.42, 1)`
+      const seconds = cssSeconds(spec), stops: string[] = []
+      for (let i = 0; i <= 40; i++) stops.push(String(Math.round(springAt(spec, seconds * i / 40) * 1000) / 1000))
+      return `linear(${stops.join(', ')})`
     }
   }
 }
 
-export function cssTransition(spec: AnimationSpec, properties: string): string {
-  const delay = spec.delay ? ` ${spec.delay * 1000}ms` : ''
-  return properties
-    .split(',')
-    .map((p) => `${p.trim()} ${Math.round(spec.duration * 1000)}ms ${cssEasing(spec)}${delay}`)
-    .join(', ')
+/** How far a spring has gone, 0 to 1, `t` seconds in, as SwiftUI's `spring(duration:bounce:)` moves (Wave 5a). */
+function springAt(spec: AnimationSpec, t: number): number {
+  const w = 2 * Math.PI / spec.duration, damping = 1 - Math.min(Math.max(spec.bounce ?? 0, 0), 0.95)
+  if (damping >= 1) return 1 - Math.exp(-w * t) * (1 + w * t)
+  const ringing = w * Math.sqrt(1 - damping * damping)
+  return 1 - Math.exp(-damping * w * t) * (Math.cos(ringing * t) + damping * w / ringing * Math.sin(ringing * t))
+}
+
+/**
+ * How long an animation runs in the browser, in seconds (Wave 5a): its duration, or for a
+ * spring the time until it is within 0.2% of where it goes, past the duration SwiftUI
+ * names it by.
+ */
+export function cssSeconds(spec: AnimationSpec): number {
+  if (spec.curve !== 'spring') return spec.duration
+  const w = 2 * Math.PI / spec.duration, damping = 1 - Math.min(Math.max(spec.bounce ?? 0, 0), 0.95)
+  const step = spec.duration / 40
+  let t = step
+  // What it can still be off by: the envelope of its swing.
+  while (t < spec.duration * 10 && (damping >= 1 ? Math.exp(-w * t) * (1 + w * t) : Math.exp(-damping * w * t) / Math.sqrt(1 - damping * damping)) > 0.002) t += step
+  return Math.round(t * 1000) / 1000
+}
+
+/** An animation as the browser times it (Wave 5a): `cssSeconds` and its delay in whole milliseconds, and `cssEasing`. */
+export interface CssTiming {
+  readonly duration: number
+  readonly delay: number
+  readonly easing: string
+}
+
+/**
+ * The browser's timing of an animation (Wave 5a), worked out once for each: a spring's
+ * easing is a `linear()` of 41 stops and its time to rest a search. Kept by what the
+ * animation is, up to `CSS_TIMINGS_KEPT` of them, which is more than a screen writes; an
+ * app making new ones as it runs, as a duration it computes, starts the cache over rather
+ * than growing it.
+ */
+export function cssTiming(spec: AnimationSpec): CssTiming {
+  const key = `${spec.curve} ${spec.duration} ${spec.bounce ?? 0} ${spec.delay ?? 0}`
+  let timing = CSS_TIMINGS.get(key)
+  if (!timing) {
+    if (CSS_TIMINGS.size >= CSS_TIMINGS_KEPT) CSS_TIMINGS.clear()
+    CSS_TIMINGS.set(key, timing = { duration: Math.round(cssSeconds(spec) * 1000), delay: Math.round((spec.delay ?? 0) * 1000), easing: cssEasing(spec) })
+  }
+  return timing
+}
+
+const CSS_TIMINGS = new Map<string, CssTiming>()
+const CSS_TIMINGS_KEPT = 64
+
+/** CSS `animation` playing the keyframes `name` with `timing`, `later` seconds after its own delay, held at both ends (Wave 5a). */
+export function cssAnimation(name: string, timing: CssTiming, later = 0): string {
+  return `${name} ${timing.duration}ms ${timing.easing} ${timing.delay + Math.round(later * 1000)}ms both`
 }
 
 /** SwiftUI's axis-angle projection. Verified against _Rotation3DEffect.effectValue(size:).

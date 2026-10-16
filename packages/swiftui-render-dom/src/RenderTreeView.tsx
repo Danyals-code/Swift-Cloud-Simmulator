@@ -5,11 +5,16 @@ import { SliderView, ControlStyles } from './SliderView'
 import { placeholderWords, symbolMetrics, shapePath } from '@studio/shared'
 import { memo, useMemo, type CSSProperties, type ReactNode } from 'react'
 import {
+  cssAnimation,
+  cssTiming,
   cssTransform,
   cssColor,
   cssFill,
   cssFilter,
-  cssTransition,
+  type AnimationSpec,
+  type CssTiming,
+  type Rect,
+  type TreeAnimation,
   type RenderNode,
   type RenderTree,
   type RGBA,
@@ -18,7 +23,8 @@ import {
 } from '@studio/shared'
 import { symbolAsset, symbolStrokeScale } from './symbols'
 import { beginContextPress } from './context-press'
-import { finishExit, reconcilePresence, type PresentNode, type RenderGroups } from './transition-presence'
+import { finishExit, keyOf, reconcilePresence, type Passage, type PresentNode, type RenderGroups } from './transition-presence'
+import { matchedMorphs, rollsUp, textChange, type Morphs } from './motion'
 import { editDraft, shownValue, NO_DRAFT, type ControlDraft, type ControlEdit } from './control-draft'
 
 const EMPTY_NODES: readonly RenderNode[] = []
@@ -137,6 +143,11 @@ export const RenderTreeView = memo(function RenderTreeView({
 }: RenderTreeViewProps) {
   const reduceMotion = useSyncExternalStore(subscribeMotion, reducedMotion, serverMotion)
   const surfaceRef = useRef<HTMLDivElement>(null)
+  // A matched view that comes in moves from where the one it is matched with was (Wave 5a),
+  // so the tree drawn before is kept to compare the next one with.
+  const [motion, setMotion] = useState<{ tree: RenderTree; morphs?: Morphs }>(() => ({ tree }))
+  if (motion.tree !== tree) setMotion({ tree, ...(tree.animated ? { morphs: matchedMorphs(motion.tree.nodes, tree.nodes) } : {}) })
+  const morphs = motion.tree === tree ? motion.morphs : undefined
   const [handoffs] = useState(() => new Map<string, Handoff>())
   useLayoutEffect(() => {
     const surface = surfaceRef.current
@@ -245,7 +256,11 @@ export const RenderTreeView = memo(function RenderTreeView({
       <ControlStyles />
 
       <ControlHandoffs.Provider value={handoffs}>
-        <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={nodeInspect} />
+        <ChangeAnimation.Provider value={tree.animated}>
+          <Morphing.Provider value={morphs}>
+            <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={nodeInspect} />
+          </Morphing.Provider>
+        </ChangeAnimation.Provider>
       </ControlHandoffs.Provider>
 
       {selectedOutlines.map((group, index) => <Outline key={`selected:${index}:${group[0]!.id}`} nodes={group} tree={tree} byId={nodesById} kind="selected" />)}
@@ -267,44 +282,72 @@ function captureChrome(event: ReactUIEvent<HTMLDivElement>, chrome: RenderTree['
   if (chrome && target.dataset.nodeId === chrome.scrollId) updateChrome(event.currentTarget, target.scrollTop, chrome.collapseDistance)
 }
 
+/**
+ * What each part of a transition starts from coming in, and ends at going out (Wave 5a),
+ * as iOS 27 draws it (docs/parity/native/iphone18pro-motion): a move is by the view's own
+ * size, a scale from 0 unless `.scale(scale:)` says, a blur from 6.5 pt at 0.9 of its
+ * size. A digit that rolls comes from, or goes to, a third of its font size above or
+ * below, blurred. Parts set different properties, so a combined transition plays them
+ * together.
+ */
+const KEYFRAMES: Readonly<Record<string, string>> = {
+  opacity: 'opacity: 0',
+  scale: 'scale: var(--studio-scale, 0)',
+  blur: 'filter: blur(6.5px); scale: 0.9',
+  'move-top': 'translate: 0 -100%',
+  'move-bottom': 'translate: 0 100%',
+  'move-leading': 'translate: -100% 0',
+  'move-trailing': 'translate: 100% 0',
+  'roll-below': 'translate: 0 0.35em; filter: blur(0.08em); opacity: 0',
+  'roll-above': 'translate: 0 -0.35em; filter: blur(0.08em); opacity: 0',
+}
+
 /** Entry and exit use separate names so reversing a finished entry restarts it. */
+const KEYFRAME_CSS = Object.entries(KEYFRAMES).map(([name, from]) => `@keyframes studio-${name} { from { ${from} } } @keyframes studio-${name}-exit { to { ${from} } }`).join('\n')
+
 function TransitionKeyframes() {
   return (
     <style>{`
       @media (prefers-reduced-motion: reduce) {
         [data-studio-preview], [data-studio-preview] * { animation: none !important; transition: none !important; }
       }
-      @keyframes studio-opacity { from { opacity: 0 } }
-      @keyframes studio-scale { from { opacity: 0; transform: scale(0.85) } }
-      @keyframes studio-move-top { from { opacity: 0; transform: translateY(-24px) } }
-      @keyframes studio-move-bottom { from { opacity: 0; transform: translateY(24px) } }
-      @keyframes studio-move-leading { from { opacity: 0; transform: translateX(-24px) } }
-      @keyframes studio-move-trailing { from { opacity: 0; transform: translateX(24px) } }
-      @keyframes studio-opacity-exit { to { opacity: 0 } }
-      @keyframes studio-scale-exit { to { opacity: 0; transform: scale(0.85) } }
-      @keyframes studio-move-top-exit { to { opacity: 0; transform: translateY(-24px) } }
-      @keyframes studio-move-bottom-exit { to { opacity: 0; transform: translateY(24px) } }
-      @keyframes studio-move-leading-exit { to { opacity: 0; transform: translateX(-24px) } }
-      @keyframes studio-move-trailing-exit { to { opacity: 0; transform: translateX(24px) } }
+      ${KEYFRAME_CSS}
       @keyframes studio-spin { to { transform: rotate(360deg) } }
     `}</style>
   )
 }
 
-/** The keyframe name for a transition spec. */
-function transitionAnimation(node: RenderNode, exiting = false): string | undefined {
-  const transition = node.transition
-  if (!transition) return undefined
+/** The CSS `animation` for a node coming in or going out (Wave 5a). */
+function passageAnimation(passage: Passage, exiting: boolean): string {
+  const timing = cssTiming(passage.animation)
+  return passage.parts.map(part => cssAnimation(`studio-${part}${exiting ? '-exit' : ''}`, timing)).join(', ')
+}
 
-  const name =
-    transition.kind === 'scale'
-      ? 'studio-scale'
-      : transition.kind === 'opacity'
-        ? 'studio-opacity'
-        : // `.slide` is a move from the leading edge unless an edge was named.
-          `studio-move-${transition.edge ?? (transition.kind === 'slide' ? 'leading' : 'bottom')}`
+/**
+ * How a node moves to its new frame and paint in an animated frame. The timing is written
+ * once for every property it moves: a spring's easing is a long `linear()` (Wave 5a).
+ */
+function movedBy(animation: AnimationSpec): CSSProperties {
+  const timing = cssTiming(animation)
+  return {
+    transitionProperty: 'left, top, width, height, opacity, transform, background-color, border-radius',
+    transitionDuration: `${timing.duration}ms`,
+    transitionTimingFunction: timing.easing,
+    ...(timing.delay ? { transitionDelay: `${timing.delay}ms` } : {}),
+  }
+}
 
-  return `${name}${exiting ? '-exit' : ''} ${Math.round(transition.duration * 1000)}ms cubic-bezier(0.42, 0, 0.58, 1) both`
+/** What animates the change to the tree drawn, which says which exits play (Wave 5a). */
+const ChangeAnimation = createContext<TreeAnimation | undefined>(undefined)
+
+/** Where the matched views of the tree drawn move from and to (Wave 5a). */
+const Morphing = createContext<Morphs | undefined>(undefined)
+
+/** Moves a node from one frame to another in its parent's space, with `animation`'s timing (Wave 5a). */
+function morph(element: HTMLElement | null, from: Rect, to: Rect, animation: AnimationSpec, forwards: boolean) {
+  const frame = (rect: Rect) => ({ left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` })
+  const { duration, delay, easing } = cssTiming(animation)
+  element?.animate?.([frame(from), frame(to)], { duration, delay, easing, fill: forwards ? 'forwards' : 'none' })
 }
 
 interface NodePresentation {
@@ -316,27 +359,31 @@ interface NodePresentation {
 }
 
 function RenderNodeGroup({ nodes, byParent, ...presentation }: NodePresentation & { nodes: readonly RenderNode[]; byParent: RenderGroups }) {
+  const animated = useContext(ChangeAnimation)
   const [state, setState] = useState(() => ({ nodes, byParent, animate: presentation.animate, entries: reconcilePresence([], nodes, byParent, false) }))
   // This conditional adjustment finishes before React commits, keeping a removed
-  // node mounted for its exit instead of removing and reinserting its DOM.
+  // node mounted for its exit instead of removing and reinserting its DOM. Nodes are
+  // told apart by their keys, so a view an `if` moves keeps its DOM (Wave 5a).
   if (state.nodes !== nodes || state.byParent !== byParent || state.animate !== presentation.animate) {
-    setState({ nodes, byParent, animate: presentation.animate, entries: reconcilePresence(state.entries, nodes, byParent, state.animate && presentation.animate) })
+    setState({ nodes, byParent, animate: presentation.animate, entries: reconcilePresence(state.entries, nodes, byParent, state.animate && presentation.animate, animated) })
   }
-  const complete = useCallback((id: string, token: object) => setState(current => ({ ...current, entries: finishExit(current.entries, id, token) })), [])
-  return state.entries.map(entry => <PresentRenderNode key={entry.node.id} entry={entry} complete={complete} {...presentation} />)
+  const complete = useCallback((key: string, token: object) => setState(current => ({ ...current, entries: finishExit(current.entries, key, token) })), [])
+  return state.entries.map(entry => <PresentRenderNode key={keyOf(entry.node)} entry={entry} complete={complete} {...presentation} />)
 }
 
-function PresentRenderNode({ entry, complete, ...presentation }: NodePresentation & { entry: PresentNode; complete: (id: string, token: object) => void }) {
-  const { node, exiting, exitToken } = entry
-  const duration = node.transition?.duration ?? 0
+function PresentRenderNode({ entry, complete, ...presentation }: NodePresentation & { entry: PresentNode; complete: (key: string, token: object) => void }) {
+  const { node, exiting, exitToken, exit } = entry
+  const key = keyOf(node)
+  const timing = exit && cssTiming(exit.animation)
+  const duration = timing ? timing.duration + timing.delay : 0
   useEffect(() => {
     if (!exiting || !exitToken) return
     // Bounded cleanup works even when CSS animation events are absent. A token
     // prevents an interrupted exit's delayed completion removing a later exit.
-    const timer = setTimeout(() => complete(node.id, exitToken), duration * 1000 + 50)
+    const timer = setTimeout(() => complete(key, exitToken), duration + 50)
     return () => clearTimeout(timer)
-  }, [exiting, exitToken, duration, node.id, complete])
-  return <RenderNodeView node={node} byParent={entry.groups} {...presentation} exiting={exiting} onEvent={exiting ? ignorePreviewEvent : presentation.onEvent} inspect={exiting ? undefined : presentation.inspect} />
+  }, [exiting, exitToken, duration, key, complete])
+  return <RenderNodeView node={node} byParent={entry.groups} {...presentation} passage={exiting ? exit : entry.entry} exiting={exiting} onEvent={exiting ? ignorePreviewEvent : presentation.onEvent} inspect={exiting ? undefined : presentation.inspect} />
 }
 
 /**
@@ -433,6 +480,7 @@ function RenderNodeView({
   inspect,
   animate,
   exiting = false,
+  passage,
 }: {
   node: RenderNode
   byParent: ReadonlyMap<string, RenderNode[]>
@@ -442,9 +490,20 @@ function RenderNodeView({
   inspect?: NodeInspect
   animate: boolean
   exiting?: boolean
+  /** How it comes in or goes, when that is animated (Wave 5a). */
+  passage?: Passage
 }) {
   const multiplyId = `multiply-${useId().replace(/:/g, '')}`
   const panelRef = useRef<HTMLDivElement>(null)
+  const morphs = useContext(Morphing)
+  // A matched view that comes in moves from where the one it is matched with was, and one
+  // that goes to where that one is, unless the node has a transform of its own (Wave 5a).
+  // Only the frame that brings it in, or takes it away, names a rect, so each plays once.
+  const moves = passage && animate && !node.transform ? (exiting ? morphs?.to : morphs?.from)?.get(keyOf(node)) : undefined
+  const frame = node.frame
+  useLayoutEffect(() => {
+    if (moves && passage) morph(panelRef.current, exiting ? frame : moves, exiting ? moves : frame, passage.animation, exiting)
+  }, [moves, passage, frame, exiting])
   const cancelContextPress = useRef<(() => void) | null>(null)
   useLayoutEffect(() => () => cancelContextPress.current?.(), [])
   useLayoutEffect(() => { if (exiting) cancelContextPress.current?.() }, [exiting])
@@ -555,7 +614,7 @@ function RenderNodeView({
     // A mask's alpha is all that counts; a solid colour is a uniform one, which CSS
     // only takes as an image, so it becomes a gradient between two equal stops.
     ...(node.mask ? (mask => ({ maskImage: mask, WebkitMaskImage: mask }))(node.mask.kind === 'solid' ? `linear-gradient(${cssColor(node.mask.color)}, ${cssColor(node.mask.color)})` : cssFill(node.mask, node.frame)) : {}),
-    ...(node.transition && animate ? { animation: transitionAnimation(node, exiting) } : {}),
+    ...(passage && animate ? { animation: passageAnimation(passage, exiting), ...(node.transition?.scale !== undefined ? { '--studio-scale': node.transition.scale } : {}) } : {}),
     ...(node.material
       ? {
           // A material is a translucent panel over a blurred backdrop, which is
@@ -568,14 +627,7 @@ function RenderNodeView({
             : `rgb(30 30 32 / ${node.material.opacity})`,
         }
       : {}),
-    ...(node.animation
-      ? {
-          transition: cssTransition(
-            node.animation,
-            'left, top, width, height, opacity, transform, background-color, border-radius',
-          ),
-        }
-      : {}),
+    ...(node.animation ? movedBy(node.animation) : {}),
     ...(debugOutlines ? { outline: '1px solid rgb(0 122 255 / 0.35)', outlineOffset: -1 } : {}),
   }
 
@@ -599,7 +651,7 @@ function RenderNodeView({
       {node.background && node.cornerStyle === 'continuous' ? <ShapeView shape={{ shape: 'roundedRectangle', cornerRadius: node.cornerRadius, cornerStyle: node.cornerStyle, fill: node.background }} width={node.frame.width} height={node.frame.height} /> : null}
       {node.slider ? <SliderView slider={node.slider} width={node.frame.width} height={node.frame.height} /> : null}
       {redacted ? <RedactedBar /> : null}
-      {!redacted && node.kind === 'text' && node.text ? <TextContent node={node} /> : null}
+      {!redacted && node.kind === 'text' && node.text ? <TextContent node={node} animate={animate && !exiting} /> : null}
       {!redacted && node.kind === 'image' && node.image ? <ImageContent node={node} /> : null}
       {node.kind === 'shape' && node.shape ? <ShapeContent node={node} /> : null}
       {node.kind === 'path' && node.path ? <PathContent node={node} /> : null}
@@ -616,6 +668,7 @@ function RenderNodeView({
     <div
       ref={panelRef}
       data-node-id={node.id}
+      data-node-key={keyOf(node)}
       data-layer-selected={selectedIds?.has(node.id) || undefined}
       data-handler-id={node.hitTarget?.handlerId}
       data-context-menu-id={node.hitTarget?.contextMenuHandlerId}
@@ -875,7 +928,7 @@ const HANDOFF_MS = 1000
  * What a field or slider shows while its changes are on their way: its own draft
  * until the app has answered them (see `control-draft`), then the app's value.
  */
-function useControlDraft(node: RenderNode, send: (value: string) => void | Promise<void>) {
+function useControlDraft(node: RenderNode, handlerId: string, send: (value: string) => void | Promise<void>) {
   const appValue = node.hitTarget?.value ?? (node.hitTarget?.role === 'slider' ? '0' : '')
   const [draft, setDraft] = useState<ControlDraft>(NO_DRAFT)
   const latest = useRef<ControlDraft>(NO_DRAFT)
@@ -895,6 +948,14 @@ function useControlDraft(node: RenderNode, send: (value: string) => void | Promi
     const answered = () => { apply({ kind: 'answered' }) }
     void Promise.resolve(sender.current(value)).then(answered, answered)
   }, [apply])
+  // A view an `if` puts above the control keeps its element, by its key, and moves its
+  // handler, which is its path's; what went to the old one is sent again (Wave 5a).
+  const handler = useRef(handlerId)
+  useLayoutEffect(() => {
+    if (handler.current === handlerId) return
+    handler.current = handlerId
+    edit({ kind: 'moved' })
+  }, [handlerId, edit])
 
   const handoffs = useContext(ControlHandoffs)
   const key = node.origin && `${node.origin.file}:${node.origin.start}:${node.origin.end}`
@@ -936,7 +997,7 @@ function useControlDraft(node: RenderNode, send: (value: string) => void | Promi
 function PreviewField({ node, handlerId, onEvent }: ControlProps) {
   const hit = node.hitTarget!
   const font = hit.font
-  const { value, edit, tracking } = useControlDraft(node, (text) => onEvent?.({ kind: 'textChange', handlerId, value: text }))
+  const { value, edit, tracking } = useControlDraft(node, handlerId, (text) => onEvent?.({ kind: 'textChange', handlerId, value: text }))
   const Field = hit.multiline ? 'textarea' : 'input'
   return (
     <Field
@@ -993,7 +1054,7 @@ function PreviewField({ node, handlerId, onEvent }: ControlProps) {
 
 function PreviewSlider({ node, handlerId, onEvent }: ControlProps) {
   const hit = node.hitTarget!
-  const { value, edit, tracking } = useControlDraft(node, (position) => onEvent?.({ kind: 'slide', handlerId, value: Number(position) }))
+  const { value, edit, tracking } = useControlDraft(node, handlerId, (position) => onEvent?.({ kind: 'slide', handlerId, value: Number(position) }))
   return (
     <input
       {...tracking}
@@ -1058,6 +1119,74 @@ function ColorMultiply({ color, id }: { color: RGBA; id: string }) {
  * across nodes would rotate about a point the user did not write.
  */
 
+/** How a text's words changed in an animated frame (Wave 5a): the node before, and whether and which way its digits roll. */
+interface TextChange {
+  readonly before: RenderNode
+  readonly rolls: boolean
+  readonly up: boolean
+  readonly timing: CssTiming
+}
+
+/** A digit's roll, which takes about half a second whatever the change's own timing (measured, Wave 5a). */
+const ROLL: AnimationSpec = { curve: 'spring', duration: 0.5, bounce: 0.15 }
+
+const wordsOf = (node: RenderNode) => node.text!.runs.map(run => run.text).join('')
+
+/**
+ * A text, and how its words change (Wave 5a). In an animated frame, `.numericText()` rolls
+ * the characters that changed, the old ones out and the new ones in, and `.opacity`
+ * cross-fades the old words with the new, as the simulator draws them. Other texts swap.
+ */
+function TextContent({ node, animate }: { node: RenderNode; animate: boolean }) {
+  const words = wordsOf(node)
+  // The node its words were last drawn from, kept to roll or fade from when they change.
+  const [shown, setShown] = useState<{ node: RenderNode; words: string; change: TextChange | null }>(() => ({ node, words, change: null }))
+  if (shown.words !== words) {
+    const kind = node.contentTransition?.kind
+    const plays = animate && node.animation && (kind === 'numeric' || kind === 'opacity')
+    const rolls = kind === 'numeric'
+    setShown({ node, words, change: plays ? { before: shown.node, rolls, up: rollsUp(node.contentTransition!, shown.node.contentTransition), timing: cssTiming(rolls ? ROLL : node.animation!) } : null })
+  }
+  const change = shown.words === words ? shown.change : null
+  useEffect(() => {
+    if (!change) return
+    const timer = setTimeout(() => setShown(current => current.change === change ? { ...current, change: null } : current), change.timing.duration + change.timing.delay + 50)
+    return () => clearTimeout(timer)
+  }, [change])
+  if (!change) return <TextLines node={node} />
+  const css = (name: string, later = 0) => cssAnimation(`studio-${name}`, change.timing, later)
+  const single = (text: RenderNode) => text.text!.runs.length === 1 && (text.text!.lines?.length ?? 1) === 1 && !text.text!.lines?.[0]?.slices
+  // The old words are drawn over the new, in the same box, as they leave.
+  const leaving = (content: ReactNode, animation?: string) => <div aria-hidden style={{ position: 'absolute', inset: 0, ...(animation ? { animation } : {}) }}>{content}</div>
+  if (change.rolls && single(node) && single(change.before)) {
+    const { prefix, suffix } = textChange(wordsOf(change.before), words)
+    const roll = (exiting: boolean): Roll => ({ prefix, suffix, exiting, css: (index: number) => css(`${(change.up !== exiting) ? 'roll-below' : 'roll-above'}${exiting ? '-exit' : ''}`, index * 0.02) })
+    return <>{leaving(<TextLines node={change.before} roll={roll(true)} />)}<TextLines node={node} roll={roll(false)} /></>
+  }
+  return (
+    <>
+      {leaving(<TextLines node={change.before} />, css('opacity-exit'))}
+      <div style={{ position: 'absolute', inset: 0, animation: css('opacity') }}><TextLines node={node} /></div>
+    </>
+  )
+}
+
+/** The characters of a one-line text that roll, between what stays at each end, and how. */
+interface Roll {
+  readonly prefix: number
+  readonly suffix: number
+  /** The old words, whose characters that stay are drawn by the new ones. */
+  readonly exiting: boolean
+  readonly css: (index: number) => string
+}
+
+function rolled(text: string, roll: Roll): ReactNode {
+  const characters = Array.from(text)
+  return characters.map((character, i) => i < roll.prefix || i >= characters.length - roll.suffix
+    ? <span key={i} style={roll.exiting ? { visibility: 'hidden' } : undefined}>{character}</span>
+    : <span key={i} style={{ display: 'inline-block', animation: roll.css(i - roll.prefix) }}>{character}</span>)
+}
+
 /**
  * Paints text.
  *
@@ -1070,7 +1199,7 @@ function ColorMultiply({ color, id }: { color: RGBA; id: string }) {
  * boundary keeps each half's own face. Without that, `Text("a").bold() + Text("b")`
  * drew both halves bold: the first run won and the rest were dropped.
  */
-function TextContent({ node }: { node: RenderNode }) {
+function TextLines({ node, roll }: { node: RenderNode; roll?: Roll }) {
   const payload = node.text!
   const first = payload.runs[0]
   if (!first) return null
@@ -1120,7 +1249,7 @@ function TextContent({ node }: { node: RenderNode }) {
                     return <span key={j} dir="auto" style={{ ...runStyle(run, node.frame), position: 'relative',
                       top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{decoratedText(run, slice.text)}</span>
                   })
-                : <span dir="auto" style={{ position: 'relative', top: line.baseline - fontBaseline - (first.baselineOffset ?? 0) }}>{decoratedText(first, line.text)}</span>}
+                : <span dir="auto" aria-hidden={roll?.exiting || undefined} style={{ position: 'relative', top: line.baseline - fontBaseline - (first.baselineOffset ?? 0) }}>{roll ? rolled(line.text, roll) : decoratedText(first, line.text)}</span>}
             </div>
           )
         })}
@@ -1140,7 +1269,7 @@ function TextContent({ node }: { node: RenderNode }) {
     >
       {payload.runs.length > 1
         ? payload.runs.map((run, i) => <RunSpan key={i} run={run} text={run.text} />)
-        : decoratedText(first, first.text)}
+        : roll ? <span aria-hidden={roll.exiting || undefined}>{rolled(first.text, roll)}</span> : decoratedText(first, first.text)}
     </div>
   )
 }

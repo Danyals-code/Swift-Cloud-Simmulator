@@ -996,10 +996,6 @@ export class Checker {
         feature = `.toolbar(.hidden, for: ${bars.join(', ')})`
         reason = 'it is not applied by the preview, so the bar still shows'
       }
-      if (callee.member === 'asymmetric' && labels.has('insertion') && (callee.base === null || callee.base.kind === 'identifier' && callee.base.name === 'AnyTransition')) {
-        feature = '.asymmetric'
-        reason = 'the preview plays the insertion transition when the view is removed too'
-      }
     }
     if (feature && reason) this.report(expr.span, 'warning', callee.kind === 'identifier' ? 'unsupported_swiftui_view' : 'unsupported_swiftui_modifier', `${feature}: ${reason}. The source exports unchanged.`, feature)
   }

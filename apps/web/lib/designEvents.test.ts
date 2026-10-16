@@ -100,6 +100,8 @@ const EVERY_KIND: { readonly [K in Operation['kind']]: Extract<Operation, { kind
   'toolbar-item-add': { kind: 'toolbar-item-add', placement: 'trailing', snippet: `Button("${S}") { }` },
   'searchable-add': { kind: 'searchable-add', prompt: S },
   'searchable-remove': { kind: 'searchable-remove' },
+  'visibility': { kind: 'visibility', when: { input: S, is: S }, create: { name: S, value: true } },
+  'animate-action': { kind: 'animate-action', animation: { style: 'linear', duration: 0.4 } },
 }
 
 describe('design edits in the event log', () => {
@@ -126,6 +128,8 @@ describe('design edits in the event log', () => {
     expect(designEvent({ kind: 'modifier-add', name: 'opacity' }, text)).toEqual({ type: 'design', op: 'modifier-add', layer: 'Text', modifier: 'opacity' })
     expect(designEvent({ kind: 'modifier-toggle', modifier: padding.id, enabled: false }, text)).toEqual({ type: 'design', op: 'modifier-toggle', layer: 'Text', modifier: 'padding' })
     expect(designEvent({ kind: 'delete' })).toEqual({ type: 'design', op: 'delete' })
+    // The Visibility group's controls are the studio's own (Wave 5a).
+    expect(designEvent({ kind: 'property', control: 'motion:rolls-digits', value: 'true' }, text)).toEqual({ type: 'design', op: 'property', layer: 'Text', control: 'motion:rolls-digits' })
   })
 
   it('log a refused copy or paste as a refused edit is, on what kind of layer and nothing more (C7)', () => {

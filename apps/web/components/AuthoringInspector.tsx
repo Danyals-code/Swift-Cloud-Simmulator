@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { isHelperDefinition, isStructuralLayer, layoutParentOf, offersWhenTapped, stackLayoutOf, LAYOUT_WORDS, type AuthoringNode, type ResourceOperation, type Size, type SourceSpan } from '@studio/shared'
 import { AuthoringFeatures, type FeatureProps } from './AuthoringFeatures'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
+import { VisibilityGroup } from './VisibilityGroup'
 import { LayoutGuide } from './LayoutGuide'
 import { ModifierStack } from './ModifierStack'
 import { LayerSections } from './layer/LayerSections'
@@ -35,13 +36,14 @@ const NAVIGATE_TYPES: readonly { type: 'push' | 'sheet' | 'cover'; label: string
  * `onCopy` and `onPaste` put Copy and Paste in the view menu, as ⌘C and ⌘V do (D6);
  * Paste is off while nothing is copied.
  */
-export function AuthoringInspector({ node, drawn, stale, onReveal, onChange, features, onCopy, onPaste, measure, sizeOverlap }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; /** The words the selected view draws where it was selected, which name it when it is bound to data (Wave 3a). */ drawn?: string; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange; onCopy?: (node: AuthoringNode) => void; onPaste?: (node: AuthoringNode) => void; measure?: Size; sizeOverlap?: () => Promise<string | null> }) {
+export function AuthoringInspector({ node, drawn, hiddenView, stale, onReveal, onChange, features, onCopy, onPaste, measure, sizeOverlap }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; /** The words the selected view draws where it was selected, which name it when it is bound to data (Wave 3a). */ drawn?: string; /** When the selected view isn't drawn in this state, the view its branch holds, as Layers marks it (Wave 5a). */ hiddenView?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange; onCopy?: (node: AuthoringNode) => void; onPaste?: (node: AuthoringNode) => void; measure?: Size; sizeOverlap?: () => Promise<string | null> }) {
   const root = useRef<HTMLDivElement | null>(null)
   const focus = useRef<{ source: string; owner: string; control: string; label: string; caret: number | null; modifier?: string; button?: string } | null>(null)
-  const [retained, setRetained] = useState(node)
-  if (node && node !== retained) setRetained(node)
+  // The view hiding it, if any, is kept with it (Wave 5a), so Hidden while doesn't blink through an edit.
+  const [retained, setRetained] = useState({ node, hiddenView })
+  if (node && (node !== retained.node || hiddenView !== retained.hiddenView)) setRetained({ node, hiddenView })
   // Keep card expansion and draft focus while the worker updates the preview.
-  const selected = stale ? retained : node
+  const selected = stale ? retained.node : node, hidden = stale ? retained.hiddenView : hiddenView
   const sourceKey = selected ? `${features?.snapshot?.projectId}:${selected.owner}:${selected.source.file}:${selected.source.start}` : ''
   useLayoutEffect(() => {
     if (stale) return
@@ -62,7 +64,9 @@ export function AuthoringInspector({ node, drawn, stale, onReveal, onChange, fea
   if (!selected) return <p className={styles.empty} role={stale ? 'status' : undefined}>{stale ? 'Updating views…' : 'Select a view in the tree or on the canvas.'}</p>
   const modifierControlIds = new Set(selected.modifiers?.flatMap(modifier => modifier.controls.map(control => control.id)) ?? [])
   // Width and Height sizing belong to the Layout section once the view is read as a layer (Wave 2).
-  const basics = selected.controls?.filter(control => !control.id.startsWith('modifier:') && !modifierControlIds.has(control.id) && (!control.id.startsWith('add:') || control.id === 'add:listStyle') && !(selected.layer && features?.onCommand && control.id.startsWith('fill:'))) ?? []
+  // Shown when's transition, Moves with and Rolls digits sit in the Visibility group (Wave 5a).
+  const motion = selected.controls?.filter(control => control.id.startsWith('motion:')) ?? []
+  const basics = selected.controls?.filter(control => !control.id.startsWith('modifier:') && !control.id.startsWith('motion:') && !modifierControlIds.has(control.id) && (!control.id.startsWith('add:') || control.id === 'add:listStyle') && !(selected.layer && features?.onCommand && control.id.startsWith('fill:'))) ?? []
   // A value inside a modifier belongs to that modifier's card; the rest are the view's own.
   const modifierProperties = new Set(selected.modifiers?.flatMap(modifier => modifier.propertyIds) ?? [])
   const basicProperties = selected.properties.filter(property => !modifierProperties.has(property.id)).map(property => property.id)
@@ -90,7 +94,7 @@ export function AuthoringInspector({ node, drawn, stale, onReveal, onChange, fea
   ]
   // A Button's action, a control's value, or any other view When tapped can make tappable (D16).
   const interaction = offersWhenTapped(selected.behavior) || !!selected.behavior?.binding
-  const advanced = !!selected.behavior && (selected.behavior.canConfigureAction || selected.behavior.states.length > 0) || !!selected.component
+  const advanced = !!selected.behavior?.canConfigureAction || !!selected.component
   // Only wrappers with something to set: a bare NavigationStack around every view is not news.
   const wrappers = context.surrounding.filter(owner => !!owner.modifiers?.length || owner.controls?.some(control => !/^(modifier:|add:|fill:)/.test(control.id)))
   // Figma aligns a layer itself; SwiftUI has the stack around it do it (D4), so a view in one says where to look.
@@ -146,7 +150,8 @@ export function AuthoringInspector({ node, drawn, stale, onReveal, onChange, fea
         {stack && stackLayout && <p className={styles.note} data-testid="alignment-hint">{stackLayout === 'ZStack' ? 'Aligned' : 'Aligned and spaced'} by its {LAYOUT_WORDS[stackLayout]}. <button type="button" className={styles.linkButton} onClick={() => features?.onSelect?.(stack)}>Select {sourceLayerLabel(stack)}</button></p>}
         {interaction && features && <AuthoringFeatures key={`interaction:${featureKey}`} node={selected} {...features} section="interaction" />}
         {!!selected.fields?.length && features && <AuthoringFeatures key={`field:${dataKey}`} node={selected} {...features} section="field" />}
-        {!!conditions.length && <div className={styles.shownWhen} data-testid="shown-when">{conditions.map(condition => {
+        {(selected.visibility || !!motion.length || hidden) && <VisibilityGroup key={`visibility:${featureKey}`} node={selected} controls={motion} hiddenView={hidden} busy={!!stale} onCommand={features?.onCommand} onChange={onChange} onShowIt={features?.onShowIt} />}
+        {!selected.visibility && !!conditions.length && <div className={styles.shownWhen} data-testid="shown-when">{conditions.map(condition => {
           const expression = condition.properties.map(property => property.expression).join(' and ')
           const alternate = context.ancestors.find(ancestor => ancestor.parentId === condition.id && (ancestor.name === 'Otherwise' || ancestor.name.startsWith('Case ')))
           const summary = condition.name === 'Switch' ? alternate?.name.startsWith('Case ') ? `${expression} is ${alternate.name.slice(5)}` : `${expression} has another value` : alternate ? `${expression} is false` : expression

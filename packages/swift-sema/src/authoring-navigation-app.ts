@@ -1,8 +1,9 @@
+import { swiftIdentifier } from '@studio/shared'
 import type { AppNavigationModel, AppTab, NavigationOperation, SourceFile, SourceSpan } from '@studio/shared'
 import { chainBase, forEachChild, type CallExpr, type Expr, type Node, type Stmt, type StructDecl } from '@studio/swift-syntax'
 import { viewCallChain, swiftString } from './design-controls'
 import { isPageStyle } from './page-style'
-import { allDeclarations, identifier, namedStruct, patch, raw, sourceRoot, type FeatureContext, type SourcePatch } from './authoring-context'
+import { allDeclarations, namedStruct, patch, raw, sourceRoot, type FeatureContext, type SourcePatch } from './authoring-context'
 
 /**
  * The app's own navigation: which screen it starts on, or which tabs it has.
@@ -295,7 +296,7 @@ export function navigationPatches(ctx: FeatureContext, operation: NavigationOper
     return { patches: [patch(container.call.span, container.sites[0]!.tab.content!)] }
   }
   if (operation.kind === 'tab-add' && model.style !== 'tabs') {
-    if (!identifier(operation.screen) || !namedStruct(ctx, operation.screen)) throw new Error('Choose a screen for this tab.')
+    if (!swiftIdentifier(operation.screen) || !namedStruct(ctx, operation.screen)) throw new Error('Choose a screen for this tab.')
     validTab(operation.name, operation.icon)
     const first = model.root
     if (!first) throw new Error('This app’s first screen is built in Swift. Open the code to add tabs.')
@@ -309,7 +310,7 @@ export function navigationPatches(ctx: FeatureContext, operation: NavigationOper
   const sites = container.sites
   if (operation.kind === 'tab-add') {
     validTab(operation.name, operation.icon)
-    if (!identifier(operation.screen) || !namedStruct(ctx, operation.screen)) throw new Error('Choose a screen for this tab.')
+    if (!swiftIdentifier(operation.screen) || !namedStruct(ctx, operation.screen)) throw new Error('Choose a screen for this tab.')
     if (sites.some(site => site.tab.screen === operation.screen)) throw new Error('That screen is already a tab.')
     const last = sites.at(-1)
     if (!last) throw new Error('This tab bar is built in Swift. Open the code to change it.')
@@ -340,7 +341,7 @@ export function navigationPatches(ctx: FeatureContext, operation: NavigationOper
   if (operation.name !== undefined && site.nameSpan) patches.push(patch(site.nameSpan, swiftString(name)))
   if (operation.icon !== undefined && site.iconSpan) patches.push(patch(site.iconSpan, swiftString(icon)))
   if (operation.screen !== undefined && operation.screen !== site.tab.screen) {
-    if (!identifier(operation.screen) || !namedStruct(ctx, operation.screen)) throw new Error('Choose a screen for this tab.')
+    if (!swiftIdentifier(operation.screen) || !namedStruct(ctx, operation.screen)) throw new Error('Choose a screen for this tab.')
     if (sites.some(other => other !== site && other.tab.screen === operation.screen)) throw new Error('That screen is already a tab.')
     if (!site.screenSpan) throw new Error('This tab’s screen is built in Swift. Open the code to change it.')
     patches.push(patch(site.screenSpan, operation.screen))

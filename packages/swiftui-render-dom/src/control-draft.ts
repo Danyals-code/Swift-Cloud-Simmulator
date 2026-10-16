@@ -27,6 +27,11 @@ export type ControlEdit =
   | { readonly kind: 'compositionStart' }
   | { readonly kind: 'compositionEnd'; readonly value: string }
   | { readonly kind: 'answered' }
+  /**
+   * The control kept its element but its handler moved, as when an `if` above it opens
+   * (Wave 5a): what it sent and is still unanswered went to a handler that is gone.
+   */
+  | { readonly kind: 'moved' }
 
 /** The control's next draft, and the value to send the app when the edit sends one. */
 export function editDraft(draft: ControlDraft, edit: ControlEdit): { draft: ControlDraft; send?: string } {
@@ -41,6 +46,8 @@ export function editDraft(draft: ControlDraft, edit: ControlEdit): { draft: Cont
       const unanswered = draft.unanswered - 1
       return { draft: unanswered > 0 || draft.composing ? { ...draft, unanswered } : NO_DRAFT }
     }
+    case 'moved':
+      return draft.value === null ? { draft } : { draft: { ...draft, unanswered: draft.unanswered + 1 }, send: draft.value }
   }
 }
 

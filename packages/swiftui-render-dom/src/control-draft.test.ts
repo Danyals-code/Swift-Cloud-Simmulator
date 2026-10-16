@@ -27,6 +27,18 @@ describe("a preview control's draft", () => {
     expect(shownValue(draft, 'HE')).toBe('HE')
   })
 
+  it('sends what is still unanswered again when its handler moves, since the old one is gone (Wave 5a)', () => {
+    // "t" opens an `if` above the field, which keeps its element and takes a new
+    // handler; "th" was typed before that was drawn, and went to the old one.
+    const { draft, sent } = run([{ kind: 'input', value: 't' }, { kind: 'input', value: 'th' }, { kind: 'moved' }, { kind: 'answered' }, { kind: 'answered' }])
+    expect(sent).toEqual(['t', 'th', 'th'])
+    // The app has answered "t", and dropped the "th" sent to the old handler.
+    expect(shownValue(draft, 't')).toBe('th')
+    expect(shownValue(run([{ kind: 'answered' }], draft).draft, 'th')).toBe('th')
+    // With nothing on its way there is nothing to send again.
+    expect(run([{ kind: 'moved' }])).toEqual({ draft: NO_DRAFT, sent: [] })
+  })
+
   it('sends what an input method is composing, as iOS does, but keeps it on screen until it is done', () => {
     const { draft, sent } = run([
       { kind: 'input', value: 'a' },

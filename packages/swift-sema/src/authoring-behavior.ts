@@ -1,7 +1,7 @@
 import { Lexer, type CallExpr, type StructDecl } from '@studio/swift-syntax'
-import { deploymentVersion, isHelperDefinition, tappableProblem } from '@studio/shared'
+import { deploymentVersion, isHelperDefinition, tappableProblem, swiftIdentifier } from '@studio/shared'
 import type { AlertActionSpec, AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
-import { allDeclarations, callOf, enumCases, expressionOf, hasComments, identifier, insertMember, layerById, lineIndent, literal, modifierIndent, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
+import { allDeclarations, callOf, enumCases, expressionOf, hasComments, insertMember, layerById, lineIndent, literal, modifierIndent, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { collectionFor, recordsSwift } from './authoring-collections'
 import { namedActions } from './authoring-components'
 import { styleExpression } from './authoring-resources'
@@ -10,6 +10,7 @@ import { appRoot } from './authoring-navigation-app'
 import { screenStateInputs } from './authoring-states'
 import { dotOf } from './authoring-modifiers'
 import { buttonRole, literalText, swiftString, viewCallChain } from './design-controls'
+import { actionClosure, appearSite, readAnimation } from './authoring-motion'
 
 /**
  * The values a view's states can change. A screen's own definition also offers what its
@@ -19,9 +20,15 @@ import { buttonRole, literalText, swiftString, viewCallChain } from './design-co
 export function stateInputs(ctx: FeatureContext, node: AuthoringNode): StateInput[] {
   // A helper is written inside its view, whose own definition reads the view's states (Wave 3a).
   if (isHelperDefinition(node)) return []
-  const plain = ownStates(ctx, node)
-  return node.kind === 'definition' ? screenStateInputs(ctx, node, plain) : plain
+  if (node.kind !== 'definition') return ownStates(ctx, node)
+  // A screen's are worked out once for each model, as its views and its States all ask (Wave 5a).
+  let screens = screenInputs.get(ctx)
+  if (!screens) screenInputs.set(ctx, screens = new Map())
+  let inputs = screens.get(node.id)
+  if (!inputs) screens.set(node.id, inputs = screenStateInputs(ctx, node, ownStates(ctx, node)))
+  return inputs
 }
+const screenInputs = new WeakMap<FeatureContext, Map<string, StateInput[]>>()
 /** A view's own `@State` scalars, enums, dates and colours, as a state or a control sets them. */
 function ownStates(ctx: FeatureContext, node: AuthoringNode): StateInput[] {
   const owner = ownerOf(ctx, node)
@@ -134,9 +141,10 @@ export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): Beha
   const canConfigureAction = (withTitle || labelledButton(call)) && !!call.trailingClosure && call.trailingClosure.params.length === 0
   // Any other view When tapped can make tappable, as a card or a row is (D16).
   const canMakeTappable = !canConfigureAction && !tappableProblem(ctx.nodes, node)
-  const site = deploymentVersion(ctx.deploymentTarget) < 15 ? { problem: 'An appear animation needs an iOS 15 deployment target.' } : appearSite(ctx, node)
+  const site = appearSite(ctx, node)
   const appear = 'problem' in site ? { problem: site.problem } : { by: site.by }
-  return { appear, states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' || canMakeTappable ? tapDestinations(ctx, node) : [], canConfigureAction, canMakeTappable, titled: withTitle && call.args[0]!.value.kind === 'stringLiteral', shows: canConfigureAction ? shownOnTap(ctx, node, call) : undefined, currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined }
+  const animation = canConfigureAction ? readAnimation(ctx, call.trailingClosure!) : undefined
+  return { appear, states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' || canMakeTappable ? tapDestinations(ctx, node) : [], canConfigureAction, canMakeTappable, titled: withTitle && call.args[0]!.value.kind === 'stringLiteral', shows: canConfigureAction ? shownOnTap(ctx, node, call) : undefined, currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined, animation }
 }
 
 /** Each owner's alerts and confirmation dialogs, by the modifier that writes them: read from their layers once. */
@@ -285,7 +293,7 @@ function namedState(ctx: FeatureContext, node: AuthoringNode, name: string): Sta
 }
 export function configureBinding(ctx: FeatureContext, node: AuthoringNode, name: string, create?: { readonly value: DesignValue }): SourcePatch[] {
   const settings = behaviorSettings(ctx, node), owner = ownerOf(ctx, node), call = callOf(ctx, node)
-  if (!settings?.binding || !owner || !call || !identifier(name)) throw new Error('Select an input, toggle or picker and a valid state name.')
+  if (!settings?.binding || !owner || !call || !swiftIdentifier(name)) throw new Error('Select an input, toggle or picker and a valid state name.')
   const argument = call.args.find(a => a.label === settings.binding!.label)!
   if (!argument) throw new Error('This binding overload is not supported.')
   // Preserve arbitrary Binding(get:set:) logic; explicit .constant is eligible for replacement.
@@ -432,7 +440,9 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
       body = `${info.name}.removeAll { $0.id == ${swiftValue(action.id)} }`
     }
   }
-  patches.push(patch(call.trailingClosure.span, `{ ${body} }`))
+  // A change of a value, a list or a call can animate (Wave 5a): Replace keeps the animation it had.
+  const animates = ['toggle', 'set', 'append', 'delete', 'call'].includes(action.type) || action.type === 'dismiss' && !!action.state
+  patches.push(patch(call.trailingClosure.span, actionClosure(ctx, call.trailingClosure, body, animates, action.animation)))
   return patches
 }
 
@@ -458,43 +468,3 @@ function presentationSwift(action: Extract<BehaviorAction, { type: 'alert' | 'di
   const visibility = action.type === 'dialog' && read?.titleVisibility ? `, titleVisibility: ${read.titleVisibility}` : ''
   return `.${action.type === 'alert' ? 'alert' : 'confirmationDialog'}(${swiftString(action.title)}, isPresented: $${name}${visibility}) {\n${buttons}${indent}}${message}`
 }
-/**
- * How a view comes and goes, which is when a transition plays: by an if or a switch, or as
- * a row a collection adds. `owner` is the ancestor that stays while it does, where the
- * animation goes, and `value` what it animates on for rows.
- */
-function appearSite(ctx: FeatureContext, node: AuthoringNode): { by: 'branch' | 'row'; owner: AuthoringNode; value?: string } | { problem: string } {
-  const expression = expressionOf(ctx, node), chain = expression && viewCallChain(expression)
-  if (!chain || chain.modifiers.some(m => m.callee.kind === 'memberAccess' && ['animation', 'transition'].includes(m.callee.member))) return { problem: 'Existing animation code is developer-owned. Edit it in Swift.' }
-  let parent = layerById(ctx, node.parentId), inserted: AuthoringNode | undefined, owner = node
-  while (parent && parent.kind !== 'definition') {
-    if (!inserted && (parent.kind === 'branch' && ['Condition', 'Otherwise', 'Switch'].includes(parent.name) || parent.kind === 'template')) inserted = parent
-    // A ForEach lays nothing out, so a modifier on it would land on every row.
-    if (inserted && parent.kind !== 'template' && parent.name !== 'ForEach' && expressionOf(ctx, parent)) { owner = parent; break }
-    parent = layerById(ctx, parent.parentId)
-  }
-  if (!inserted) return { problem: APPEAR_ALWAYS_SHOWN }
-  if (owner === node) return { problem: 'An appear animation needs a container that stays while this view comes and goes. Put it in a stack first.' }
-  if (viewCallChain(expressionOf(ctx, owner)!)?.modifiers.some(m => m.callee.kind === 'memberAccess' && m.callee.member === 'animation')) return { problem: 'The enclosing container already controls animation. Preserve it and add the transition in Swift.' }
-  if (inserted.kind !== 'template') return { by: 'branch', owner }
-  // Rows come and go as their collection does: its count changes with every row added or removed.
-  const collection = layerById(ctx, inserted.parentId), data = collection && callOf(ctx, collection)?.args[0]?.value
-  const name = data && /^\$?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(raw(ctx, data.span)) ? raw(ctx, data.span).replace(/^\$/, '') : undefined
-  const fixed = data?.kind === 'identifier' && ownerOf(ctx, node)?.members.some(m => m.kind === 'varDecl' && m.name === name && m.isLet && !!m.initializer)
-  if (!name || fixed) return { problem: 'An appear animation on rows plays as rows are added or removed, and these rows are fixed in the code rather than read from a collection that changes, such as ForEach(items). Add it in Code.' }
-  return { by: 'row', owner, value: `${name}.count` }
-}
-export function configureTransition(ctx: FeatureContext, node: AuthoringNode, state: string, style: 'opacity' | 'slide' | 'scale', duration: number): SourcePatch[] {
-  if (deploymentVersion(ctx.deploymentTarget) < 15) throw new Error('Value-driven animation requires an iOS 15 deployment target.')
-  if (!['opacity', 'slide', 'scale'].includes(style) || !Number.isFinite(duration) || duration < 0 || duration > 2) throw new Error('Use a supported transition and a duration from 0 to 2 seconds.')
-  const site = appearSite(ctx, node)
-  if ('problem' in site) throw new Error(site.problem)
-  if (site.by === 'branch') namedState(ctx, node, state)
-  // Keep the animation transaction on a surviving ancestor; a removed child cannot
-  // observe the state change that should animate its exit.
-  const animation = `.animation(.easeInOut(duration: ${duration}), value: ${site.value ?? state})`
-  const transition: SourcePatch = { file: node.source.file, start: node.source.end, end: node.source.end, text: `.transition(.${style})` }
-  return [transition, { file: site.owner.source.file, start: site.owner.source.end, end: site.owner.source.end, text: animation }]
-}
-/** Why an appear animation does not apply to a view that is always there. */
-const APPEAR_ALWAYS_SHOWN = 'An appear animation plays when a view is added or removed, and this view is always shown. Use it on a view inside an if or a switch, or on the rows of a collection.'

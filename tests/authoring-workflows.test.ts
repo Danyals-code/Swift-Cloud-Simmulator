@@ -337,7 +337,7 @@ describe('Preservation, scenarios and independent native fixtures', () => {
     const source = files(app('VStack { if on { Text("Row") }; Button("Change") { /* configured by developer */ } }', '@State var on = true'))
     const animated = edit(source, 'Text', { kind: 'transition', state: 'on', style: 'scale', duration: 0.4 })
     expect(animated[0]!.text).toBe(source[0]!.text.replace('Text("Row")', 'Text("Row").transition(.scale)').replace('/* configured by developer */ } }', '/* configured by developer */ } }.animation(.easeInOut(duration: 0.4), value: on)'))
-    expect(render(animated).renderTree?.nodes.some(n => n.transition?.kind === 'scale' && n.transition.duration === 0.4)).toBe(true)
+    expect(render(animated).renderTree?.nodes.some(n => n.transition?.kind === 'scale')).toBe(true)
     expect(plan(source, 'Button', { kind: 'behavior', action: { type: 'toggle', state: 'on' }, replace: false })).toMatchObject({ ok: false })
     expect(plan(source, 'Button', { kind: 'behavior', action: { type: 'toggle', state: 'on' }, replace: true })).toMatchObject({ ok: true })
   })

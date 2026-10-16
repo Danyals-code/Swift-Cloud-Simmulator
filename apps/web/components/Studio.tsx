@@ -49,7 +49,7 @@ import { AppNavigationSettings } from './settings/AppNavigationSettings'
 import { ScreenSettings } from './settings/ScreenSettings'
 import { AppearancePicker, DevicePicker, TextSizePicker } from './PreviewEnvironment'
 import { canvasLanes, designScreens, designTree, focusedDesignScreen, liveDesignScreen, screenRemovalRefusal, type DesignTree } from '../lib/designTree'
-import { sourceLayerAround, sourceLayerDrawn, sourceLayerLabel, sourceLayerNames, sourceLayerOpens, sourceLayerRevealing, sourceLayerSlot, sourceLayerType } from '../lib/sourceLayers'
+import { sourceLayerAround, sourceLayerDrawn, sourceLayerHiddenBy, sourceLayerHiddenView, sourceLayerLabel, sourceLayerNames, sourceLayerOpens, sourceLayerRevealing, sourceLayerSlot, sourceLayerType } from '../lib/sourceLayers'
 import { paletteEdit } from '../lib/viewCatalog'
 const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane), { ssr: false })
 import { ShortcutsDialog } from './ShortcutsDialog'
@@ -58,6 +58,7 @@ import { JumpBar } from './JumpBar'
 import { reconcileLayerLabel } from '../lib/layerLabels'
 const DesignReview = dynamic(() => import('./DesignReview').then(m => m.DesignReview), { ssr: false })
 import { scenarioKey, scenarioScreen, screenCatalog, screenDefinition, type ScreenCommand, type DesignScreen } from '../lib/screens'
+import { stateShowing } from '../lib/screenStates'
 import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
 import { TemplateGallery, type GallerySource } from './TemplateGallery'
@@ -544,6 +545,14 @@ export function Studio() {
     if (layerSelection?.anchor) return reconcileAuthoringSelection(layerSelection.anchor, snapshot, project.files) ?? undefined
     return undefined
   }, [result?.authoring, project, stale, editedLayer, layerSelection, pendingSelect])
+  /** The view whose condition hides the selection in this state, as Layers marks it (Wave 5a): the Inspector says why, with Show it. */
+  const selectedHiddenView = useMemo(() => {
+    const snapshot = result?.authoring
+    if (!snapshot || !authoringNode) return undefined
+    const nodes = new Map(snapshot.nodes.map(node => [node.id, node]))
+    const by = sourceLayerHiddenBy(snapshot, authoringNode, pageHierarchy, nodes)
+    return by ? sourceLayerHiddenView(nodes, authoringNode, by) : undefined
+  }, [result?.authoring, authoringNode, pageHierarchy])
 
   const navigationPickerIdentity = useMemo(() => ({ projectId: project?.id, files: project?.files, nodeId: authoringNode?.id, inspecting, mode, inspectorTab, showSettings: shown.preview }), [project?.id, project?.files, authoringNode?.id, inspecting, mode, inspectorTab, shown.preview])
   const navigationPicker = useNavigationPicker(navigationPickerIdentity, mode === 'design' && inspecting && shown.preview && !stale)
@@ -597,6 +606,16 @@ export function Studio() {
     if (!error) setScenarioSelection({ projectId: project.id, key: scenarioKey(scenario) })
     return error
   }, [project, stale, result?.authoring])
+
+  /** Show it (Wave 5a): the state that draws a view its condition hides now, saved first when it is new. */
+  const showState = useCallback((view: AuthoringNode) => {
+    if (!project || !view.visibility) return
+    const screen = view.visibility.shows?.[0]?.owner.split('.')[0] ?? view.owner
+    const chosen = stateShowing(view.visibility, (project.studio?.scenarios ?? []).filter(saved => scenarioScreen(saved) === screen), scenario, result?.authoring?.inputs ?? [])
+    if ('problem' in chosen) setEditNote(chosen.problem)
+    else if ('save' in chosen) { const problem = saveScenario(chosen.save.name, chosen.save.inputs); if (problem) setEditNote(problem) }
+    else setScenarioSelection(chosen.select ? { projectId: project.id, key: scenarioKey(chosen.select) } : null)
+  }, [project, scenario, result?.authoring, saveScenario])
 
   const captureLayer = useCallback((layer: ViewLayer) => {
     if (!project || stale) return
@@ -1509,7 +1528,7 @@ export function Studio() {
   ) : null
 
   const screenViews = screens.map(screen => screen.view)
-  const authoringFeatures: Omit<FeatureProps, 'node'> = { variants: project.studio?.variants, previewInputs: scenario?.inputs, screens: screenViews,
+  const authoringFeatures: Omit<FeatureProps, 'node'> = { variants: project.studio?.variants, previewInputs: scenario?.inputs, screens: screenViews, onShowIt: showState,
                 pasteNudge: !!pasteNudge, onDismissNudge: () => { if (pasteNudge) dismissedNudges.current.add(pasteNudge); setPasteNudge(null) },
                 onFindCopies: (node: AuthoringNode) => findCopies(project.files, node.source, { deploymentTarget: project.manifest.deploymentTarget, screens: screenViews }), onSaveVariant: variant => {
                   const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
@@ -1548,7 +1567,7 @@ export function Studio() {
             onNodeChange={(node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }, undefined, undefined, undefined, true)}
             onNodeCommand={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation, undefined, undefined, undefined, true)} onSelect={selectAuthoring} onReveal={revealSpan} />
         : <p className="text-footnote text-xc-text-3" role={busy ? 'status' : undefined}>{busy ? 'Drawing screens…' : 'Select a screen, a view, or the App.'}</p>
-      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} drawn={drawnTitle} stale={busy} onReveal={revealSpan} onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined} measure={selectedSize} sizeOverlap={sizeOverlap} />}</PaneBoundary>
+      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} drawn={drawnTitle} hiddenView={selectedHiddenView} stale={busy} onReveal={revealSpan} onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined} measure={selectedSize} sizeOverlap={sizeOverlap} />}</PaneBoundary>
   const settingsTitle = <nav className={styles.levelPath} aria-label="Settings level" data-level={level}>
     <button type="button" aria-current={level === 'app' ? 'page' : undefined} onClick={selectApp} data-testid="level-app">App</button>
     {level !== 'app' && focusedScreen && <><span aria-hidden>›</span><button type="button" aria-current={level === 'screen' ? 'page' : undefined} onClick={() => openPage(focusedScreen.page)} data-testid="level-screen">{focusedScreen.name}</button></>}
@@ -1659,7 +1678,7 @@ export function Studio() {
                   onHover={hoverAuthoring} stale={busy} onSelect={selectAuthoring} onEdit={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
                   onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined}
                   multiple={multiSelection.page === layersPage ? multiSelection : NO_MULTI_SELECTION} onMultipleChange={next => setMultiSelection({ ...next, page: layersPage })}
-                  hidden={hidden.views} onShow={showHidden} editable={inspecting} /> : <p className="px-4 py-3 text-footnote text-xc-text-3">Building the view hierarchy…</p>}
+                  hidden={hidden.views} onShow={showHidden} onShowIt={showState} editable={inspecting} /> : <p className="px-4 py-3 text-footnote text-xc-text-3">Building the view hierarchy…</p>}
               /> : <Navigator tabbed
                 key={project.id}
                 assets={<AssetsFolder {...assetsFolder} />}

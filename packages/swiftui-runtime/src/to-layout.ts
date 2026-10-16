@@ -24,6 +24,7 @@ import {
   type ShapeKind,
   type ShapeOutline,
   type Size,
+  type TransitionPart,
 } from '@studio/shared'
 import {
   asDate,
@@ -32,6 +33,7 @@ import {
   formatDateValue,
   formatNumber,
   foundationDescription,
+  identityKey,
   truthy,
   type ClosureValue,
   type SwiftValue,
@@ -103,6 +105,8 @@ import {
   STROKE_STYLE_TYPE,
   TOKEN_TYPE,
   TRANSITION_TYPE,
+  NAMESPACE_TYPE,
+  NUMERIC_TEXT_TYPE,
   asView,
   handlerIdFor,
   payloadOf,
@@ -115,6 +119,7 @@ import {
   type StrokeStylePayload,
   type TokenPayload,
   type TransitionPayload,
+  type NumericTextPayload,
   type ViewArg,
   type ViewValue,
 } from './view-value'
@@ -1261,6 +1266,8 @@ class Converter {
         return
       }
 
+      // An empty group draws nothing, whatever its modifiers: an `if` that drew nothing (Wave 5a).
+      if (view.name === 'Group' && !view.children.length) return
       if (view.name !== 'EmptyView' || view.modifiers.length > 0) out.push(this.convert(view, path, axis))
     })
     return out
@@ -1268,6 +1275,14 @@ class Converter {
 
   convert(view: ViewValue, fallbackPath: string, parentAxis: Axis): LayoutElement {
     const path = view.path ?? fallbackPath
+    // A builder's body with an `if` in it is a group whatever it drew (Wave 5a). Where one
+    // view goes, a group of one is that view and an empty one is nothing, as its modifiers
+    // apply to each view it has.
+    if (view.name === 'Group' && view.children.length <= 1) {
+      const child = view.children[0]
+      if (!child) return { kind: 'empty', id: path }
+      return this.convert({ ...child, path: child.path ?? `${path}-0`, modifiers: [...child.modifiers, ...view.modifiers] }, `${path}-0`, parentAxis)
+    }
     const outer = this.styles
     this.styles = withStyles(outer, view, this.scheme)
     try {
@@ -4176,25 +4191,39 @@ class Converter {
         // form without a `value:` animates its subtree unconditionally, as SwiftUI's
         // deprecated one does.
         const gated = args.some((a) => a.label === 'value')
-        if (gated && !boolArg(labelled(args, 'armed'))) return { kind: 'transitionTiming', hint }
+        if (gated && !boolArg(labelled(args, 'armed'))) return null
 
         return { kind: 'animate', hint }
       }
 
       case 'transition': {
         const spec = payloadOf<TransitionPayload>(args[0]?.value, TRANSITION_TYPE)
-        if (!spec || spec.kind === 'identity') return null
-        const edge = spec.edge
-        return {
-          kind: 'transition',
-          spec: {
-            kind: spec.kind,
-            ...(edge === 'top' || edge === 'bottom' || edge === 'leading' || edge === 'trailing'
-              ? { edge }
-              : {}),
-            duration: 0.3,
-          },
-        }
+        if (!spec) return null
+        return { kind: 'transition', spec: spec.removal ? { ...transitionPart(spec), removal: transitionPart(spec.removal) } : transitionPart(spec) }
+      }
+
+      // How the texts below change their words (Wave 5a): `.numericText()` rolls the digits,
+      // `.opacity` and `.interpolate` cross-fade, `.identity` swaps them.
+      case 'contentTransition': {
+        const value = args[0]?.value
+        const numeric = payloadOf<NumericTextPayload>(value, NUMERIC_TEXT_TYPE)
+        if (numeric) return { kind: 'contentTransition', spec: { kind: 'numeric', ...numeric } }
+        const name = payloadOf<TransitionPayload>(value, TRANSITION_TYPE)?.kind ?? tokenName(value)
+        if (name === 'identity') return { kind: 'contentTransition', spec: { kind: 'identity' } }
+        return name === 'opacity' || name === 'interpolate' ? { kind: 'contentTransition', spec: { kind: 'opacity' } } : null
+      }
+
+      // `.matchedGeometryEffect(id: "card", in: namespace)` (Wave 5a): the namespace is the
+      // view's that declares it, so two copies of a view aren't matched with each other.
+      case 'matchedGeometryEffect': {
+        const space = payloadOf<string>(labelled(args, 'in'), NAMESPACE_TYPE), id = labelled(args, 'id')
+        if (space === null || !id) return null
+        const properties = tokenName(labelled(args, 'properties')), source = labelled(args, 'isSource')
+        return { kind: 'matched', spec: {
+          id: `${space}:${identityKey(id, true)}`,
+          ...(properties === 'position' || properties === 'size' ? { properties } : {}),
+          ...(source?.kind === 'bool' && !source.value ? { isSource: false as const } : {}),
+        } }
       }
 
       // The size category is already scoped to this subtree; re-seeding the body font
@@ -4654,6 +4683,21 @@ function edgeSet(value: SwiftValue | undefined): SafeAreaEdges {
 
 function tokenName(value: SwiftValue | undefined): string | null {
   return payloadOf<TokenPayload>(value, TOKEN_TYPE)?.name ?? null
+}
+
+/**
+ * A transition as the render tree carries it (Wave 5a). `.identity` is kept, as it plays
+ * nothing where a view with no transition fades; combined with another, it adds nothing.
+ */
+function transitionPart(payload: TransitionPayload): TransitionPart {
+  const edge = payload.edge
+  const also = payload.also?.flatMap(part => part.kind === 'identity' && !part.also?.length ? [] : [transitionPart(part)])
+  return {
+    kind: payload.kind,
+    ...(edge === 'top' || edge === 'bottom' || edge === 'leading' || edge === 'trailing' ? { edge } : {}),
+    ...(payload.scale !== undefined ? { scale: payload.scale } : {}),
+    ...(also?.length ? { also } : {}),
+  }
 }
 
 function animationHint(value: SwiftValue | undefined): AnimationPayload | null {

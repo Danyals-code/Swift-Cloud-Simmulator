@@ -104,8 +104,10 @@ export interface InterpreterHost {
    * Swift's builder wraps them in a `TupleView`; what that is here is the host's
    * business, because the interpreter does not know what a view is. Returning
    * undefined leaves the first value, which is what happened before this existed.
+   * `varies` says the body's `if`, `switch` or loop could have drawn a different number
+   * of values, so it stands for them as one value even when it drew one or none (Wave 5a).
    */
-  groupValues?(values: readonly SwiftValue[], span: SourceSpan): SwiftValue | undefined
+  groupValues?(values: readonly SwiftValue[], span: SourceSpan, varies?: boolean): SwiftValue | undefined
 
   /**
    * A string interpolation with a part the host knows better than by its description:

@@ -76,6 +76,12 @@ export interface ViewValue {
    * shown, and these are its dots.
    */
   readonly pager?: PageDots
+  /**
+   * The branch of an `if` or a `switch` that produced this view, as `ifStmt:2/then`, nested
+   * branches joined by `>` (Wave 5a). The resolver keys a view by it, so a view keeps its
+   * key when an `if` before it opens, and the two sides of an `if`/`else` are two views.
+   */
+  readonly branch?: string
 }
 
 /**
@@ -390,18 +396,27 @@ export interface AnimationPayload {
 export const TRANSITION_TYPE = 'Transition'
 
 export interface TransitionPayload {
-  readonly kind: 'opacity' | 'slide' | 'scale' | 'move' | 'identity'
+  readonly kind: 'opacity' | 'slide' | 'scale' | 'move' | 'push' | 'blur' | 'identity'
+  /** `.move(edge:)`'s edge, or `.push(from:)`'s. */
   readonly edge?: string
-  /**
-   * What `.combined(with:)` added.
-   *
-   * Recorded rather than merged: `TransitionSpec` in the render tree carries one
-   * kind, and giving it a list means the renderer animating several properties at
-   * once - which belongs with the rest of the animation work, not with making the
-   * value constructible. The preview draws `kind` and the coverage matrix says so.
-   */
-  readonly combinedWith?: readonly string[]
+  /** `.scale(scale:)`: the size it comes from and goes to. */
+  readonly scale?: number
+  /** What `.combined(with:)` added, each played at the same time (Wave 5a). */
+  readonly also?: readonly TransitionPayload[]
+  /** `.asymmetric(insertion:removal:)`'s removal, when this is its insertion (Wave 5a). */
+  readonly removal?: TransitionPayload
 }
+
+/** `.numericText(countsDown:)` or `.numericText(value:)`, as `.contentTransition` takes it (Wave 5a). */
+export const NUMERIC_TEXT_TYPE = 'NumericText'
+
+export interface NumericTextPayload {
+  readonly countsDown?: boolean
+  readonly value?: number
+}
+
+/** A `@Namespace`'s id, one for each copy of the view that declares it (Wave 5a). */
+export const NAMESPACE_TYPE = 'Namespace.ID'
 
 /** `EdgeInsets(top:leading:bottom:trailing:)`, as `.padding` takes it. */
 export const EDGE_INSETS_TYPE = 'EdgeInsets'

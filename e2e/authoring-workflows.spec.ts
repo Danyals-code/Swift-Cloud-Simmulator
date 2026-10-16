@@ -39,12 +39,19 @@ async function openSection(scope: Locator, summary: string) {
   if (await details.getAttribute('open') === null) await toggle.click()
   await expect(details).toHaveAttribute('open', '')
 }
-/** Scripted actions and appear animations sit in the view's collapsed Advanced section. */
-async function advanced(page: Page, part: 'Other actions' | 'Appear animation') {
+/** Scripted actions sit in the view's collapsed Advanced section. */
+async function advanced(page: Page, part: 'Other actions') {
   const section = page.getByTestId('settings-advanced')
   await openSection(section, 'Advanced')
   await openSection(section, part)
   return section
+}
+/** Sets the selected view's Transition in its Visibility group (Wave 5a), by the words its option shows. */
+async function chooseTransition(page: Page, label: RegExp) {
+  const select = inspector(page).locator('select[data-control-id="motion:transition"]')
+  const option = select.locator('option').filter({ hasText: label }).first()
+  await select.selectOption(await option.getAttribute('value') ?? '')
+  await expect(inspector(page).locator('select[data-control-id="motion:transition"] option:checked')).toHaveText(label)
 }
 /** Preview scenarios are the screen's States, in Screen settings (nothing selected). */
 async function screenStates(page: Page) {
@@ -144,13 +151,10 @@ test('scenarios survive reload and source stays unchanged', async ({ page }) => 
 
 test('reduced motion disables preview transitions', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  // An appear animation is offered on a view an if adds and removes, where it plays.
+  // A transition is offered on a view an if adds and removes, where it plays (Wave 5a).
   await open(page, SOURCE.replace('Card(title: "Primary")', 'if !on { Text("Animated") }; Card(title: "Primary")'))
   await sourceRow(page, 'Text').filter({ hasText: 'Animated' }).click()
-  const animation = await advanced(page, 'Appear animation')
-  await animation.getByLabel('Behavior state').last().selectOption('on')
-  await animation.getByRole('button', { name: 'Add transition', exact: true }).click()
-  await expect(inspector(page).locator('[data-modifier-name="transition"]')).toHaveCount(1)
+  await chooseTransition(page, /^Slide$/)
   const nodes = page.getByTestId('render-tree').locator('[data-node-id]')
   expect(await nodes.evaluateAll(elements => elements.every(e => getComputedStyle(e).animationName === 'none' && getComputedStyle(e).transitionDuration === '0s'))).toBe(true)
 })
@@ -180,18 +184,18 @@ test('row field binding writes real Swift storage and toggles only the selected 
 test('conditional transitions retain exits, cancel on reentry and finish without active stale controls', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await open(page, SOURCE.replace('Card(title: "Primary")', 'if !on { Text("Animated") }; Card(title: "Primary")'))
-  await sourceRow(page, 'Text').filter({ hasText: 'Animated' }).click()
-  const animation = await advanced(page, 'Appear animation')
-  await animation.getByLabel('Behavior state').selectOption('on')
-  await animation.getByLabel('Duration in seconds').fill('1')
-  await animation.getByRole('button', { name: 'Add transition', exact: true }).click()
-  await expect(inspector(page).locator('[data-modifier-name="transition"]')).toHaveCount(1)
+  // The tap animates the change for a second (Wave 5a), and the view fades as it comes and goes.
   await sourceRow(page, 'Button').click()
-  const actions = await advanced(page, 'Other actions')
-  await actions.getByLabel('Action type').selectOption('toggle')
-  await actions.getByLabel('Behavior state').first().selectOption('on')
-  await actions.getByRole('button', { name: 'Apply action', exact: true }).click()
-  await expect(inspector(page)).toContainText('on.toggle()')
+  await inspector(page).getByLabel('On tap', { exact: true }).selectOption('toggle')
+  await inspector(page).getByLabel('Interaction value', { exact: true }).selectOption('on')
+  await inspector(page).getByRole('checkbox', { name: 'Animate this change', exact: true }).check()
+  await inspector(page).getByLabel('Animation style', { exact: true }).selectOption('linear')
+  await inspector(page).getByLabel('Animation duration', { exact: true }).fill('1')
+  await inspector(page).getByLabel('Animation duration', { exact: true }).press('Enter')
+  await inspector(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(inspector(page)).toContainText('animated, Linear, 1 s')
+  await sourceRow(page, 'Text').filter({ hasText: 'Animated' }).click()
+  await chooseTransition(page, /^Fade$/)
   await page.getByTestId('live-toggle').click()
   const preview = page.getByTestId('render-tree'), change = preview.getByRole('button', { name: 'Change', exact: true })
   await change.click()

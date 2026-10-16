@@ -1,4 +1,4 @@
-import { deploymentVersion, isContainerLayout, titledContainer, SCREEN_REMOVAL_REFUSALS } from '@studio/shared'
+import { deploymentVersion, isContainerLayout, titledContainer, SCREEN_REMOVAL_REFUSALS, swiftIdentifier } from '@studio/shared'
 import type { AuthoringNode, AuthoringOperation, ContainerLayout, DesignValue, SourceFile, SourceSpan } from '@studio/shared'
 import { afterOffMarkers, forEachChild, Lexer, Parser, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
@@ -6,7 +6,7 @@ import { Checker } from './checker'
 import { behaviorSettings, configureAction } from './authoring-behavior'
 import { tappablePatch } from './authoring-structure'
 import { emptyComponents } from './authoring-components'
-import { allDeclarations, applyPatches, callOf, identifier, insertMember, namedStruct, ownerOf, patch, raw, shadowsMember, shapedProject, sourceRoot, swiftValue, type FeatureContext, type SourcePatch } from './authoring-context'
+import { allDeclarations, applyPatches, callOf, insertMember, insertStoredMember, namedStruct, ownerOf, patch, raw, shadowsMember, shapedProject, sourceRoot, swiftValue, type FeatureContext, type SourcePatch } from './authoring-context'
 import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
 import { appNavigation, appRoot } from './authoring-navigation-app'
 
@@ -41,7 +41,7 @@ export function screenPatches(ctx: FeatureContext, node: AuthoringNode, operatio
  */
 export function screenEdit(ctx: FeatureContext, node: AuthoringNode, operation: ScreenOperation): { patches: SourcePatch[]; files?: SourceFile[]; removed?: string[] } {
   const file = ctx.files.find(f => f.id === node.source.file)!
-  if (operation.kind !== 'screen-remove' && (!identifier(operation.name) || allDeclarations(ctx).some(d => 'name' in d && d.name === operation.name))) throw new Error('Choose a unique screen name.')
+  if (operation.kind !== 'screen-remove' && (!swiftIdentifier(operation.name) || allDeclarations(ctx).some(d => 'name' in d && d.name === operation.name))) throw new Error('Choose a unique screen name.')
   if (operation.kind === 'screen-create') {
     if (!isContainerLayout(operation.layout) || !operation.title.trim() || operation.title.length > 100) throw new Error('Enter a screen name of 1–100 characters and choose its layout.')
     const title = swiftValue(operation.title), root = SCREEN_ROOTS[operation.layout]?.(deploymentVersion(ctx.deploymentTarget))
@@ -144,14 +144,15 @@ function ownPreviews(ctx: FeatureContext, name: string): { file: string; start: 
  * writes the one line that fixes that - `@State private var loading = false` - on
  * the screen itself, which is where a designer is standing when they need it.
  */
-export function createScreenValue(ctx: FeatureContext, node: AuthoringNode, name: string, value: DesignValue): SourcePatch[] {
+export function createScreenValue(ctx: FeatureContext, node: AuthoringNode, name: string, value: DesignValue, switched = false): SourcePatch[] {
   const owner = node.kind === 'definition' ? namedStruct(ctx, node.name) : ownerOf(ctx, node)
   if (!owner) throw new Error('Select a screen first.')
-  if (!identifier(name) || name.length > 40) throw new Error('Use a value name of letters and numbers, starting with a letter.')
+  if (!swiftIdentifier(name) || name.length > 40) throw new Error('Use a value name of letters and numbers, starting with a letter.')
   if (owner.members.some(member => 'name' in member && member.name === name) || shadowsMember(ctx, node, name)) throw new Error(`This screen already has something called “${name}”.`)
   if (value === null || typeof value === 'number' && !Number.isFinite(value)) throw new Error('Choose what this value starts as.')
   const type = typeof value === 'boolean' ? 'Bool' : typeof value === 'number' ? 'Double' : 'String'
-  return [insertMember(ctx, owner, `@State private var ${name}: ${type} = ${swiftValue(value)}`)]
+  // Shown when's new switch is written as a developer would, its type read from `true` (Wave 5a).
+  return [switched && typeof value === 'boolean' ? insertStoredMember(ctx, owner, `@State private var ${name} = ${value}`) : insertMember(ctx, owner, `@State private var ${name}: ${type} = ${swiftValue(value)}`)]
 }
 
 /** Prepare destinations, values and navigation context as one validated document edit. */
@@ -172,7 +173,7 @@ export function guidedAction(ctx: FeatureContext, node: AuthoringNode, operation
   }
   if (operation.createValue) {
     const { name, value } = operation.createValue, owner = ownerOf(context, current)
-    if (!owner || !identifier(name) || shadowsMember(context, current, name) || owner.members.some(m => 'name' in m && m.name === name)) throw new Error('Choose an unused value name, using letters and numbers.')
+    if (!owner || !swiftIdentifier(name) || shadowsMember(context, current, name) || owner.members.some(m => 'name' in m && m.name === name)) throw new Error('Choose an unused value name, using letters and numbers.')
     if (!['toggle', 'set'].includes(operation.action.type) || !('state' in operation.action) || operation.action.state !== name || value === null || typeof value === 'number' && !Number.isFinite(value)) throw new Error('Choose a valid initial value for this action.')
     const type = typeof value === 'boolean' ? 'Bool' : typeof value === 'number' ? 'Double' : 'String'
     apply([insertMember(context, owner, `@State private var ${name}: ${type} = ${swiftValue(value)}`)])
