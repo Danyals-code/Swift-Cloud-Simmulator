@@ -3,6 +3,7 @@ import type { CompileRequest, Diagnostic, RenderNode, RenderTree } from '@studio
 import { TEMPLATES, appNameOf, createProjectFromTemplate } from '@studio/project-model/templates'
 import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
 import { DEVICES } from '@studio/sim-shell'
+import { libraryPreviewImages } from './helpers/library'
 
 /**
  * The conformance corpus.
@@ -30,6 +31,7 @@ function requestFor(
     safeArea: device.safeArea,
     colorScheme,
     revision: 1,
+    images: libraryPreviewImages(),
   }
 }
 

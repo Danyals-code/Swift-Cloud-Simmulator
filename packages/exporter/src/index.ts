@@ -9,3 +9,4 @@ export { parsePlist, serializePlist, type PlistDict, type PlistValue } from './p
 export * from './xcode-files'
 export * from './handoff-report'
 export * from './zip'
+export { libraryAsset } from './library'

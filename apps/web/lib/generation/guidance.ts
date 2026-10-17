@@ -1,3 +1,4 @@
+import { LIBRARY_IMAGES } from '@studio/project-model'
 import { offeredSymbols } from './offered-symbols'
 import { PREVIEW_STDLIB } from './preview-stdlib'
 
@@ -127,6 +128,15 @@ struct SettingsView: View {
 `
 
 /**
+ * The built-in library (Wave 7b): photos every project draws by name, listed with the alt
+ * text that gives each one's shape, so a hero or a thumbnail gets an image that fits. Only a
+ * name written as a literal is found and bundled when the app is exported. Some of the photos
+ * show real, recognisable people, so they are photography, never anyone the app names.
+ */
+export const LIBRARY_GUIDANCE = `- Photos: every project can show these built-in library images by name, and the export gives Xcode each one the code uses. Show one by its exact name as Image("snowy-peak"), with .resizable() and .scaledToFill() or .scaledToFit() in a .frame or an .aspectRatio, and .clipped() or .clipShape after a fill. Write each name as a string literal where it is chosen, in Image("…") or in a record's literal data (Trip(name: "Coast", photo: "red-roof-house") shown with Image(trip.photo)), never built from parts, which the export cannot find. Never invent an image name. The people in these photos are real: use them only as photography with a neutral caption, never as a user, contact, author, reviewer or coach the app shows, and never give them a name. Keep the photos that show smoking out of health and fitness apps.
+${LIBRARY_IMAGES.map(image => `  - ${image.name}: ${image.alt}`).join('\n')}`
+
+/**
  * The SwiftUI both AI prompts ask for (G1), so that creating and editing an app write
  * the same kind of code.
  *
@@ -152,7 +162,9 @@ export const SWIFTUI_GUIDANCE = `SwiftUI rules. The studio previews the app in a
 - State: @State private var with a literal initial value for a screen's own values (String, Int, Double, Bool, an enum or a Date). Keep the records a screen lists in that screen, as literals: @State private var places: [Place] = [Place(id: 1, name: "Harbor Walk", visited: false), ...], with struct Place: Identifiable { let id: Int; var name: String; var visited: Bool } (Int ids, fields typed String, Int, Double or Bool, or Date for a chart of days, and no initializer of its own). Show them with List(places) { place in ... } or ForEach(places) { place in ... }, and ForEach($places) { $place in ... } when rows change them.
 - Shared state: only when several screens must share data, one @Observable final class, created as @State in the App, passed down with .environment(model), and read with @Environment(Model.self), with @Bindable var model = model inside body for bindings. Never ObservableObject, @Published, @StateObject, @ObservedObject or @EnvironmentObject.
 - SF Symbols, only these names, which the preview draws as iOS does: ${offeredSymbols(300).join(', ')}
-- The preview cannot show these, so never use them: glass button styles; .redacted; Label or DisclosureGroup built from content closures (write Label("Title", systemImage: "star") and DisclosureGroup("More") { ... }); .toolbar(.hidden, for:) for any bar but .navigationBar, .tabBar and .bottomBar, and .toolbarVisibility; ToolbarItem placements other than .topBarLeading, .topBarTrailing, .principal, .bottomBar, .navigation, .status, .primaryAction, .secondaryAction, .confirmationAction and .cancellationAction, such as the .keyboard toolbar placement; .environment(\\.colorScheme, ...) and .preferredColorScheme; timers (Timer, .onReceive), which never fire in the preview; .searchScopes and .searchSuggestions; .presentationBackground with a view (use a Color or a Material); a ForEach over more than 1,000 items; custom EnvironmentKey or @Entry values; DateFormatter (write date.formatted(date: .abbreviated, time: .omitted) or date.formatted(.dateTime.month(.wide).day())); _value = State(initialValue:); TextField(value:format:); AsyncImage, TimelineView, Link, ShareLink, .onMove, .refreshable, .sensoryFeedback, PhotosPicker, MultiDatePicker, Table, OutlineGroup, TipKit, .fileImporter, .fileExporter, MapKit, web views, SwiftData, GeometryReader, custom Layouts and preference keys.
+- Loading placeholders: .redacted(reason: .placeholder) on a view draws its texts and images as gray bars, as iOS does, and .unredacted() keeps one part shown.
+${LIBRARY_GUIDANCE}
+- The preview cannot show these, so never use them: glass button styles; Label or DisclosureGroup built from content closures (write Label("Title", systemImage: "star") and DisclosureGroup("More") { ... }); .toolbar(.hidden, for:) for any bar but .navigationBar, .tabBar and .bottomBar, and .toolbarVisibility; ToolbarItem placements other than .topBarLeading, .topBarTrailing, .principal, .bottomBar, .navigation, .status, .primaryAction, .secondaryAction, .confirmationAction and .cancellationAction, such as the .keyboard toolbar placement; .environment(\\.colorScheme, ...) and .preferredColorScheme; timers (Timer, .onReceive), which never fire in the preview; .searchScopes and .searchSuggestions; .presentationBackground with a view (use a Color or a Material); a ForEach over more than 1,000 items; custom EnvironmentKey or @Entry values; DateFormatter (write date.formatted(date: .abbreviated, time: .omitted) or date.formatted(.dateTime.month(.wide).day())); _value = State(initialValue:); TextField(value:format:); AsyncImage, TimelineView, Link, ShareLink, .onMove, .refreshable, .sensoryFeedback, PhotosPicker, MultiDatePicker, Table, OutlineGroup, TipKit, .fileImporter, .fileExporter, MapKit, web views, SwiftData, GeometryReader, custom Layouts and preference keys.
 - Real SwiftUI that Xcode builds but the preview can't draw yet, so leave it out for now: scrolling charts (.chartScrollableAxes), chart selection (.chartXSelection, .chartAngleSelection), custom axis marks (AxisMarks in .chartXAxis { } or .chartYAxis { }), chosen series colors (.chartForegroundStyleScale; .foregroundStyle(by:) picks them), and .interpolationMethod, .symbol and .lineStyle on a mark.
 ${PREVIEW_STDLIB}
 

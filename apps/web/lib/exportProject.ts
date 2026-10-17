@@ -1,8 +1,10 @@
-import { exportArchive, type ExportReview, type ScreenSnapshot } from '@studio/exporter'
-import type { Project } from '@studio/project-model'
+import { exportArchive, libraryAsset, type ExportReview, type ScreenSnapshot } from '@studio/exporter'
+import { LIBRARY_IMAGES, libraryImageURL, type Project } from '@studio/project-model'
+import { Lexer } from '@studio/swift-syntax/lexer'
 import { getDevice } from '@studio/sim-shell'
 import { viewsDrawing, type AppAccent, type ArchiveFormat, type CompileResult, type PagePreview } from '@studio/shared'
 import { STUDIO_BUILD } from './build'
+import { shadowedLibraryNames } from './library'
 import type { LogFile } from './eventLog'
 import { screenNaming } from './designTree'
 import { screenCatalog } from './screens'
@@ -23,6 +25,8 @@ export interface ExportSteps {
   events(projectId: string, format: ArchiveFormat): Promise<LogFile>
   /** Hands the archive to the browser's downloads. */
   download(name: string, bytes: Uint8Array): void
+  /** A library image's served bytes. The page's own fetch when left out. */
+  library?(name: string): Promise<Uint8Array>
 }
 
 export interface ExportOutcome {
@@ -39,6 +43,7 @@ const SAVE_MS = 2_500
 const EVENTS_MS = 5_000
 const COMPILE_MS = 40_000
 const CAPTURE_MS = 10_000
+const LIBRARY_MS = 30_000
 /**
  * What the report says when the event log is missing, or holds only the exporting
  * session's events. The complete bundle's report is the only place that says so: the
@@ -69,9 +74,54 @@ export async function exportProject(project: Project, format: ArchiveFormat, pre
   const unlogged = !log ? NO_LOG : log.partial ? PARTIAL_LOG : null
   const review = captured && unlogged ? { ...captured, issues: [...captured.issues ?? [], unlogged] } : captured
   const tint = capture ? capture.accent : accent
-  const archive = exportArchive(project, { format, review, build: STUDIO_BUILD, events: log?.text, now: new Date(), ...(tint ? { accent: tint } : {}) })
+  const exported = await withLibraryImages(project, steps.library ?? fetchLibraryImage)
+  const archive = exportArchive(exported, { format, review, build: STUDIO_BUILD, events: log?.text, now: new Date(), ...(tint ? { accent: tint } : {}) })
   steps.download(archive.name, archive.bytes)
   return { name: archive.name, screenImages: review?.screens.length ?? 0, issues: archive.issues.filter(issue => issue !== unlogged) }
+}
+
+/**
+ * Every library image name the Swift writes as a whole string literal, in the library's order,
+ * leaving out those the project's own images shadow (Wave 7b, `shadowedLibraryNames`), so the
+ * asset catalog never holds two images whose names differ only in case.
+ *
+ * Literals rather than `Image("…")` calls, since an app keeps image names in its model data
+ * too (`Trail(photo: "snowy-peak")`). Read with the lexer, so a name in a comment is not one;
+ * a name built at runtime, `"photo-\(i)"`, can't be found, and the guidance asks for literals.
+ */
+export function usedLibraryNames(project: Project): string[] {
+  const used = new Set<string>()
+  const scan = (text: string) => {
+    for (const token of Lexer.tokenize(text, 'library').tokens) {
+      const segments = token.kind === 'stringLiteral' ? token.segments ?? [] : []
+      if (segments.length && segments.every(segment => segment.kind === 'text')) used.add(segments.map(segment => segment.value).join(''))
+      for (const segment of segments) if (segment.kind === 'interpolation') scan(segment.value)
+    }
+  }
+  for (const file of project.files) scan(file.text)
+  const shadowed = shadowedLibraryNames(project.assets ?? [])
+  return LIBRARY_IMAGES.filter(image => used.has(image.name) && !shadowed.has(image.name)).map(image => image.name)
+}
+
+/**
+ * An export-only copy of the project with the library images its code uses, or the project
+ * itself when it uses none, so such an export is byte for byte what it was. An image that can't
+ * be downloaded stops the export: an app missing an image it draws is not one to hand over.
+ */
+async function withLibraryImages(project: Project, download: (name: string) => Promise<Uint8Array>): Promise<Project> {
+  const names = usedLibraryNames(project)
+  if (!names.length) return project
+  const images = await Promise.all(names.map(name => within(() => download(name), LIBRARY_MS).then(bytes => libraryAsset(name, bytes), () => {
+    throw new Error(`Couldn’t download the library image “${name}”. Check your connection and export again.`)
+  })))
+  return { ...project, assets: [...project.assets ?? [], ...images] }
+}
+
+/** A library image as the page serves it. */
+async function fetchLibraryImage(name: string): Promise<Uint8Array> {
+  const response = await fetch(libraryImageURL(name))
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return new Uint8Array(await response.arrayBuffer())
 }
 
 /** What the studio says once the archive is in the downloads. */

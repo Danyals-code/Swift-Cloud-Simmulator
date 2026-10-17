@@ -4,6 +4,7 @@ import { isPreviewTarget, type SourceFile } from '@studio/shared'
 import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
 import { encodeText, type ExportBundle } from './bundle'
 import { importSourceAssets } from './import-assets'
+import { isLibraryAsset } from './library'
 import { validatePromptHistory } from '@studio/project-model'
 
 export const PROJECT_DOCUMENT = '.swiftstudio/project.json'
@@ -41,6 +42,11 @@ export interface Handoff {
   readonly colors?: readonly { readonly name: string; readonly path: string }[]
   /** Font files, by id and where the export put them. Absent when there are none, so older readers see no change. */
   readonly fonts?: readonly { readonly id: string; readonly path: string }[]
+  /**
+   * Library images the code uses, by name, written to the catalog beside the own images but
+   * not among `assets` (Wave 7b). Absent when there are none, so older readers see no change.
+   */
+  readonly library?: readonly string[]
   readonly baseManifest: ProjectManifest
   readonly baseStudio?: StudioMetadata
 }
@@ -70,7 +76,10 @@ export function validatePortableProject(value: unknown): asserts value is Projec
   validateFonts((value.fonts ?? []) as FontAsset[])
 }
 /** Source files and resources stay outside the optional Studio metadata. */
-export function attachHandoff(project: Project, bundle: ExportBundle, { root, sourcePath, catalog: catalogPath, fonts: fontFolder }: HandoffPaths, { build, events }: HandoffExtras = {}): ExportBundle {
+export function attachHandoff(exported: Project, bundle: ExportBundle, { root, sourcePath, catalog: catalogPath, fonts: fontFolder }: HandoffPaths, { build, events }: HandoffExtras = {}): ExportBundle {
+  // The project as the studio holds it: library images are references, not its own images.
+  const library = (exported.assets ?? []).filter(isLibraryAsset).map(asset => asset.name)
+  const project = library.length ? { ...exported, assets: exported.assets!.filter(asset => !isLibraryAsset(asset)) } : exported
   const normalized = normalizeProject(project)
   validatePortableProject(normalized)
   const files = new Map(bundle)
@@ -82,6 +91,7 @@ export function attachHandoff(project: Project, bundle: ExportBundle, { root, so
     assets: (project.assets ?? []).map(a => ({ id: a.id, name: a.name, scale: a.scale, light: `${catalogPath}/${a.name}.imageset/light.${a.light.mime === 'image/png' ? 'png' : 'jpg'}`, ...(a.dark ? { dark: `${catalogPath}/${a.name}.imageset/dark.${a.dark.mime === 'image/png' ? 'png' : 'jpg'}` } : {}) })),
     ...(project.colors?.length ? { colors: project.colors.map(color => ({ name: color.name, path: `${catalogPath}/${color.name}.colorset/Contents.json` })) } : {}),
     ...(project.fonts?.length ? { fonts: project.fonts.map(font => ({ id: font.id, path: `${fontFolder}/${fontFileName(font)}` })) } : {}),
+    ...(library.length ? { library } : {}),
     baseManifest: project.manifest, baseStudio: project.studio,
   }
   const put = (path: string, bytes: Uint8Array) => { if (files.has(path)) throw new Error('The project conflicts with an export metadata path.'); files.set(path, bytes) }

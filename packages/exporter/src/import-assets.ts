@@ -1,4 +1,5 @@
 import { newProjectId, projectFromFiles, readColorSet, readImage, validColorName, type ColorAsset, type ImageAsset, type OpenedFile, type Project } from '@studio/project-model'
+import { isLibraryCopy } from './library'
 import { decodeText, validatePortableProject, type Handoff } from './portable'
 
 /** The same universal PNG/JPEG image-set subset that the Studio exports. */
@@ -51,6 +52,8 @@ export function importSourceAssets(files: readonly OpenedFile[], entries: Readon
       } else throw new Error(`Image set ${name} uses an unsupported appearance.`)
     }
     if (!light || !scale) throw new Error(`Image set ${name} needs a default light image.`)
+    // An unchanged library image goes back to being a reference to the library (Wave 7b).
+    if (isLibraryCopy(name, scale, light, dark)) continue
     assets.push({ id: newProjectId(), name, scale, light, dark })
   }
   const source = projectFromFiles(files)

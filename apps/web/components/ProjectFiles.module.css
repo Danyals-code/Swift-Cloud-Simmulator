@@ -17,6 +17,9 @@
 .disclosure > svg { transition: transform var(--duration-fast) var(--ease-in-out); }
 .label[aria-expanded='true'] > .disclosure > svg { transform: rotate(90deg); }
 .thumb { flex-shrink: 0; width: 16px; height: 16px; object-fit: contain; border-radius: var(--radius-sm); background: var(--color-xc-fill); }
+/* A library row (Wave 7b): tagged, and dimmed when an own image of its name replaces it. */
+.tag { flex-shrink: 0; padding: 0 4px; border-radius: var(--radius-sm); background: var(--color-xc-fill); font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-xc-text-3); }
+.row[data-replaced] > .thumb, .row[data-replaced] > .name { opacity: .45; }
 .swatch { flex-shrink: 0; width: 16px; height: 16px; border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-xc-text) 12%, transparent); }
 .add, .actions button { display: grid; place-items: center; width: var(--control-height-sm); height: var(--control-height-sm); flex-shrink: 0; margin-right: -4px; border-radius: var(--radius-md); color: var(--color-xc-text-2); cursor: pointer; transition: background-color var(--duration-fast), color var(--duration-fast); }
 .add:hover:not([aria-disabled]), .actions button:hover, .actions button[aria-expanded='true'] { background: var(--color-xc-fill); color: var(--color-xc-text); }

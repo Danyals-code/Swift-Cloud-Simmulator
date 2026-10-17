@@ -2133,11 +2133,17 @@ class Converter {
     return symbol !== null ? { symbol } : bitmap && { bitmap }
   }
 
-  /** The project image `Image("name")` draws, as a PNG or JPEG data URL, in this appearance. */
+  /**
+   * The image `Image("name")` draws in this appearance: a project image as a PNG or JPEG data URL,
+   * or a built-in library image at its same-origin path (Wave 7b). Never a host, so code can't
+   * make the preview fetch a remote image. The path is the project model's `LIBRARY_PATH`,
+   * written out so the worker doesn't load the project model; `tests/library-preview.test.ts`
+   * keeps the two in step.
+   */
   private bitmapOf(name: string | null): { url: string; name: string; width: number; height: number } | null {
     const image = name === null ? undefined : this.images.find(image => image.name === name)
     const url = image && (this.scheme === 'dark' ? image.dark ?? image.light : image.light)
-    return image && url && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(url) ? { url, name: image.name, width: image.width, height: image.height } : null
+    return image && url && /^(data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+|\/library\/v1\/[a-z0-9-]+\.jpg)$/.test(url) ? { url, name: image.name, width: image.width, height: image.height } : null
   }
 
   /** What one span's own modifier chain sets, as overrides on its surroundings. */

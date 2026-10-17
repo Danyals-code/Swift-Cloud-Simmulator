@@ -1,3 +1,5 @@
+import { imageDataURL, LIBRARY_IMAGES, libraryImageURL, readImage } from '@studio/project-model'
+
 let symbolSprite: Promise<Document> | undefined
 async function inlineSymbols(root: HTMLElement) {
   for (const use of root.querySelectorAll('svg use')) {
@@ -12,6 +14,24 @@ async function inlineSymbols(root: HTMLElement) {
     for (const attr of [...use.attributes]) if (attr.name !== 'href' && attr.name !== 'xlink:href') group.setAttribute(attr.name, attr.value)
     const content = definition.cloneNode(true) as Element; content.removeAttribute('id'); group.append(content); use.replaceWith(group)
   }
+}
+
+/** The path of a library image the studio serves itself, as the manifest names it, or null for any other source (Wave 7b). */
+export function libraryImagePath(src: string, origin: string): string | null {
+  const url = new URL(src, origin)
+  return url.origin === origin && !url.search && !url.hash && LIBRARY_IMAGES.some(image => libraryImageURL(image.name) === url.pathname) ? url.pathname : null
+}
+
+/** Library images as data URLs, kept for the session: a complete export captures many screens. */
+const libraryData = new Map<string, Promise<string>>()
+function libraryDataURL(path: string): Promise<string> {
+  let data = libraryData.get(path)
+  if (!data) {
+    data = fetch(path).then(async response => { if (!response.ok) throw new Error('A library image could not be loaded. Try exporting again.'); return imageDataURL(readImage(new Uint8Array(await response.arrayBuffer()))) })
+    data.catch(() => libraryData.delete(path))
+    libraryData.set(path, data)
+  }
+  return data
 }
 
 /** Browser-only export of the actual preview DOM, including bundled image data. */
@@ -41,7 +61,11 @@ export async function capturePreview(element: HTMLElement, width: number, height
       copy.removeAttribute('placeholder')
     }
     if (source instanceof HTMLSelectElement && copy instanceof HTMLSelectElement) for (let index = 0; index < source.options.length; index++) { if (source.options[index]!.selected) copy.options[index]!.setAttribute('selected', ''); else copy.options[index]!.removeAttribute('selected') }
-    if (source instanceof HTMLImageElement) { if (!source.currentSrc.startsWith('data:')) throw new Error('This image is not bundled. Import it into Project resources before exporting.'); copy.setAttribute('src', source.currentSrc) }
+    if (source instanceof HTMLImageElement) {
+      const library = libraryImagePath(source.currentSrc, window.location.origin)
+      if (!library && !source.currentSrc.startsWith('data:')) throw new Error('This image is not bundled. Import it into Project resources before exporting.')
+      copy.setAttribute('src', library ? await libraryDataURL(library) : source.currentSrc)
+    }
   }
   await inlineSymbols(clone)
   clone.querySelectorAll('style, script, link').forEach(node => node.remove())

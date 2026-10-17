@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ASSET_LIMITS, imageDataURL, type ImageAsset } from '@studio/project-model'
 import { decodeImportedImage, importedImageName } from '../lib/images'
+import { libraryRows } from '../lib/library'
 import { paletteGate, searchCatalog, type ViewSnippet } from '../lib/viewCatalog'
 import { Spotlight } from './Spotlight'
 import { Icon } from './ui/Icon'
@@ -113,7 +114,8 @@ function ImagePicker({ target, assets, onImage, onBack, onClose }: Pick<Props, '
   const pending = useRef(false)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
-  async function insert(close: () => void, choice: ImageAsset | File) {
+  /** An own image, a file to add, or a library image's name (Wave 7b). */
+  async function insert(close: () => void, choice: ImageAsset | File | string) {
     if (pending.current) return
     pending.current = true
     setBusy(true); setError(null)
@@ -125,7 +127,7 @@ function ImagePicker({ target, assets, onImage, onBack, onClose }: Pick<Props, '
         imported = { id: crypto.randomUUID(), name: importedImageName(choice.name, assets), scale: 1, light }
       }
       if (!mounted.current) return
-      const problem = await onImage(imported?.name ?? (choice as ImageAsset).name, imported)
+      const problem = await onImage(imported?.name ?? (typeof choice === 'string' ? choice : (choice as ImageAsset).name), imported)
       if (!mounted.current) return
       if (problem) setError(problem)
       else close()
@@ -154,8 +156,12 @@ function ImagePicker({ target, assets, onImage, onBack, onClose }: Pick<Props, '
         {/* Bundled data URLs are already decoded and bounded at import. */}
         <img src={imageDataURL(asset.light)} alt="" /><span>{asset.name}</span>
       </button>)}
-      {!assets.length && <p className={styles.empty}>Upload your first image to add it to the canvas.</p>}
+      {!assets.length && <p className={styles.empty}>Upload an image, or choose one from the Library.</p>}
+      <h3 className={styles.imageHeading}>Library</h3>
+      {libraryRows(assets).filter(row => !row.replaced).map(row => <button key={row.name} type="button" disabled={busy} className={styles.imageChoice} onClick={() => void insert(close, row.name)} aria-label={`Add ${row.name}, from the Library`} title={row.alt}>
+        <img src={row.thumb} alt="" loading="lazy" /><span>{row.name}</span>
+      </button>)}
     </div>
-    <footer className={styles.footer}>Choose an image to insert it. Manage variants in App settings → Images.</footer>
+    <footer className={styles.footer}>Choose an image to insert it. Library images are exported only when used. Manage your own in App settings → Images.</footer>
   </>}</Spotlight>
 }

@@ -6,6 +6,7 @@ import { ColorField } from './controls/ColorField'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
 import { SymbolPicker } from './SymbolPicker'
 import { copyColor } from '../lib/componentInputs'
+import { libraryChoices } from '../lib/library'
 import { SYSTEM_COLOR_SWATCHES } from '../lib/colorValue'
 import styles from './AuthoringInspector.module.css'
 
@@ -14,7 +15,7 @@ const TOKEN_OPACITY = 'A token takes no opacity here. Change it in Code.'
 
 /**
  * A copy's input drawn by what it is (Wave 5b): a symbol with the symbol picker, an image
- * with the bundled images, a colour with the colour field. Any other input is drawn as a
+ * with the bundled and Library images, a colour with the colour field. Any other input is drawn as a
  * value is, so a name list never stands in for a symbol or a colour.
  */
 export function CopyInput({ control, assets, tokens, onChange }: { control: DesignControl; assets?: readonly { readonly name: string; readonly id: string }[]; tokens: readonly SharedStyle[]; onChange: PropertyChange }) {
@@ -23,8 +24,10 @@ export function CopyInput({ control, assets, tokens, onChange }: { control: Desi
   const [error, setError] = useState<string | null>(null)
   const change = async (value: string) => { const problem = await onChange(control.id, value); setError(problem); return problem }
   const locked = !!control.disabledReason
-  // The image the copy shows now stays a choice even when it isn't among the bundled ones.
-  const images = assets?.length && (assets.some(asset => asset.name === control.value) || !control.value ? assets.map(asset => asset.name) : [control.value, ...assets.map(asset => asset.name)])
+  // The project's images, then the Library's it doesn't replace (Wave 7b). The image the copy
+  // shows now stays a choice even when it is neither.
+  const names = [...(assets ?? []).map(asset => asset.name), ...libraryChoices(assets ?? [])]
+  const images = names.includes(control.value) || !control.value ? names : [control.value, ...names]
   // The symbol picker says its own refusal, so only the image and colour fields set one here (Wave 5b).
   const field = kind === 'symbol' ? <><div className={styles.row}><span>{control.label}</span><span><code>{control.value}</code></span></div>{!locked && <SymbolPicker selected={control.value} onChoose={value => onChange(control.id, value)} />}</>
     : kind === 'image' && images ? <label className={styles.controlLabel}><span>{control.label}</span>

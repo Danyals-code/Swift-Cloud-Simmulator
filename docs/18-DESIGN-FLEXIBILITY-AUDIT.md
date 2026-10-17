@@ -160,6 +160,8 @@ Ordered so each wave makes Design trustworthy before making it bigger. Each item
 
 **Wave 6: Rendering fidelity, long tail (ongoing).** SF Symbols coverage toward the most-used 600 names (look-alikes, see below); Liquid Glass and iOS 27 chrome (search tab, ToolbarSpacer, bottom accessory; done in 6c); custom font files in Assets, exported with `UIAppFonts` (done in 6f); Markdown and AttributedString; images in text; toolbar placements (done in 6c); date picker styles; symbol rendering modes; shape and text masks; `zIndex`; views beside NavigationStack (done in 6c) and embedded page TabViews (done in 4c); MeshGradient; scroll paging and content margins; basic Charts (BarMark, LineMark, SectorMark; done in 6e); popovers (the compact bubble, done in 6c).
 
+**Wave 7: Built-in images and template polish (six PRs).** Template sources as static files, which frees the bundle for polish (7a); a built-in library of 15 photos every project can draw by name, listed in Assets, Add and the image pickers, offered to both AI prompts, and exported only when the code uses them (7b, done); then the templates polished in four PRs, photo-led first (7c to 7f). Before 7b a designer had no picture to start from but their own files, and every template drew SF Symbols only.
+
 ## Constraints that shape the roadmap
 
 - **JavaScript budget.** The client budget is 750 KB with 1.1 KB left (748.9 KB). Waves 2 to 5 add panel code; the semantic writers run in the compiler worker, which is also counted. A budget raise, or moving the inspector's heavier editors behind dynamic imports, is needed before Wave 2.

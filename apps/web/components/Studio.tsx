@@ -13,7 +13,8 @@ import type { HiddenViewInfo, ViewSiteInfo } from '@studio/shared'
 import { AddView } from './AddView'
 import { fontFiles, importAssetFiles } from '../lib/fonts'
 import { draggingFiles, imageViewSnippet, importImageFiles } from '../lib/images'
-import { imageDataURL, validateAssets, validateFonts, type FontAsset, type ImageAsset } from '@studio/project-model'
+import { previewImages } from '../lib/library'
+import { libraryImage, validateAssets, validateFonts, type FontAsset, type ImageAsset } from '@studio/project-model'
 import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
 import { findLayer, insertionLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
@@ -351,7 +352,8 @@ export function Studio() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [tab, flush])
 
-  const images = useMemo(() => project?.assets?.map(asset => ({ name: asset.name, width: asset.light.width / asset.scale, height: asset.light.height / asset.scale, light: imageDataURL(asset.light), dark: asset.dark ? imageDataURL(asset.dark) : undefined })), [project?.assets])
+  // The project's images, then the built-in library's by path (Wave 7b).
+  const images = useMemo(() => previewImages({ assets: project?.assets }), [project?.assets])
   const device = getDevice(project?.manifest.device ?? DEFAULT_DEVICE)
   const files = project?.files ?? NO_FILES
   const [scenarioSelection, setScenarioSelection] = useState<{ projectId: string; key: string } | null>(null)
@@ -1015,14 +1017,14 @@ export function Studio() {
   const addTargetLayer = useMemo(() => insertionLayer(pageHierarchy ?? layers, selectedLayer), [selectedLayer, pageHierarchy, layers])
 
   /**
-   * Puts an Image of an Assets image into `target`. `added` are images arriving with
+   * Puts an Image of an Assets or library image into `target`. `added` are images arriving with
    * it, committed in the same undo step so the Image never names a missing asset.
    */
   const placeImage = useCallback(async (name: string, target: ViewLayer | undefined, added: readonly ImageAsset[] = []): Promise<string | null> => {
     const model = result?.authoring
     const node = model?.nodes.find(item => item.id === model.runtimeToSource[target?.id ?? ''])
     if (!node) return 'Select a view or stack on the canvas first.'
-    if (!added.length && !project?.assets?.some(item => item.name === name)) return 'This image is no longer in the project.'
+    if (!added.length && !project?.assets?.some(item => item.name === name) && !libraryImage(name)) return 'This image is no longer in the project.'
     return performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'insert', snippet: imageViewSnippet(name) }, undefined, undefined, added.length ? [...(project?.assets ?? []), ...added] : undefined)
   }, [result?.authoring, project, performDesignEdit])
 
@@ -1956,7 +1958,7 @@ export function Studio() {
       {galleryOpen ? (
         <TemplateGallery
           currentProject={project}
-          onImport={async (expected, incoming, removedNames, removedColors) => { const referenceProblem = await validateResourceRemoval(incoming.files, removedNames, removedColors); if (referenceProblem) return referenceProblem; const problem = await useStudio.getState().importProject(expected, incoming); if (!problem) setGalleryOpen(false); return problem }}
+          onImport={async (expected, incoming, removedNames, removedColors) => { const referenceProblem = await validateResourceRemoval(incoming.files, removedNames.filter(name => !libraryImage(name)), removedColors); if (referenceProblem) return referenceProblem; const problem = await useStudio.getState().importProject(expected, incoming); if (!problem) setGalleryOpen(false); return problem }}
           projectId={project.id}
           projectName={project.manifest.name}
           fileCount={files.length}

@@ -1,6 +1,7 @@
 import { validatePromptHistory, type Project } from '@studio/project-model'
 import { normalizePreviewTarget } from '@studio/shared'
 import { encodeText, newBundle, type ExportBundle } from './bundle'
+import { isLibraryAsset } from './library'
 import { EVENT_LOG, type StudioBuild } from './portable'
 
 export interface ScreenSnapshot {
@@ -58,6 +59,8 @@ export function attachExportReview(project: Project, bundle: ExportBundle, revie
   const chat = history.map(message => `## ${message.role === 'user' ? 'You' : 'AI'} · ${new Date(message.createdAt).toISOString()}\n\n${message.provider} / ${message.model} · ${message.kind}${message.status ? ` · ${message.status}` : ''}\n\n${message.selection ? `Selected: ${JSON.stringify(message.selection)}\n\n` : ''}${quote(message.content)}${message.changedFiles?.length ? `\n\nFiles: ${message.changedFiles.join(', ')}` : ''}`).join('\n\n')
   output.put(`${base}/chat-history.md`, encodeText(`# Prompts and AI conversation\n\n${chat || 'No prompts or AI messages have been saved in this project.'}\n`))
   const line = (value: string) => value.replace(/[\r\n]/g, ' ')
+  // Library images the code uses are in the app's catalog too, so they count as bundled (Wave 7b).
+  const library = (project.assets ?? []).filter(isLibraryAsset).length
   const made = build ? `\nExported by Swift Web Studio build ${line(build.commit).slice(0, 7)} (commit ${line(build.commit)}, built ${line(build.builtAt)}).\n` : ''
   const issues = review.issues?.length ? `\n## Known issues\n\n${review.issues.map(issue => `- ${line(issue)}`).join('\n')}\n` : ''
   const report = `# ${line(project.manifest.name)}: project report
@@ -93,7 +96,7 @@ ${screens.map(screen => `- ${line(screen.name)} (${screen.kind}): ${screen.path}
 
 ${project.files.map(file => `- ${line(file.id)}`).join('\n')}
 
-${project.assets?.length ?? 0} bundled images; ${project.fonts?.length ? `${project.fonts.length} font files (${project.fonts.map(font => line(font.postScriptName)).join(', ')}); ` : ''}${project.colors?.length ?? 0} color sets; ${project.studio?.components.length ?? 0} documented components; ${project.studio?.scenarios.length ?? 0} saved preview scenarios.
+${project.assets?.length ?? 0} bundled images${library ? `, including ${library} from the studio library` : ''}; ${project.fonts?.length ? `${project.fonts.length} font files (${project.fonts.map(font => line(font.postScriptName)).join(', ')}); ` : ''}${project.colors?.length ?? 0} color sets; ${project.studio?.components.length ?? 0} documented components; ${project.studio?.scenarios.length ?? 0} saved preview scenarios.
 
 ## Preview diagnostics
 

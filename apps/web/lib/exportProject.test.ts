@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { unzipSync } from 'fflate'
-import { emptyStudioMetadata, type Project } from '@studio/project-model'
+import { emptyStudioMetadata, readImage, type Project } from '@studio/project-model'
+import { exportArchive } from '@studio/exporter'
 import { createDefaultProject } from '@studio/project-model/templates'
 import { getDevice } from '@studio/sim-shell'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
-import { exportNote, exportProject, type ExportSteps } from './exportProject'
+import { STUDIO_BUILD } from './build'
+import { exportNote, exportProject, usedLibraryNames, type ExportSteps } from './exportProject'
 
 /**
  * Exporting, as the Export button runs it.
@@ -150,5 +153,78 @@ describe('the Export button', () => {
     expect(logs).toEqual([LOG])
     expect(report).toContain('- The studio’s event log could not be read in full, so events.jsonl holds only the events of the session that exported it.')
     expect(outcome.issues).toEqual([])
+  })
+})
+
+/** A library image's bytes as the studio serves them. */
+const served = (name: string) => new Uint8Array(readFileSync(new URL(`../public/library/v1/${name}.jpg`, import.meta.url)))
+/** A design whose Swift files are `texts`, one each. */
+function swift(...texts: string[]): Project {
+  const base = createDefaultProject(0)
+  return { ...base, files: texts.map((text, i) => ({ id: `Sources/File${i}.swift`, text })) }
+}
+
+describe('the library images an export needs (Wave 7b)', () => {
+  it('finds library names written as whole string literals, wherever the code keeps them', () => {
+    const project = swift(
+      'struct Trail { let photo: String }\nlet trails = [Trail(photo: "snowy-peak"), Trail(photo: "giant-redwoods")]',
+      'import SwiftUI\nstruct Row: View { var body: some View { Text("Look \\(Image("sea-tram")) here") } }',
+      'import SwiftUI\nstruct Hero: View { var body: some View { Image("red-bus-bridge").resizable() } }',
+    )
+    expect(usedLibraryNames(project)).toEqual(['giant-redwoods', 'sea-tram', 'red-bus-bridge', 'snowy-peak'])
+  })
+
+  it('ignores comments, other spellings, longer strings and names built at runtime', () => {
+    const project = swift([
+      '// Image("blue-mosaic")',
+      '/* Image("arch-view") */',
+      'let a = "Snowy-Peak"',
+      'let b = "snowy-peak 2"',
+      'let c = "portrait-\\(n)"',
+      'let d = "sea-tram.jpg"',
+    ].join('\n'))
+    expect(usedLibraryNames(project)).toEqual([])
+  })
+
+  it('leaves out a library image the project’s own images shadow, an older project’s other letter case included, so the catalog never holds both', () => {
+    const own = { id: 'own', name: 'Snowy-Peak', scale: 1 as const, light: readImage(served('blue-mosaic')) }
+    const project = { ...swift('let a = "snowy-peak"; let b = "sea-tram"'), assets: [own] }
+    expect(usedLibraryNames(project)).toEqual(['sea-tram'])
+  })
+})
+
+describe('exporting a design that uses library images', () => {
+  it('downloads only the library images the code uses and puts them in the catalog at 3x', async () => {
+    const project = app('VStack { Image("snowy-peak"); Image("sea-tram") }'), asked: string[] = []
+    const { steps, downloads } = browser({ library: async name => { asked.push(name); return served(name) } })
+
+    await exportProject(project, 'xcodeproj', PREVIEW, steps)
+
+    expect(asked).toEqual(['sea-tram', 'snowy-peak'])
+    const entries = unzipSync(downloads[0]!.bytes)
+    const sets = Object.keys(entries).filter(path => path.endsWith('.imageset/Contents.json')).map(path => path.split('/').at(-2))
+    expect(sets.sort()).toEqual(['sea-tram.imageset', 'snowy-peak.imageset'])
+    const [, handoff] = Object.entries(entries).find(([path]) => path.endsWith('.swiftstudio/project.json'))!
+    expect(JSON.parse(new TextDecoder().decode(handoff))).toMatchObject({ assets: [], library: ['sea-tram', 'snowy-peak'] })
+  })
+
+  it('stops with a clear message, and downloads nothing, when a library image cannot be downloaded', async () => {
+    const project = app('Image("snowy-peak")')
+    const { steps, downloads } = browser({ library: async () => { throw new TypeError('Failed to fetch') } })
+
+    await expect(exportProject(project, 'xcodeproj', PREVIEW, steps)).rejects.toThrow('Couldn’t download the library image “snowy-peak”. Check your connection and export again.')
+    expect(downloads).toEqual([])
+  })
+
+  it('exports a design that uses no library image exactly as before, asking for none', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 9, 17, 12, 0))
+    const project = app('Text("Hello")')
+    const { steps, downloads } = browser({ library: async () => { throw new Error('not asked') } })
+
+    await exportProject(project, 'xcodeproj', PREVIEW, steps)
+
+    const expected = exportArchive(project, { format: 'xcodeproj', build: STUDIO_BUILD, events: LOG, now: new Date() })
+    expect(Buffer.from(downloads[0]!.bytes).equals(Buffer.from(expected.bytes))).toBe(true)
   })
 })
