@@ -1,4 +1,4 @@
-import { graphemes, inlineSymbolBox, textLineHeight, textMeasureKey, type ResolvedFont, type TextMeasureRequest, type TextMetricsData, type MeasuredTextData } from '@studio/shared'
+import { graphemes, inlineSymbolBox, leadingFamily, projectFamilies, textLineHeight, textMeasureKey, type PreviewFontAsset, type ResolvedFont, type TextMeasureRequest, type TextMetricsData, type MeasuredTextData } from '@studio/shared'
 
 /**
  * Synchronous shaped-run measurement, cached by the full font and text. Browsers
@@ -515,10 +515,29 @@ const FAMILY_HEIGHTS: Readonly<Record<string, number>> = {
 /** Each CSS stack's measured height, or 0 for SF Pro's, read once per stack rather than per line. */
 const stackHeights = new Map<string, number>()
 
-/** How tall a line of `font`'s glyphs is: a measured built-in family's, or SF Pro's. */
+/**
+ * Each project font family's line, for 1 pt of its size, by its CSS family (Wave 6f): the
+ * ascender to the descender of its regular face, as `hhea` gives them. The line gap is left
+ * out, as iOS 27 leaves it out of the ten families above: Helvetica Neue, Futura and Times
+ * New Roman have one, and the simulator draws their lines without it.
+ */
+const NO_HEIGHTS: ReadonlyMap<string, number> = new Map()
+let projectHeights = NO_HEIGHTS
+
+/** The project's font families' line heights, for the compile in progress. A project without fonts allocates nothing. */
+export function setProjectFontHeights(fonts: readonly PreviewFontAsset[] | undefined): void {
+  if (!fonts?.length) { projectHeights = NO_HEIGHTS; return }
+  const heights = new Map<string, number>()
+  for (const [name, { metrics }] of projectFamilies(fonts)) if (metrics.unitsPerEm > 0) heights.set(name, (metrics.ascender - metrics.descender) / metrics.unitsPerEm)
+  projectHeights = heights
+}
+
+/** How tall a line of `font`'s glyphs is: a project font's, a measured built-in family's, or SF Pro's. */
 export function glyphHeight(font: Pick<ResolvedFont, 'family' | 'size'>): number {
+  const own = projectHeights.size ? projectHeights.get(leadingFamily(font.family)) : undefined
+  if (own) return Math.ceil(font.size * own * 3 - 1e-6) / 3
   let ratio = stackHeights.get(font.family)
-  if (ratio === undefined) stackHeights.set(font.family, ratio = FAMILY_HEIGHTS[/^"([^"]+)"/.exec(font.family)?.[1] ?? ''] ?? 0)
+  if (ratio === undefined) stackHeights.set(font.family, ratio = FAMILY_HEIGHTS[leadingFamily(font.family)] ?? 0)
   return ratio ? Math.round(font.size * ratio * 3) / 3 : textLineHeight(font.size)
 }
 

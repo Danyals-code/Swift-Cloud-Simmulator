@@ -36,7 +36,6 @@ describe('reading a font', () => {
   })
 
   it.each([
-    ['a custom font', 'Text("A").font(.custom("Avenir", size: 18))'],
     ['a font worked out at run time', 'Text("A").font(big ? .title : .body)'],
     ['a size from a property that is no @ScaledMetric', 'Text("A").font(.system(size: computed))'],
   ])('leaves %s to Code', (_, body) => {

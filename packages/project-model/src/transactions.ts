@@ -3,6 +3,7 @@ import { sourcePathsConflict, type Project } from './types'
 import { readStudioMetadata, type StudioMetadata } from './studio-metadata'
 import { validateAssets, type ImageAsset } from './assets'
 import { validateColors, type ColorAsset } from './colors'
+import { validateFonts, type FontAsset } from './fonts'
 
 export interface DocumentSelection { readonly file: string; readonly offset: number }
 export interface ProjectTransaction {
@@ -13,6 +14,8 @@ export interface ProjectTransaction {
   readonly assets?: { readonly before: readonly ImageAsset[] | undefined; readonly after: readonly ImageAsset[] }
   /** Colour sets change with the Swift that names them, in the same undo step. */
   readonly colors?: { readonly before: readonly ColorAsset[] | undefined; readonly after: readonly ColorAsset[] }
+  /** Font files, compared by identity as images are. */
+  readonly fonts?: { readonly before: readonly FontAsset[] | undefined; readonly after: readonly FontAsset[] }
   readonly selection?: DocumentSelection | null
 }
 export type TransactionResult = { readonly ok: true; readonly project: Project } | { readonly ok: false; readonly reason: string }
@@ -32,19 +35,23 @@ export function applyProjectTransaction(project: Project, revision: number, tran
     if (project.assets !== transaction.assets.before) return { ok: false, reason: 'Project images changed while this edit was being prepared.' }
     try { validateAssets(transaction.assets.after) } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : 'Invalid image resources.' } }
   }
+  if (transaction.fonts) {
+    if (project.fonts !== transaction.fonts.before) return { ok: false, reason: 'Project fonts changed while this edit was being prepared.' }
+    try { validateFonts(transaction.fonts.after) } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : 'Invalid font files.' } }
+  }
   if (transaction.colors) {
     if (JSON.stringify(project.colors ?? []) !== JSON.stringify(transaction.colors.before ?? [])) return { ok: false, reason: 'Project colours changed while this edit was being prepared.' }
     try { validateColors(transaction.colors.after) } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : 'Invalid colour sets.' } }
   }
   const changes = transaction.changes.filter(c => c.before !== c.after || c.deleted)
   const colorsChanged = !!transaction.colors && JSON.stringify(transaction.colors.before ?? []) !== JSON.stringify(transaction.colors.after)
-  if (!changes.length && !transaction.assets && !colorsChanged && (!transaction.studio || JSON.stringify(transaction.studio.before) === JSON.stringify(transaction.studio.after))) return { ok: true, project }
+  if (!changes.length && !transaction.assets && !transaction.fonts && !colorsChanged && (!transaction.studio || JSON.stringify(transaction.studio.before) === JSON.stringify(transaction.studio.after))) return { ok: true, project }
   const byId = new Map(changes.map(c => [c.file, c]))
   const files = project.files.filter(f => !byId.get(f.id)?.deleted).map(f => byId.has(f.id) ? { ...f, text: byId.get(f.id)!.after } : f)
   for (const c of changes) if (c.before === null && !c.deleted) files.push({ id: c.file, text: c.after })
   if (!files.length) return { ok: false, reason: 'A project needs at least one Swift file.' }
   if (sourcePathsConflict(files.map(file => file.id))) return { ok: false, reason: 'Swift file paths must be unique, including letter case and Unicode spelling.' }
-  return { ok: true, project: { ...project, files: changes.length ? files : project.files, studio: transaction.studio?.after ?? project.studio, assets: transaction.assets?.after ?? project.assets, colors: colorsChanged ? transaction.colors!.after : project.colors, updatedAt: Date.now() } }
+  return { ok: true, project: { ...project, files: changes.length ? files : project.files, studio: transaction.studio?.after ?? project.studio, assets: transaction.assets?.after ?? project.assets, fonts: transaction.fonts?.after ?? project.fonts, colors: colorsChanged ? transaction.colors!.after : project.colors, updatedAt: Date.now() } }
 }
 
 /** Translate a source selection through typing or an unambiguous file rename. */
@@ -70,7 +77,7 @@ export function translateDocumentSelection(before: Project | null, after: Projec
 }
 
 interface Entry { before: Project; after: Project; beforeSelection: DocumentSelection | null; afterSelection: DocumentSelection | null; group?: string; time: number }
-const sameDocument = (a: Project, b: Project) => a.id === b.id && JSON.stringify([a.files, a.studio, a.folders, a.manifest, a.colors ?? []]) === JSON.stringify([b.files, b.studio, b.folders, b.manifest, b.colors ?? []]) && a.assets === b.assets
+const sameDocument = (a: Project, b: Project) => a.id === b.id && JSON.stringify([a.files, a.studio, a.folders, a.manifest, a.colors ?? []]) === JSON.stringify([b.files, b.studio, b.folders, b.manifest, b.colors ?? []]) && a.assets === b.assets && a.fonts === b.fonts
 
 /** One bounded timeline for typing, structural edits and atomic project changes. */
 export class DocumentHistory {
@@ -100,6 +107,6 @@ export class DocumentHistory {
     // An undo/redo boundary always ends a typing group.
     entry.group = undefined
     const target = direction === 'undo' ? entry.before : entry.after
-    return { project: { ...current, files: target.files, studio: target.studio, folders: target.folders, assets: target.assets, colors: target.colors, manifest: target.manifest, updatedAt: Date.now() }, selection: direction === 'undo' ? entry.beforeSelection : entry.afterSelection }
+    return { project: { ...current, files: target.files, studio: target.studio, folders: target.folders, assets: target.assets, fonts: target.fonts, colors: target.colors, manifest: target.manifest, updatedAt: Date.now() }, selection: direction === 'undo' ? entry.beforeSelection : entry.afterSelection }
   }
 }

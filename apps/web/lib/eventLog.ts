@@ -7,7 +7,7 @@ import type { RecoveryEvent } from './recovery'
 import type { ProjectOrigin } from './store'
 
 /** Changes Design makes to the studio's own records rather than through the planner. */
-export type StudioChange = 'state-save' | 'state-delete' | 'screen-rename' | 'screen-move' | 'layer-rename' | 'images' | 'variant-save' | 'variant-delete' | 'component-describe'
+export type StudioChange = 'state-save' | 'state-delete' | 'screen-rename' | 'screen-move' | 'layer-rename' | 'images' | 'fonts' | 'variant-save' | 'variant-delete' | 'component-describe'
 
 /** A change made in Design, in the studio's own words: `designEvent` says which. */
 export interface DesignEvent {

@@ -336,10 +336,10 @@ describe('a font token worked out by a getter, or in a custom face', () => {
     expect(bodyOf(setLayer(fonts('Text("A").font(.heading)'), 'Text', [{ section: 'text', font: {} }]))).toBe('        Text("A").font(.system(size: 20, weight: .semibold))')
   })
 
-  it('shows a custom face behind a token with its name and size, read only, with why', () => {
+  it('shows a family behind a token with its name and size, read only, with why', () => {
     const read = layerOf(fonts('Text("A").font(.brand)'), 'Text')
     expect(read.text!.font).toMatchObject({ state: 'code', value: { style: null, size: 20, face: 'Avenir', token: '.brand' } })
-    expect(read.text!.font.disabledReason).toBe('This text’s font, .brand, is Avenir, a custom face the panel doesn’t offer. Change it in Code.')
+    expect(read.text!.font.disabledReason).toBe('This text’s font, .brand, is in the Avenir family, which a text style token doesn’t set. Change it in Code.')
     expect(read.tokens?.['.brand']).toMatchObject({ declaration: { name: 'Font.brand' } })
     expect(planLayer(fonts('Text("A").font(.brand)'), 'Text', [{ section: 'text', font: { style: 'title' } }])).toMatchObject({ ok: false })
   })

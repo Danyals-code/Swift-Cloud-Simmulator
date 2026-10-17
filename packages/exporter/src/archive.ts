@@ -81,11 +81,12 @@ function archiveName(project: Project, format: ArchiveFormat, now: Date): string
   return `${name || 'Project'}-${stamp}${SUFFIX[format]}`
 }
 
-/** What a complete bundle holds besides its screens, at most: the Swift twice (the sources and the project record), the images, the event log, and the scaffolding, report and chat around them. */
+/** What a complete bundle holds besides its screens, at most: the Swift twice (the sources and the project record), the images and fonts, the event log, and the scaffolding, report and chat around them. */
 function bundleBytesBesidesScreens(project: Project, events: string | undefined): number {
   const swift = project.files.reduce((total, file) => total + encodeText(file.text).length, 0)
   const images = (project.assets ?? []).reduce((total, asset) => total + asset.light.bytes.length + (asset.dark?.bytes.length ?? 0), 0)
-  return 2 * swift + images + encodeText(events ?? '').length + 2 * 1024 * 1024
+  const fonts = (project.fonts ?? []).reduce((total, font) => total + font.bytes.length, 0)
+  return 2 * swift + images + fonts + encodeText(events ?? '').length + 2 * 1024 * 1024
 }
 
 /** The capture without the images an archive can't take, in order until it is full, and with why each other one is missing. */
@@ -118,7 +119,7 @@ function sourcesOnly(project: Project, reason: string, { build, events }: Handof
   for (const file of project.files) files.set(`${root}/${unusedPath(plainSegments(file.id) || 'Untitled.swift', taken)}`, encodeText(native ? withoutStudioMarkers(file.text) : file.text))
   files.set(`${root}/project-backup.json`, encodeText(projectBackup(project, build)))
   if (events !== undefined) files.set(`${root}/${EVENT_LOG}`, encodeText(events))
-  files.set(`${root}/KNOWN-ISSUES.md`, encodeText(`# What this export leaves out\n\nThe project could not be built into the format you chose, so this archive holds its Swift files exactly as they were written. project-backup.json holds everything else it had: images, colour sets, designer settings and the AI conversation.\n\nWhy: ${reason}\n`))
+  files.set(`${root}/KNOWN-ISSUES.md`, encodeText(`# What this export leaves out\n\nThe project could not be built into the format you chose, so this archive holds its Swift files exactly as they were written. project-backup.json holds everything else it had: images, ${Array.isArray(project.fonts) && project.fonts.length ? 'fonts, ' : ''}colour sets, designer settings and the AI conversation.\n\nWhy: ${reason}\n`))
   return zipBundle(files)
 }
 

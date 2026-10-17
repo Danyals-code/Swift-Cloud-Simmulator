@@ -1719,11 +1719,10 @@ export class SwiftUIHost implements InterpreterHost {
     // the one previews actually use. `Binding.constant(…)` reaches `callMember`.
     if (member === 'constant') return this.constantBinding(call)
 
-    // `.custom("Avenir", size: 24)`. The face itself cannot be honoured - a browser
-    // has no access to a project's bundled fonts, and the checker says so - but the
-    // *size* is a layout input, and dropping it left every custom-font view previewing
-    // at the 17-point body size. It grows with Dynamic Type as `.body` does, or as the
-    // style `relativeTo:` names, and a `fixedSize:` does not grow.
+    // `.custom("Avenir", size: 24)`: in the project's font file of that name (Wave 6f), a
+    // face iOS ships (Wave 6a), or else the system face, which the checker says. The size
+    // is kept either way, as a layout input. It grows with Dynamic Type as `.body` does,
+    // or as the style `relativeTo:` names, and a `fixedSize:` does not grow.
     if (member === 'custom') {
       const size = numberOf(call.args.find((a) => a.label === 'size')?.value)
       const fixed = numberOf(call.args.find((a) => a.label === 'fixedSize')?.value)

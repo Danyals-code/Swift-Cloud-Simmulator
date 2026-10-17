@@ -39,8 +39,26 @@ export interface PreviewColorAsset {
   readonly dark?: string
 }
 
+/**
+ * A font file of the project's own (Wave 6f), as the name table and metrics read it: what
+ * `.custom(name)` matches, by PostScript name or family. Its bytes go to the worker once,
+ * with `setProjectFonts`, not with every compile.
+ */
+export interface PreviewFontAsset {
+  readonly postScriptName: string
+  readonly family: string
+  readonly weight: number
+  readonly italic: boolean
+  readonly metrics: { readonly unitsPerEm: number; readonly ascender: number; readonly descender: number; readonly lineGap: number }
+}
+
+/** A project font with its file, which the worker registers as a `FontFace`. */
+export interface ProjectFontFile extends PreviewFontAsset { readonly bytes: Uint8Array }
+
 export interface CompileRequest {
   readonly images?: readonly PreviewImageAsset[]
+  /** The project's own font files, which `.custom(name)` draws in and the checker knows (Wave 6f). */
+  readonly fonts?: readonly PreviewFontAsset[]
   /** The project's colour sets, one value per appearance. */
   readonly colors?: readonly PreviewColorAsset[]
   /** Separates live app state when the IDE opens a different project. */
@@ -314,6 +332,8 @@ export interface CompilerApi {
    * startup, before the first compile.
    */
   setFontMetrics(fonts: readonly MeasuredFontData[]): Promise<void>
+  /** The project's font files (Wave 6f), registered in the worker: on start and whenever they change, before the next compile. */
+  setProjectFonts(fonts: readonly ProjectFontFile[]): Promise<void>
   setTextMeasurements(data: readonly MeasuredTextData[], revision: number, generation?: number): Promise<CompileResult | null>
   relayout(revision: number): Promise<CompileResult>
   /**

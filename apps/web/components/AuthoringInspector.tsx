@@ -162,7 +162,7 @@ export function AuthoringInspector({ node, drawn, hiddenView, stale, onReveal, o
         })}</div>}
       </section>
 
-      {!['definition', 'template', 'branch'].includes(selected.kind) && <LayerSections key={`layer:${sourceKey}`} node={selected} onCommand={features?.onCommand} tokens={tokens} disabled={stale} measure={stale ? undefined : measure} sizeOverlap={sizeOverlap} />}
+      {!['definition', 'template', 'branch'].includes(selected.kind) && <LayerSections key={`layer:${sourceKey}`} node={selected} onCommand={features?.onCommand} tokens={tokens} fonts={features?.fonts} disabled={stale} measure={stale ? undefined : measure} sizeOverlap={sizeOverlap} />}
 
       {!['definition', 'template', 'branch'].includes(selected.kind) && <section className={styles.settingsSection}>
         <ModifierStack disabled={stale} snapshot={features?.snapshot} key={sourceKey} node={selected} onChange={onChange} onCommand={features?.onCommand} onReveal={onReveal} features={features}

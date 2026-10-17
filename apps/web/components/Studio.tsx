@@ -11,8 +11,9 @@ import type { DropPosition, FileId, PagePreview, PreviewScenario, RenderNode, Re
 import { AI_EDITING, useStudio, type PreviewSettings } from '../lib/store'
 import type { HiddenViewInfo, ViewSiteInfo } from '@studio/shared'
 import { AddView } from './AddView'
+import { fontFiles, importAssetFiles } from '../lib/fonts'
 import { draggingFiles, imageViewSnippet, importImageFiles } from '../lib/images'
-import { imageDataURL, validateAssets, type ImageAsset } from '@studio/project-model'
+import { imageDataURL, validateAssets, validateFonts, type FontAsset, type ImageAsset } from '@studio/project-model'
 import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
 import { findLayer, insertionLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
@@ -362,7 +363,7 @@ export function Studio() {
   const { result, stale, workerError, dispatch, reset, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews, setMeasureTarget, followMeasureTarget, layerDrafts } = useCompiler({
     projectId: project?.id,
     deploymentTarget: project?.manifest.deploymentTarget,
-    images, colors: project?.colors, scenario, componentDescriptions: project?.studio?.components, designScreens: project?.studio?.screens, previewScreen: standalonePreview,
+    images, fonts: project?.fonts, colors: project?.colors, scenario, componentDescriptions: project?.studio?.components, designScreens: project?.studio?.screens, previewScreen: standalonePreview,
     files,
     device,
     colorScheme: previewSettings.colorScheme,
@@ -901,6 +902,7 @@ export function Studio() {
       projectId: project.id,
       files,
       images,
+      fonts: project.fonts,
       colors: project.colors,
       designScreens: project.studio?.screens,
       componentDescriptions: project.studio?.components,
@@ -934,22 +936,41 @@ export function Studio() {
     } catch (e) { return e instanceof Error ? e.message : 'Could not update images.' } finally { editingRef.current = false }
   }, [project, stale, snapshot, planDesignEdit])
 
-  /** Picked or dropped images that are not being placed: into the Assets folder, and nowhere else. */
-  const importImages = useCallback(async (files: readonly File[]): Promise<string | null> => {
+  /** Adds or removes the project's font files (Wave 6f), with any images that came with them, as one undo step. */
+  const updateFonts = useCallback(async (fonts: readonly FontAsset[], assets?: readonly ImageAsset[]): Promise<string | null> => {
+    const state = useStudio.getState()
+    if (!project || state.project !== project || stale || editingRef.current) return 'The project changed or is still compiling. Try again.'
+    try {
+      validateFonts(fonts)
+      if (assets) validateAssets(assets)
+      return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], fonts: { before: project.fonts, after: fonts }, ...assets ? { assets: { before: project.assets, after: assets } } : {} }, studioChange('fonts'))
+    } catch (e) { return e instanceof Error ? e.message : 'Could not update fonts.' }
+  }, [project, stale])
+
+  /**
+   * Picked or dropped images and font files that are not being placed: into the Assets
+   * folder, and nowhere else. Font files are read for their names and kept beside the images.
+   */
+  const importImagesAndFonts = useCallback(async (files: readonly File[]): Promise<string | null> => {
     if (!project) return 'Open a project first.'
-    const { added, problems } = await importImageFiles(files, project.assets ?? [])
-    if (!added.length) return problems.join(' ') || 'There were no images to add.'
-    const problem = await updateAssets([...(project.assets ?? []), ...added])
-    return problem ?? (problems.length ? `Added ${added.map(asset => asset.name).join(', ')}. ${problems.join(' ')}` : null)
-  }, [project, updateAssets])
+    const { fonts, images, problems } = await importAssetFiles(files, { assets: project.assets ?? [], fonts: project.fonts ?? [] })
+    const names = [...images.map(asset => asset.name), ...fonts.map(font => font.postScriptName)]
+    if (!names.length) return problems.join(' ') || 'There were no images to add.'
+    const assets = images.length ? [...(project.assets ?? []), ...images] : undefined
+    const problem = fonts.length ? await updateFonts([...(project.fonts ?? []), ...fonts], assets) : await updateAssets(assets!)
+    return problem ?? (problems.length ? `Added ${names.join(', ')}. ${problems.join(' ')}` : null)
+  }, [project, updateAssets, updateFonts])
+
+  /** Removes a font file; text that names it draws in the system font, and a warning says so. */
+  const removeFont = useCallback((id: string) => updateFonts((project?.fonts ?? []).filter(font => font.id !== id)), [project, updateFonts])
 
   /** Images dropped outside the canvas and the Assets folder still belong in Assets. */
   const dropToAssets = useCallback(async (files: readonly File[]) => {
     if (!files.length) return
-    const problem = await importImages(files)
-    setEditNote(problem ?? `Added ${files.length === 1 ? files[0]!.name : `${files.length} images`} to Assets.`)
+    const problem = await importImagesAndFonts(files)
+    setEditNote(problem ?? `Added ${files.length === 1 ? files[0]!.name : `${files.length} files`} to Assets.`)
     if (!problem) { setHierarchyView('files'); setPane('navigator', true) }
-  }, [importImages, setPane])
+  }, [importImagesAndFonts, setPane])
 
   const deleteScenario = useCallback((key: string) => {
     const state = useStudio.getState()
@@ -1016,19 +1037,23 @@ export function Studio() {
     const target = dropped ? insertionLayer(layers, dropped) : undefined
     if (target && pageId) setDesignPageSelection({ projectId: project.id, id: pageId })
     if ('asset' in image) { setEditNote(target ? await placeImage(image.asset, target) : `Drop ${image.asset} onto a view to place it.`); return }
+    // A font file is not placed: the drop goes to Assets, where Family finds it.
+    if (fontFiles(image.files).fonts.length) { await dropToAssets(image.files); return }
     const { added, problems } = await importImageFiles(image.files, project.assets ?? [])
     const first = added[0]
     const problem = !first ? null : target ? await placeImage(first.name, target, added) : await updateAssets([...(project.assets ?? []), ...added])
     const rest = added.slice(1).map(asset => asset.name).join(', ')
     const outcome = problem ?? (!first ? null : !target ? `Added ${added.map(asset => asset.name).join(', ')} to Assets. Drag one onto a view to place it.` : rest ? `Placed ${first.name}. ${rest} ${added.length > 2 ? 'are' : 'is'} in Assets.` : `Placed ${first.name}.`)
     setEditNote([outcome, ...problems].filter(Boolean).join(' ') || null)
-  }, [project, layers, placeImage, updateAssets])
+  }, [project, layers, placeImage, updateAssets, dropToAssets])
 
   const assetsFolder: AssetsFolderProps = {
     images: project?.assets ?? [],
     colors: project?.colors ?? [],
+    fonts: project?.fonts ?? [],
+    onRemoveFont: removeFont,
     busy: stale || preparingEdit,
-    onImport: importImages,
+    onImport: importImagesAndFonts,
     onInsert: name => placeImage(name, addTargetLayer),
     onManage: () => { setMode('design'); selectApp() },
   }
@@ -1538,7 +1563,7 @@ export function Studio() {
                   const state = useStudio.getState(), before = project.studio
                   if (state.project !== project || !before || stale || preparingEdit) return 'Wait for the current design to finish updating.'
                   return commitStudioRecords(project, { ...before, variants: before.variants?.filter(v => v.owner !== owner || v.name !== name) }, 'variant-delete')
-                }, onPickNavigation: navigationPicker.start, assets: project.assets, snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
+                }, onPickNavigation: navigationPicker.start, assets: project.assets, fonts: project.fonts, snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
                   const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
                   if (state.project !== project || stale) return 'Wait for the current source to compile.'
                   return commitStudioRecords(project, { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] }, 'component-describe')
@@ -1889,7 +1914,7 @@ export function Studio() {
       {!layout.showPreview && <div className={styles.codeFooter}>{previewTools}</div>}
 
       </div>
-      {reviewOpen && <DesignReview key={project.id} name={project.manifest.name} pages={designPages ?? []} selectedPageId={designPage?.id} options={{ projectId: project.id, files: project.files, images, colors: project.colors, scenario, designScreens: project.studio?.screens, componentDescriptions: project.studio?.components, deploymentTarget: project.manifest.deploymentTarget, previewTarget: project.manifest.previewTarget }} onClose={() => setReviewOpen(false)} onInspect={source => {
+      {reviewOpen && <DesignReview key={project.id} name={project.manifest.name} pages={designPages ?? []} selectedPageId={designPage?.id} options={{ projectId: project.id, files: project.files, images, fonts: project.fonts, colors: project.colors, scenario, designScreens: project.studio?.screens, componentDescriptions: project.studio?.components, deploymentTarget: project.manifest.deploymentTarget, previewTarget: project.manifest.previewTarget }} onClose={() => setReviewOpen(false)} onInspect={source => {
         setReviewOpen(false)
         const node = sourceLayerAround(result?.authoring, source)
         if (node) selectAuthoring(node)

@@ -222,11 +222,25 @@ export interface FontValue {
    */
   readonly token?: string
   /**
-   * A custom face a font token is declared with, `Font.custom("Avenir", size: 20)` (Wave 3b):
-   * shown with the token, read only, as the panel offers no custom faces.
+   * The family `.custom("Brand", …)` names, a font file of the project's or one iOS ships
+   * (Wave 6f); absent, or null in a change, for the system font. Behind a font token,
+   * `Font.custom("Avenir", size: 20)`, it is shown with the token, read only (Wave 3b).
    */
-  readonly face?: string
+  readonly face?: string | null
 }
+
+/**
+ * Why Design is off with a family set (Wave 6f): the writer's refusal and the panel's note,
+ * one sentence, so the two can't say it differently.
+ */
+export const DESIGN_NEEDS_SYSTEM = 'Design applies to the system font. Choose System in Family to use it.'
+
+/**
+ * What the Family note tells a designer whose text has a design (Wave 6f). A design beside a
+ * family is left to Code, so the writer drops it, and System can't know it again: the Swift
+ * keeps no trace of it, and remembering it anywhere else would show a value the code lacks.
+ */
+export const FAMILY_DROPS_DESIGN = 'A family has its own design, so choosing one drops this text’s design, and System doesn’t bring it back.'
 
 /**
  * A drop shadow, as `.shadow(color:radius:x:y:)` draws one, in points; `color` is null for

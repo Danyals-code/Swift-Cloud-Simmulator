@@ -1,4 +1,4 @@
-import type { Project } from '@studio/project-model'
+import { fontFileName, type Project } from '@studio/project-model'
 import { serializePlist, type PlistDict, type PlistValue } from './plist'
 
 /**
@@ -183,6 +183,20 @@ export function generatePbxproj(project: Project): XcodeProjectPlan {
     fileRef: assetsRef,
   })
 
+  // Font files, in a Fonts group, copied to the bundle's top level; and the Info.plist
+  // that lists them, which is named by INFOPLIST_FILE and so belongs to no build phase.
+  const fonts = (project.fonts ?? []).map(fontFileName).sort()
+  const fontRefs = fonts.map(file => ids.id(`fileref:Fonts/${file}`)), fontBuildFiles = fonts.map(file => ids.id(`build:Fonts/${file}`))
+  const fontsGroup = ids.id('group:fonts'), plistRef = ids.id('fileref:Info.plist')
+  fonts.forEach((file, i) => {
+    define(built, fontRefs[i]!, file, { isa: 'PBXFileReference', lastKnownFileType: 'file', path: file, sourceTree: '<group>' })
+    define(built, fontBuildFiles[i]!, `${file} in Resources`, { isa: 'PBXBuildFile', fileRef: fontRefs[i]! })
+  })
+  if (fonts.length) {
+    define(built, fontsGroup, 'Fonts', { isa: 'PBXGroup', children: fontRefs, path: 'Fonts', sourceTree: '<group>' })
+    define(built, plistRef, 'Info.plist', { isa: 'PBXFileReference', lastKnownFileType: 'text.plist.xml', path: 'Info.plist', sourceTree: '<group>' })
+  }
+
   // --- groups ----------------------------------------------------------------
   define(built, mainGroup, '', {
     isa: 'PBXGroup',
@@ -191,7 +205,7 @@ export function generatePbxproj(project: Project): XcodeProjectPlan {
   })
   define(built, targetGroup, name, {
     isa: 'PBXGroup',
-    children: [...sources.map((f) => fileRefs.get(f)!), assetsRef],
+    children: [...sources.map((f) => fileRefs.get(f)!), assetsRef, ...(fonts.length ? [fontsGroup, plistRef] : [])],
     path: name,
     sourceTree: '<group>',
   })
@@ -218,7 +232,7 @@ export function generatePbxproj(project: Project): XcodeProjectPlan {
   define(built, resourcesPhase, 'Resources', {
     isa: 'PBXResourcesBuildPhase',
     buildActionMask: '2147483647',
-    files: [assetsBuildFile],
+    files: [assetsBuildFile, ...fontBuildFiles],
     runOnlyForDeploymentPostprocessing: '0',
   })
 
@@ -357,7 +371,9 @@ function releaseProjectSettings(): PlistDict {
  *
  * `GENERATE_INFOPLIST_FILE = YES` with `INFOPLIST_KEY_*` entries is how Xcode 13+
  * handles Info.plist. Emitting a physical plist instead would work but adds a file
- * that immediately drifts from the build settings beside it.
+ * that immediately drifts from the build settings beside it. The one exception is
+ * `UIAppFonts`, which no `INFOPLIST_KEY_*` can write: a project with fonts gets a plist
+ * holding only that key, and Xcode merges it with the generated one.
  */
 function targetSettings(project: Project): PlistDict {
   const orientationsPhone =
@@ -371,6 +387,7 @@ function targetSettings(project: Project): PlistDict {
     CURRENT_PROJECT_VERSION: '1',
     ENABLE_PREVIEWS: 'YES',
     GENERATE_INFOPLIST_FILE: 'YES',
+    ...(project.fonts?.length ? { INFOPLIST_FILE: `${project.manifest.name}/Info.plist` } : {}),
     INFOPLIST_KEY_UIApplicationSceneManifest_Generation: 'YES',
     INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: 'YES',
     INFOPLIST_KEY_UILaunchScreen_Generation: 'YES',

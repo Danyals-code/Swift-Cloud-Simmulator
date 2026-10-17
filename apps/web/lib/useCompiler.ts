@@ -4,7 +4,7 @@ import * as Comlink from 'comlink'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
   CompileResult, CompileRequest,
-  PreviewScenario, ComponentDescription, PreviewImageAsset,
+  PreviewScenario, ComponentDescription, PreviewImageAsset, ProjectFontFile,
   PreviewTarget,
   DynamicTypeSize,
   CompilerApi,
@@ -24,9 +24,12 @@ import type {
 import type { DeviceSpec } from '@studio/sim-shell'
 import { sameStart } from '@studio/shared'
 import { measureFontsWhenReady, measureTextBatch } from './fontMetrics'
+import { pageFonts, previewFonts } from './fonts'
 import { PreviewEvents } from './previewEvents'
 import { recordCoverage } from './telemetry'
 import { WorkerRequests } from './workerRequests'
+
+const NO_FONTS: readonly ProjectFontFile[] = []
 
 /** Edit-to-recompile debounce. Long enough to coalesce a fast typist's burst, short enough to feel live. */
 const DEBOUNCE_MS = 150
@@ -66,6 +69,8 @@ interface WorkerHandle {
   requests: WorkerRequests
   /** Set once this worker has compiled the program: until then it has no app to send events to. */
   compiled?: boolean
+  /** The project font files this worker last registered (Wave 6f), so they go again only when they change. */
+  fonts?: readonly ProjectFontFile[]
   dispose(): void
 }
 
@@ -99,6 +104,11 @@ function spawnWorker(onFailure: (error: Error) => void): WorkerHandle {
  */
 export interface CompilerOptions {
   images?: readonly PreviewImageAsset[]
+  /**
+   * The project's font files (Wave 6f). Their bytes are registered on the page and in the
+   * worker once, when they change; each compile is told only their names and metrics.
+   */
+  fonts?: readonly ProjectFontFile[]
   /** Colour sets from the asset catalog, which `Color("name")` - a colour token - reads. */
   colors?: CompileRequest['colors']
   projectId?: string
@@ -136,7 +146,7 @@ export interface CompilerOptions {
 export function useCompiler({
   projectId,
   deploymentTarget,
-  scenario, componentDescriptions, designScreens, previewScreen, images, colors,
+  scenario, componentDescriptions, designScreens, previewScreen, images, fonts, colors,
   files,
   device,
   colorScheme,
@@ -257,11 +267,17 @@ export function useCompiler({
 
     try {
       await handle.ready
+      // Font files are registered before the compile they draw in: on the page, where the
+      // canvas draws and measures, and in the worker. A project without any skips this.
+      if ((fonts ?? NO_FONTS) !== (handle.fonts ?? NO_FONTS)) {
+        handle.fonts = fonts
+        await Promise.all([pageFonts(fonts ?? NO_FONTS), handle.api.setProjectFonts(fonts ?? NO_FONTS)])
+      }
       if (revision !== revisionRef.current || handle !== handleRef.current) return true
       const result = await handle.api.compile({
           projectId,
           deploymentTarget,
-          scenario, componentDescriptions, designScreens, previewScreen, images, colors,
+          scenario, componentDescriptions, designScreens, previewScreen, images, colors, fonts: previewFonts(fonts),
           files: files.map((f) => ({ id: f.id, text: f.text })),
           canvas: { width: device.width, height: device.height },
           safeArea: device.safeArea,
@@ -292,7 +308,7 @@ export function useCompiler({
     } finally {
       if (compilingRef.current === revision) compilingRef.current = 0
     }
-  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, scenario, componentDescriptions, designScreens, previewScreen, images, colors, contextKey])
+  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, scenario, componentDescriptions, designScreens, previewScreen, images, fonts, colors, contextKey])
 
   const latestCompile = useRef(runCompile)
   const latestPaused = useRef(paused)

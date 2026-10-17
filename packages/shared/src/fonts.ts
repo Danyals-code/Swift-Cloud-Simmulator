@@ -63,3 +63,12 @@ export function textLineHeight(size: number): number {
 
 /** SwiftUI's text styles, as `.font(.title)` and `Font.title` name them, largest first. */
 export const TEXT_STYLES: readonly string[] = ['largeTitle', 'title', 'title2', 'title3', 'headline', 'subheadline', 'body', 'callout', 'footnote', 'caption', 'caption2']
+
+/**
+ * Each text style's size in points at the default text size, Large, as Apple's iOS type
+ * table gives it and the iOS 27 simulator draws it: what `.custom(name, size:relativeTo:)`
+ * is written at to keep a style (Wave 6f).
+ */
+export const TEXT_STYLE_POINTS: Readonly<Record<string, number>> = {
+  largeTitle: 34, title: 28, title2: 22, title3: 20, headline: 17, subheadline: 15, body: 17, callout: 16, footnote: 13, caption: 12, caption2: 11,
+}

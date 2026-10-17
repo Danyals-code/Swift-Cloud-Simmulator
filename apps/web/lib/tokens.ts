@@ -1,4 +1,4 @@
-import type { AuthoringNode, AuthoringSnapshot, SharedStyle, StyleKind } from '@studio/shared'
+import { TEXT_STYLE_POINTS, type AuthoringNode, type AuthoringSnapshot, type SharedStyle, type StyleKind } from '@studio/shared'
 import { SYSTEM_COLOR_SWATCHES, isHexColor } from './colorValue'
 import { sourceLayerAround } from './sourceLayers'
 
@@ -12,17 +12,17 @@ export const TOKEN_KINDS: readonly { kind: StyleKind; title: string; singular: s
 ]
 
 export const TEXT_STYLES: readonly { value: string; label: string; size: number; weight: string }[] = [
-  { value: 'largeTitle', label: 'Large title', size: 34, weight: 'regular' },
-  { value: 'title', label: 'Title', size: 28, weight: 'regular' },
-  { value: 'title2', label: 'Title 2', size: 22, weight: 'regular' },
-  { value: 'title3', label: 'Title 3', size: 20, weight: 'regular' },
-  { value: 'headline', label: 'Headline', size: 17, weight: 'semibold' },
-  { value: 'body', label: 'Body', size: 17, weight: 'regular' },
-  { value: 'callout', label: 'Callout', size: 16, weight: 'regular' },
-  { value: 'subheadline', label: 'Subheadline', size: 15, weight: 'regular' },
-  { value: 'footnote', label: 'Footnote', size: 13, weight: 'regular' },
-  { value: 'caption', label: 'Caption', size: 12, weight: 'regular' },
-  { value: 'caption2', label: 'Caption 2', size: 11, weight: 'regular' },
+  { value: 'largeTitle', label: 'Large title', size: TEXT_STYLE_POINTS.largeTitle!, weight: 'regular' },
+  { value: 'title', label: 'Title', size: TEXT_STYLE_POINTS.title!, weight: 'regular' },
+  { value: 'title2', label: 'Title 2', size: TEXT_STYLE_POINTS.title2!, weight: 'regular' },
+  { value: 'title3', label: 'Title 3', size: TEXT_STYLE_POINTS.title3!, weight: 'regular' },
+  { value: 'headline', label: 'Headline', size: TEXT_STYLE_POINTS.headline!, weight: 'semibold' },
+  { value: 'body', label: 'Body', size: TEXT_STYLE_POINTS.body!, weight: 'regular' },
+  { value: 'callout', label: 'Callout', size: TEXT_STYLE_POINTS.callout!, weight: 'regular' },
+  { value: 'subheadline', label: 'Subheadline', size: TEXT_STYLE_POINTS.subheadline!, weight: 'regular' },
+  { value: 'footnote', label: 'Footnote', size: TEXT_STYLE_POINTS.footnote!, weight: 'regular' },
+  { value: 'caption', label: 'Caption', size: TEXT_STYLE_POINTS.caption!, weight: 'regular' },
+  { value: 'caption2', label: 'Caption 2', size: TEXT_STYLE_POINTS.caption2!, weight: 'regular' },
 ]
 export const FONT_WEIGHTS = ['ultraLight', 'thin', 'light', 'regular', 'medium', 'semibold', 'bold', 'heavy', 'black'] as const
 

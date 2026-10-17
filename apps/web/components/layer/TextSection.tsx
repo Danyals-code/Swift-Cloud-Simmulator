@@ -1,10 +1,11 @@
 'use client'
 
-import { TEXT_STYLES, helperPlaces, isConditional } from '@studio/shared'
+import { DESIGN_NEEDS_SYSTEM, FAMILY_DROPS_DESIGN, IOS_FONT_FAMILIES, TEXT_STYLES, helperPlaces, isConditional } from '@studio/shared'
 import { ColorField } from '../controls/ColorField'
 import { NumberField } from '../controls/NumberField'
 import { TokenChip } from '../controls/TokenChip'
 import { CHOICES, Choices, propertyOptionLabel } from '../PropertyControl'
+import { familyOptions } from '../../lib/fonts'
 import { FONT_WEIGHTS, TEXT_STYLES as STYLE_SIZES } from '../../lib/tokens'
 import { ColorCases, IconButton, Note, Section } from './parts'
 import { useLayerWrite, type SectionChange, type SectionProps } from './section'
@@ -23,14 +24,18 @@ const STYLE_OPTIONS = TEXT_STYLES.map(style => <option key={style} value={style}
 const nearest = (size: number) => STYLE_SIZES.filter(entry => entry.value !== 'headline').reduce((best, entry) => Math.abs(entry.size - size) < Math.abs(best.size - size) ? entry : best).value
 
 /**
- * The layer's Text, as Figma's Text section: the style or a size in points, weight,
- * design and italic, the colour, alignment, letter and line spacing, and case.
+ * The layer's Text, as Figma's Text section: the family, the style or a size in points,
+ * weight, design and italic, the colour, alignment, letter and line spacing, and case.
  *
  * A size in points scales with the reader's text size by default, as an `@ScaledMetric`
  * that follows the nearest style. Each control writes one `layer-set` change. A font the
- * panel can't rewrite, such as a custom one, locks only the font's controls.
+ * panel can't rewrite, such as a family worked out in Swift, locks only the font's controls.
+ *
+ * Family is System, the project's font files, then iOS's own families (Wave 6f). A font
+ * file is one face, so a project font writes its PostScript name, and its weight starts
+ * at regular rather than the style's own; Design applies only to the system font.
  */
-export function TextSection({ node, layer, set, busy, tokens }: SectionProps) {
+export function TextSection({ node, layer, set, busy, tokens, fonts = [] }: SectionProps) {
   const { write, error } = useLayerWrite((change: TextChange) => ({ section: 'text', ...change }), { set, busy })
   const text = layer.text
   if (!text) return null
@@ -42,7 +47,7 @@ export function TextSection({ node, layer, set, busy, tokens }: SectionProps) {
   const chooseStyle = (style: string) => {
     if (style !== 'custom') return void write({ font: { style } })
     // A size in points starts as the style it was, with the style's own weight.
-    const from = styleOf(value.style), weight = value.weight ?? (from?.weight === 'regular' ? undefined : from?.weight)
+    const from = styleOf(value.style), weight = value.weight ?? (value.face || from?.weight === 'regular' ? undefined : from?.weight)
     void write({ font: { style: null, size, relativeTo: text.scalingUnavailable ? null : value.style, ...weight ? { weight } : {} } })
   }
   // No alignment is SwiftUI's own, the start.
@@ -51,6 +56,7 @@ export function TextSection({ node, layer, set, busy, tokens }: SectionProps) {
   // A font read through a constant (Wave 3b): its name, what it is, and Detach, which writes the font itself here.
   // A custom face behind one is shown read only, with its name and size (Wave 3b).
   const linked = value.token, declared = linked ? layer.tokens?.[linked]?.declaration : undefined
+  const families = familyOptions(fonts, IOS_FONT_FAMILIES, value.face)
   const described = [value.face ?? styleOf(value.style)?.label ?? `${size} pt`, ...value.face && value.size !== undefined ? [`${value.size} pt`] : [], ...value.weight ? [propertyOptionLabel(value.weight)] : []].join(', ')
   return <Section title="Text" testId="layer-text" error={error}>
     {linked && <div className={styles.row}><span>Font</span>
@@ -59,6 +65,15 @@ export function TextSection({ node, layer, set, busy, tokens }: SectionProps) {
         : { onDetach: async () => (await write({ font: {} })) ? null : 'This font could not be detached.' } }} />
     </div>}
     {linked && !value.face && <Note>A change here sets this text’s own font, no longer linked to {linked}.</Note>}
+    <label className={styles.row}><span>Family</span>
+      <select aria-label="Font family" value={value.face ?? ''} disabled={fontOff} onChange={event => void write({ font: { face: event.target.value || null } })}>
+        <option value="">System</option>
+        {families.written && <option value={families.written.value}>{families.written.label}</option>}
+        {families.project.length > 0 && <optgroup label="In this project">{families.project.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</optgroup>}
+        <optgroup label="iOS">{families.ios.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</optgroup>
+      </select>
+    </label>
+    {value.design && value.design !== 'default' && !value.face && !font.disabledReason && <Note>{FAMILY_DROPS_DESIGN}</Note>}
     <label className={styles.row}><span>Style</span>
       <select aria-label="Text style" value={value.style ?? 'custom'} disabled={fontOff} onChange={event => chooseStyle(event.target.value)}>
         {STYLE_OPTIONS}<option value="custom">Custom size</option>
@@ -77,15 +92,16 @@ export function TextSection({ node, layer, set, busy, tokens }: SectionProps) {
       </label>}
     </>}
     <label className={styles.row}><span>Weight</span>
-      <select aria-label="Font weight" value={value.weight ?? styleOf(value.style)?.weight ?? 'regular'} disabled={fontOff} onChange={event => void write({ font: { weight: event.target.value } })}>
+      <select aria-label="Font weight" value={value.weight ?? (value.face ? 'regular' : styleOf(value.style)?.weight ?? 'regular')} disabled={fontOff} onChange={event => void write({ font: { weight: event.target.value } })}>
         {FONT_WEIGHTS.map(weight => <option key={weight} value={weight}>{weight === 'ultraLight' ? 'Ultralight' : propertyOptionLabel(weight)}</option>)}
       </select>
     </label>
     <label className={styles.row}><span>Design</span>
-      <select aria-label="Font design" value={value.design ?? 'default'} disabled={fontOff} onChange={event => void write({ font: { design: event.target.value } })}>
+      <select aria-label="Font design" value={value.design ?? 'default'} disabled={fontOff || !!value.face} onChange={event => void write({ font: { design: event.target.value } })}>
         {['default', 'serif', 'rounded', 'monospaced'].map(design => <option key={design} value={design}>{propertyOptionLabel(design)}</option>)}
       </select>
     </label>
+    {value.face && !font.disabledReason && <Note>{DESIGN_NEEDS_SYSTEM}</Note>}
     <label className={styles.check}><input type="checkbox" checked={!!value.italic} disabled={fontOff} onChange={event => void write({ font: { italic: event.target.checked } })} />Italic</label>
     <Note>{font.disabledReason}</Note>
     {inherited && <Note>This font comes from the view around it.</Note>}
