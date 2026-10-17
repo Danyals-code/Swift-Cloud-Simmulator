@@ -134,6 +134,13 @@ const KB = 1024
  *              chrome, date pickers, MeshGradient, basic Charts and custom
  *              font files, estimated at 42 to 58 KB over six PRs. Raised to
  *              950 KB by decision, for all of Wave 6.
+ *   Template sources - 943.4 KB actual after Wave 6. Wave 7a moves every
+ *              template's Swift but the blank screen's out of JavaScript into
+ *              static files under apps/web/public/templates/, fetched when a
+ *              template is created, so the lazy corpus chunk (27.0 KB) leaves
+ *              the count and a 0.4 KB loader joins it: about 917 KB after.
+ *              The budget stays at 950 KB, which leaves room for the image
+ *              library and lets template polish cost the bundle nothing.
  */
 const BUDGET_KB = 950
 

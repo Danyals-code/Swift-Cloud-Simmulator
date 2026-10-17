@@ -1,16 +1,16 @@
 /**
- * The light half of the project model.
+ * The project model the app uses.
  *
- * Deliberately *not* `./templates`. The welcome sheet opens at launch and needs the
- * catalog, the store and the project operations; the templates' Swift is 31 KB
- * gzipped and is not needed until somebody presses Create. Anything importing this
- * module from the app's static graph keeps that split intact - see
- * `@studio/project-model/templates` for the other half, which is imported
- * dynamically.
+ * Deliberately *not* `./templates`. The templates' Swift lives in static files under
+ * `apps/web/public/templates/`, which the app fetches when somebody presses Create
+ * (`apps/web/lib/templateSources.ts`); `./starter` holds the blank screen inline and
+ * makes a project from a template. `@studio/project-model/templates` reads the same
+ * files from disk for Node and the tests, and nothing in the app imports it.
  */
 
 export * from './types'
 export * from './catalog'
+export * from './starter'
 export * from './open'
 export * from './stores'
 export * from './share'

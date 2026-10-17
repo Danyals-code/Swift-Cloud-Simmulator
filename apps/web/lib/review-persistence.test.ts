@@ -3,6 +3,9 @@ import { createProjectStore, emptyStudioMetadata, projectFromFiles, type Project
 import { createDefaultProject } from '@studio/project-model/templates'
 import { useStudio } from './store'
 
+// Templates come from disk here: the same files the studio fetches from public/templates.
+vi.mock('./templateSources', () => import('../../../tests/helpers/template-sources'))
+
 const persistence = createProjectStore()
 let original: Project
 beforeEach(async () => {

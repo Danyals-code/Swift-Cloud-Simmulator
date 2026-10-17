@@ -757,6 +757,17 @@ framework's own entry measures React rather than the studio, so the biggest chun
 the honest proxy: it is the studio, it is on the critical path, and it is exactly where
 a careless static import lands.
 
+**Later (Wave 7a): the sources left JavaScript altogether.** The lazy chunk still
+counted: the total measures every chunk, and by Wave 6 the corpus was 27.0 KB gzipped
+of 943.4. Every template's Swift but the blank screen's is now a static file under
+`apps/web/public/templates/<id>/`, at the paths the catalog lists, and
+`apps/web/lib/templateSources.ts` fetches them when somebody presses Create; offline,
+the gallery says the template could not be loaded and the open project stays as it
+was. The blank screen is inline in `starter.ts`, so the first launch never waits on
+the network. `@studio/project-model/templates` keeps its API for Node and the tests,
+read from the same files, and nothing in the app imports it. A test pins every
+template's fingerprint from before the move, so the text is byte for byte what it was.
+
 ### 11.7 - the share limit was capping the gallery
 
 Not the coverage matrix, which is what the templates doc said. `share.test.ts` required
