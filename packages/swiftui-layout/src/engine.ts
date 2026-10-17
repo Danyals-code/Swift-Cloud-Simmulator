@@ -20,6 +20,7 @@ import type {
   SourceSpan,
   ContentTransitionSpec,
   MatchedGeometry,
+  SymbolPaint,
 } from '@studio/shared'
 import {
   childEnvironment,
@@ -121,6 +122,7 @@ export type PaintSpec =
       readonly resizable: boolean
       readonly symbol?: string
   readonly symbolScale?: number
+      readonly symbolPaint?: SymbolPaint
     }
   | {
       readonly kind: 'scroll'
@@ -882,6 +884,7 @@ export class LayoutEngine {
             resizable: element.resizable,
             symbolScale: element.symbolScale,
             ...(element.symbol ? { symbol: element.symbol } : {}),
+            symbolPaint: element.symbolPaint,
           },
           ...debugInfo(element),
           ...decorations(env, parent),

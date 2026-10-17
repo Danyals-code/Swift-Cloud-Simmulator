@@ -11,9 +11,12 @@ const vertical = ['top', 'center', 'bottom', 'firstTextBaseline', 'lastTextBasel
 const gradients = ['LinearGradient', 'RadialGradient', 'AngularGradient']
 const literalNumber = (expr: Expr, text: string) => ['integerLiteral', 'floatLiteral', 'unary'].includes(expr.kind) && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text.slice(expr.span.start, expr.span.end)) ? Number(text.slice(expr.span.start, expr.span.end)) : undefined
 
-/** Each placement Bars sets, as Swift writes it (Wave 4b). `navigationBarLeading` and its pair are older names for the bar's sides. */
-export const TOOLBAR_PLACEMENTS: Readonly<Record<ToolbarPlacement, string>> = { leading: 'topBarLeading', trailing: 'topBarTrailing', principal: 'principal', bottom: 'bottomBar', automatic: 'automatic' }
-const PLACEMENT_NAMES = Object.keys(TOOLBAR_PLACEMENTS) as ToolbarPlacement[]
+/**
+ * Each placement Bars sets, as Swift writes it (Wave 4b), beside its words in `TOOLBAR_PLACEMENT_WORDS`,
+ * whose order the Placement field lists them in. `navigationBarLeading` and its pair are older names for the bar's sides.
+ */
+export const TOOLBAR_PLACEMENTS: Readonly<Record<ToolbarPlacement, string>> = { leading: 'topBarLeading', trailing: 'topBarTrailing', principal: 'principal', bottom: 'bottomBar', navigation: 'navigation', status: 'status', automatic: 'automatic' }
+const PLACEMENT_NAMES = Object.keys(TOOLBAR_PLACEMENT_WORDS) as ToolbarPlacement[]
 
 /** A toolbar item's placement from the Swift of its `placement:`, Automatic when it has none; null for one Bars doesn't set. */
 export function toolbarPlacement(written: string | undefined): ToolbarPlacement | null {
@@ -23,7 +26,7 @@ export function toolbarPlacement(written: string | undefined): ToolbarPlacement 
 }
 
 /**
- * A toolbar item's Placement (Wave 4b): Leading, Trailing, Title, Bottom or Automatic, written
+ * A toolbar item's Placement (Wave 4b): Leading, Trailing, Title, Bottom, Navigation, Status (Wave 6c) or Automatic, written
  * as its `placement:`, which Automatic takes away when it is all its parentheses hold. Any
  * other placement is shown as written, read only.
  */
@@ -32,7 +35,7 @@ export function toolbarItemControls(base: CallExpr, text: string, target: number
   if (target < 14 || !content || base.args.some(a => a.label !== 'id' && a.label !== 'placement')) return
   const arg = base.args.find(a => a.label === 'placement'), written = arg && text.slice(arg.value.span.start, arg.value.span.end)
   const current = toolbarPlacement(written)
-  if (!current) return add('toolbar:placement', 'Placement', 'text', written!, () => ({ ...arg!.value.span, text: written! }), undefined, undefined, undefined, 'Shown as the code writes it.', arg!.value.span, 'Bars sets Leading, Trailing, Title, Bottom and Automatic. Change this placement in Code.')
+  if (!current) return add('toolbar:placement', 'Placement', 'text', written!, () => ({ ...arg!.value.span, text: written! }), undefined, undefined, undefined, 'Shown as the code writes it.', arg!.value.span, `Bars sets ${PLACEMENT_NAMES.slice(0, -1).map(placement => TOOLBAR_PLACEMENT_WORDS[placement]).join(', ')} and ${TOOLBAR_PLACEMENT_WORDS[PLACEMENT_NAMES.at(-1)!]}. Change this placement in Code.`)
   const close = Lexer.tokenize(text.slice(base.callee.span.end, content.span.start), base.span.file).tokens.filter(t => t.text === ')').at(-1)
   const parens = close && base.callee.span.end + close.span.start
   add('toolbar:placement', 'Placement', 'select', TOOLBAR_PLACEMENT_WORDS[current], v => {
@@ -42,7 +45,7 @@ export function toolbarItemControls(base: CallExpr, text: string, target: number
     const last = base.args.at(-1)
     if (last) return { start: last.span.end, end: last.span.end, text: `, placement: ${value}` }
     return parens === undefined ? { start: base.callee.span.end, end: base.callee.span.end, text: `(placement: ${value})` } : { start: parens, end: parens, text: `placement: ${value}` }
-  }, PLACEMENT_NAMES.map(placement => TOOLBAR_PLACEMENT_WORDS[placement]), undefined, undefined, 'Title puts it in place of the screen’s title; Bottom, in a bar at the foot of the screen.', arg?.value.span)
+  }, PLACEMENT_NAMES.map(placement => TOOLBAR_PLACEMENT_WORDS[placement]), undefined, undefined, 'Title puts it in place of the screen’s title; Bottom, in a bar at the foot of the screen; Navigation, where a menu or sidebar button goes; Status, in the middle of the bottom bar.', arg?.value.span)
 }
 
 /** A Button's Icon takes a well-formed symbol name, or nothing, which takes it away (Wave 4a). */

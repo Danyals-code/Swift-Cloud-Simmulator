@@ -211,10 +211,12 @@ var greeting: AttributedString {
 const falseAlarms = (lines: readonly string[]) => lines.filter(line => /Xcode won't build|Cannot find|does not recognise/.test(line))
 
 describe("Apple's own names", () => {
-  it.each(APPLE_NAMES)('knows %s, and says the preview does not draw it', (_, body) => {
+  it.each(APPLE_NAMES)('knows %s, and says whether the preview draws it', (name, body) => {
     const lines = said(body, ITEMS)
     expect(falseAlarms(lines)).toEqual([])
-    expect(lines.join('\n')).toMatch(/isn't drawn in the preview yet/)
+    // Charts aren't drawn yet; the glass container and the toolbar's own items are since Wave 6c.
+    if (name.startsWith('the Charts')) expect(lines.join('\n')).toMatch(/isn't drawn in the preview yet/)
+    else expect(lines.join('\n')).not.toMatch(/isn't drawn in the preview yet/)
   })
 })
 
@@ -503,7 +505,7 @@ describe('a symbol variant', () => {
   })
 
   it.each([
-    ['Image(systemName: "star").symbolVariant(.slash)', 'star.slash', 'star'],
+    ['Image(systemName: "house").symbolVariant(.slash)', 'house.slash', 'house'],
     ['Label("Files", systemImage: "folder").symbolVariant(.square)', 'folder.square', 'folder'],
     ['VStack { Image(systemName: "folder") }.symbolVariant(.square)', 'folder.square', 'folder'],
     ['HStack { Label("A", systemImage: "star"); Image(systemName: "folder").padding() }.symbolVariant(.square)', 'folder.square', 'folder'],

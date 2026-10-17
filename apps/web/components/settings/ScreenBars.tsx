@@ -13,6 +13,8 @@ interface BarsProps {
   definition?: AuthoringNode
   /** The screen's first view, when it has one: a screen with none says nothing about a title. */
   root?: AuthoringNode
+  /** The screen holding the app's tabs, which the Search tab switch writes (`searchTabScreen`, Wave 6c). */
+  tabs?: AuthoringNode
   busy: boolean
   onNodeChange: (node: AuthoringNode, control: string, value: string) => Promise<string | null>
   onNodeCommand: (node: AuthoringNode, operation: AuthoringOperation) => Promise<string | null>
@@ -20,19 +22,22 @@ interface BarsProps {
 }
 
 /**
- * The bars a screen draws (Wave 4b): its title, its toolbar items by where they sit, and its
- * search field. Each item selects its layer, where its Placement and contents are changed;
- * the + buttons and the switch write the screen's code, making a toolbar or a navigation
- * stack where it has none. A refusal shows at the foot of the canvas, as every planned edit's does.
+ * The bars a screen draws (Wave 4b): its title, its toolbar items by where they sit, its
+ * search field, and on a tab's first screen, the app's search tab (Wave 6c). Each item
+ * selects its layer, where its Placement and contents are changed; the + buttons and the
+ * switches write the screen's code, making a toolbar or a navigation stack where it has none.
+ * A refusal shows at the foot of the canvas, as every planned edit's does.
  */
-export function BarsSection({ snapshot, definition, root, busy, onNodeChange, onNodeCommand, onSelect }: BarsProps) {
+export function BarsSection({ snapshot, definition, root, tabs, busy, onNodeChange, onNodeCommand, onSelect }: BarsProps) {
   const bars = definition?.bars
   const title = screenTitleControl(snapshot, definition)
   const search = bars?.search
   const searchNode = search && snapshot?.nodes.find(node => node.id === search.node)
   const prompt = search?.control ? searchNode?.controls?.find(control => control.id === search.control) : undefined
+  const searchTab = tabs?.bars?.searchTab
+  const searchTabNode = searchTab?.node ? snapshot?.nodes.find(node => node.id === searchTab.node) : undefined
   const command = (operation: AuthoringOperation) => { if (definition) void onNodeCommand(definition, operation) }
-  if (!title && !root && !bars) return null
+  if (!title && !root && !bars && !searchTab) return null
   return <section className={styles.section} aria-label="Bars" data-testid="screen-bars">
     <div className={styles.sectionHeader}><h3>Bars</h3></div>
     {title ? <PropertyControl key={`${title.node.id}:${title.control.value}`} control={title.control} label="Title" onChange={(id, value) => onNodeChange(title.node, id, value)} />
@@ -58,6 +63,15 @@ export function BarsSection({ snapshot, definition, root, busy, onNodeChange, on
       {search && (prompt && searchNode
         ? <PropertyControl key={`${searchNode.id}:${prompt.value}`} control={prompt} label="Prompt" onChange={(id, value) => onNodeChange(searchNode, id, value)} />
         : <div className={styles.row}><span>Prompt</span><span className={styles.note}>{search.prompt ?? 'Worked out in code. Change it in Code.'}</span></div>)}
+    </>}
+    {tabs && searchTab && <>
+      <div className={styles.row}><span>{searchTabNode
+        ? <button type="button" className={styles.link} title="Select the search tab" onClick={() => onSelect(searchTabNode)}>Search tab</button>
+        : 'Search tab'}</span>
+        <button type="button" role="switch" className={inspector.switch} aria-label="Search tab" aria-checked={searchTab.on} disabled={busy || !!searchTab.problem}
+          onClick={() => void onNodeCommand(tabs, { kind: searchTab.on ? 'search-tab-remove' : 'search-tab-add' })}><i /></button>
+      </div>
+      {searchTab.problem && <p className={styles.note}>{searchTab.problem}</p>}
     </>}
   </section>
 }

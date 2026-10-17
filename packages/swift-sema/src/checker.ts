@@ -1,7 +1,8 @@
 import type { Diagnostic, DiagnosticCode, FixIt, SourceSpan } from '@studio/shared'
-import { MASK_PAINTS, MASK_RECEIVER_MODIFIERS, MASK_SHAPES, MASK_SHAPE_MODIFIERS, SYMBOL_MAP, TEXT_STYLES, iosFont, symbolDefinition, symbolVariantName } from '@studio/shared'
+import { MASK_PAINTS, MASK_RECEIVER_MODIFIERS, MASK_SHAPES, MASK_SHAPE_MODIFIERS, SYMBOL_MAP, TEXT_STYLES, iosFont, isSymbolRenderingMode, symbolDefinition, symbolDrawsMode, symbolDrawsVariableValue, symbolVariantName } from '@studio/shared'
 import type {
   Block,
+  CallExpr,
   ConformanceModel,
   Condition,
   Decl,
@@ -45,6 +46,7 @@ import {
   UNIMPLEMENTED_VIEWS,
 } from './builtins'
 import { Scope, type PropertyInfo, type SemanticModel, type TypeInfo } from './model'
+import { literalText, memberChain } from './design-controls'
 
 /**
  * Semantic analysis for the supported subset.
@@ -104,6 +106,8 @@ export class Checker {
   private readonly stroked = new WeakSet<Expr>()
   /** The same, for a dashed stroke, which the preview draws untrimmed. */
   private readonly dashStroked = new WeakSet<Expr>()
+  /** Each `.symbolRenderingMode` call a `.symbolVariant` is written around, with that variant's members joined, or null for one worked out in Swift. */
+  private readonly variantsAround = new WeakMap<Expr, string | null>()
   /** `typealias` names, which resolve as types anywhere the target would. */
   private readonly typeAliases = new Set<string>()
   /** Extension and protocol-default members, merged per type. Shared with the interpreter. */
@@ -828,7 +832,9 @@ export class Checker {
 
       case 'call': {
         this.checkTrim(expr)
+        this.markVariant(expr)
         this.checkCallee(expr.callee, scope)
+        this.checkDefaultToolbarItem(expr, scope)
         this.checkOverloadCoverage(expr, scope)
         this.checkFontCoverage(expr, scope)
         // A modifier is always *called*, so the coverage check belongs here rather
@@ -844,8 +850,14 @@ export class Checker {
             // A mark's own `.position(by:)` is not a view's `.position(x:y:)` (Wave 6a).
             if (!onAMark(expr.callee.base)) this.checkArgumentLabels(expr.callee.member, expr.args)
             this.checkBlendMode(expr.callee.member, expr.args)
+            this.checkCompactAdaptation(expr.callee.member, expr)
             this.checkStyleToken(expr.callee.member, expr.args)
             if (expr.callee.member === 'symbolVariant') this.checkSymbolVariant(expr.callee.base, expr.args[0]?.value)
+            if (expr.callee.member === 'symbolRenderingMode') this.checkSymbolRendering(expr)
+            // A scale effect draws the symbol larger or smaller while it is active, which the preview doesn't (Wave 6b).
+            if (expr.callee.member === 'symbolEffect' && memberChain(expr.args[0]?.value)?.[0] === 'scale' && !expr.args.some(arg => arg.label === 'isActive' && arg.value.kind === 'booleanLiteral' && !arg.value.value)) {
+              this.report(expr.args[0]!.span, 'warning', 'unsupported_swiftui_modifier', 'The preview draws this symbol at its own size. The app scales it while the effect is active.', '.symbolEffect')
+            }
           }
           // A colour is a view too, `Color.blue.mask(Circle())`, though its chain starts at no view's name.
           if (expr.callee.member === 'mask' && expr.callee.base) this.checkMask(expr.callee.base, expr.args, expr.trailingClosure)
@@ -1003,6 +1015,9 @@ export class Checker {
       if (callee.member === 'contextMenu' && labels.has('forSelectionType')) reason = 'selection-based context menus are not implemented; use contextMenu with action buttons'
       if (callee.member === 'contextMenu' && labels.has('preview')) reason = 'custom menu previews are not implemented; menu actions are available'
       if (callee.member === 'background' && labels.has('fillStyle')) reason = 'the fillStyle argument is not applied in the preview'
+      // Where a bubble points (Wave 6c); a phone shows a plain popover as a sheet, which has none.
+      const pointing = callee.member === 'popover' ? ['attachmentAnchor', 'arrowEdge'].filter(label => labels.has(label)) : []
+      if (pointing.length) reason = `${pointing.join(' and ')} ${pointing.length > 1 ? 'are' : 'is'} not applied in the preview, so a popover drawn as one points at the middle of its view's edge`
     }
     // These two are told apart by their arguments, so they need no view at the root:
     // they are as often written on a view of the project's own.
@@ -1245,6 +1260,26 @@ export class Checker {
     )
   }
 
+  /** A DefaultToolbarItem is drawn as the bottom bar's search field alone (Wave 6c); iOS 27 draws an empty capsule for search in the top bar. */
+  private checkDefaultToolbarItem(expr: CallExpr, scope: Scope): void {
+    if (expr.callee.kind !== 'identifier' || expr.callee.name !== 'DefaultToolbarItem' || scope.has('DefaultToolbarItem') || this.types.has('DefaultToolbarItem')) return
+    const arg = (label: string) => { const value = expr.args.find(a => a.label === label)?.value; return value?.kind === 'memberAccess' && !value.base ? value.member : undefined }
+    if (arg('kind') === 'search' && arg('placement') === 'bottomBar') return
+    this.report(expr.callee.span, 'warning', 'unsupported_swiftui_view', "'DefaultToolbarItem' is drawn in the preview as the search field in the bottom bar alone, so this one is not drawn here. Xcode draws it as written.", 'DefaultToolbarItem')
+  }
+
+  /**
+   * A compact adaptation is drawn as a popover's bubble for `.popover` and `.none`, which keeps
+   * it one (Wave 6c), and `.sheet` and `.automatic` are the sheet an iPhone shows anyway; any
+   * other is shown as a sheet. Of two, the horizontal one counts: a phone held upright is compact across.
+   */
+  private checkCompactAdaptation(member: string, expr: CallExpr): void {
+    if (member !== 'presentationCompactAdaptation') return
+    const value = (expr.args.length === 1 && !expr.args[0]!.label ? expr.args[0] : expr.args.find(a => a.label === 'horizontal'))?.value
+    if (value?.kind === 'memberAccess' && !value.base && ['popover', 'none', 'sheet', 'automatic'].includes(value.member)) return
+    this.report(expr.callee.kind === 'memberAccess' ? expr.callee.memberSpan : expr.span, 'warning', 'unsupported_swiftui_modifier', "'.presentationCompactAdaptation' is drawn by the preview for .popover and .none, and .sheet and .automatic are the sheet an iPhone shows anyway; this one is shown as a sheet. It is exported to Xcode unchanged.", '.presentationCompactAdaptation')
+  }
+
   private checkBlendMode(member: string, args: readonly { label: string | null; value: Expr }[]): void {
     if (member !== 'blendMode') return
 
@@ -1360,10 +1395,15 @@ export class Checker {
   private checkSymbolNames(args: readonly { label: string | null; value: Expr }[]): void {
     for (const arg of args) {
       if (arg.label !== 'systemName' && arg.label !== 'systemImage') continue
-      const literal = arg.value
-      if (literal.kind !== 'stringLiteral' || literal.segments.some((segment) => segment.kind !== 'text')) continue
-      const name = literal.segments.map((segment) => (segment.kind === 'text' ? segment.value : '')).join('')
-      if (symbolDefinition(name)) continue
+      const literal = arg.value, name = literalText(literal)
+      if (name === undefined) continue
+      if (symbolDefinition(name)) {
+        // A value of 1 or more is the full symbol, as the preview draws every one it doesn't dim (Wave 6b).
+        const value = args.find(other => other.label === 'variableValue')?.value
+        const full = (value?.kind === 'integerLiteral' || value?.kind === 'floatLiteral') && value.value >= 1
+        if (value && !full && !symbolDrawsVariableValue(name)) this.report(value.span, 'warning', 'unsupported_swiftui_modifier', `The preview draws '${name}' in full, whatever its variable value. The app fills it part way where the symbol can be.`, 'variableValue')
+        continue
+      }
       const near = nearestName(name, Object.keys(SYMBOL_MAP))
       this.report(
         literal.span,
@@ -1378,23 +1418,70 @@ export class Checker {
   }
 
   /**
+   * Notes the variant a `.symbolVariant` gives each `.symbolRenderingMode` it is written
+   * around, before the chain inside it is checked, as the preview composes the two in either
+   * order (Wave 6b). A nearer variant marks the modes inside it itself.
+   */
+  private markVariant(call: CallExpr): void {
+    if (call.callee.kind !== 'memberAccess' || call.callee.member !== 'symbolVariant' || !call.callee.base) return
+    const variant = memberChain(call.args[0]?.value, 'SymbolVariants')?.join('.') ?? null
+    walk(call.callee.base, node => {
+      if (node.kind !== 'call' || node.callee.kind !== 'memberAccess') return
+      if (node.callee.member === 'symbolVariant') return false
+      if (node.callee.member === 'symbolRenderingMode') this.variantsAround.set(node, variant)
+    })
+  }
+
+  /**
+   * Warns where `.symbolRenderingMode` asks for layers or colours the preview's drawing of a
+   * symbol doesn't have (Wave 6b): Hierarchical and Palette shade a drawing of two layers, an
+   * enclosed or badged symbol, and Multicolor colours only the symbols in its table; any other
+   * stays one colour. Each symbol is the one its variant draws, `heart.circle` for heart with
+   * `.circle`, as the preview draws it. Only a literal mode on literal names and variants, the
+   * first such one said; a name the preview has no drawing for is said already.
+   */
+  private checkSymbolRendering(call: CallExpr): void {
+    const base = call.callee.kind === 'memberAccess' ? call.callee.base : null, mode = call.args[0]?.value
+    const chain = memberChain(mode, 'SymbolRenderingMode'), asked = chain?.length === 1 ? chain[0] : undefined
+    if (!base || !isSymbolRenderingMode(asked) || asked === 'monochrome') return
+    let flat: string | undefined
+    // `variant` is the members of the nearest literal variant, or null for one worked out in Swift.
+    const visit = (root: Expr, variant: string | null | undefined) => walk(root, node => {
+      if (flat || node.kind !== 'call') return flat ? false : undefined
+      if (node.callee.kind === 'memberAccess' && node.callee.member === 'symbolRenderingMode') return false
+      if (node.callee.kind === 'memberAccess' && node.callee.member === 'symbolVariant') {
+        if (node.callee.base) visit(node.callee.base, memberChain(node.args[0]?.value, 'SymbolVariants')?.join('.') ?? null)
+        return false
+      }
+      const name = literalText(node.args.find(arg => arg.label === 'systemName' || arg.label === 'systemImage')?.value)
+      if (name === undefined || variant === null) return
+      // The composed name where the preview has a drawing for it, else the name written.
+      const composed = symbolVariantName(name, variant), drawn = symbolDefinition(composed) ? composed : name
+      if (symbolDefinition(drawn) && !symbolDrawsMode(drawn, asked)) flat = drawn
+    })
+    visit(base, this.variantsAround.get(call))
+    if (!flat) return
+    this.report(mode!.span, 'warning', 'unsupported_swiftui_modifier', asked === 'multicolor'
+      ? `The preview has no multicolor drawing for '${flat}', so it draws it in one color. The app draws any colors of its own.`
+      : `The preview draws '${flat}' in one color, as its drawing here has one layer. The app draws any layers it has.`, '.symbolRenderingMode')
+  }
+
+  /**
    * Warns where `.symbolVariant` asks for a symbol the preview has no drawing for: it draws
    * the base symbol (Wave 6a). Whether iOS has the composed one isn't known here, so nothing
    * is said of what the app draws: `folder` with `.square` draws `folder` there too. Only a
    * literal chain, `.fill.circle`, on literal names, the first such one said.
    */
   private checkSymbolVariant(base: Expr | null, variant: Expr | undefined): void {
-    const parts: string[] = []
-    for (let part = variant; part?.kind === 'memberAccess'; part = part.base ?? undefined) parts.unshift(part.member)
-    if (!base || !parts.length) return
+    const parts = memberChain(variant, 'SymbolVariants')
+    if (!base || !parts) return
     // Each symbol named by a literal in what the variant is written on, an Image or Label or a
     // container of them, short of one with a variant of its own.
     let missing: readonly [asked: string, name: string] | undefined
     walk(base, node => {
       if (missing || node.kind === 'call' && node.callee.kind === 'memberAccess' && node.callee.member === 'symbolVariant') return false
-      const literal = node.kind === 'call' ? node.args.find(arg => arg.label === 'systemName' || arg.label === 'systemImage')?.value : undefined
-      if (literal?.kind !== 'stringLiteral' || literal.segments.some(segment => segment.kind !== 'text')) return
-      const name = literal.segments.map(segment => (segment.kind === 'text' ? segment.value : '')).join('')
+      const name = node.kind === 'call' ? literalText(node.args.find(arg => arg.label === 'systemName' || arg.label === 'systemImage')?.value) : undefined
+      if (name === undefined) return
       const asked = symbolVariantName(name, parts.join('.'))
       if (asked !== name && !symbolDefinition(asked) && symbolDefinition(name)) missing = [asked, name]
     })

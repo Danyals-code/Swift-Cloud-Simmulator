@@ -54,7 +54,7 @@ export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation:
     case 'guided-action': return guidedAction(ctx, node, operation)
     case 'screen-create': case 'screen-duplicate': case 'screen-remove': { const result = screenEdit(ctx, node, operation); patches = result.patches; files = result.files ?? []; removed = result.removed ?? []; break }
     case 'card-customize': return customizeCard(ctx, node, operation.color)
-    case 'toolbar-item-add': case 'searchable-add': case 'searchable-remove': return barsEdit(ctx, node, operation)
+    case 'toolbar-item-add': case 'searchable-add': case 'searchable-remove': case 'search-tab-add': case 'search-tab-remove': return barsEdit(ctx, node, operation)
     case 'layer-duplicate': case 'layer-wrap': case 'layer-reparent': return structureEdit(ctx, node, operation)
     case 'make-tappable': return makeTappable(ctx, node)
     case 'visibility': return visibilityEdit(ctx, node, operation)

@@ -113,6 +113,46 @@ asset catalog holding a 40 x 30 pt "photo"), measure what the Wave 6a fixes draw
 
 `tests/text-trust-runtime.test.ts` cites these.
 
+10 light images in [native/iphone18pro-symbols](native/iphone18pro-symbols/measurements.json),
+paired with `tests/fixtures/ios27-symbols-6b.swift`, measure what Wave 6b draws. Each screen
+prints the frames of what it measures. They cover:
+- `.multicolor` on 56 common symbols, under the accent and under purple: which keep fixed
+  colours (heart red, leaf green, star and bolt yellow, badges red, green or blue) and which
+  follow the foreground style (flame, drop);
+- `.hierarchical` on enclosed and badged symbols: a filled container at 0.25 and an outline
+  container, a badge's symbol or speaker waves at 0.5;
+- palette: two styles alone are palette; the glyph takes the first style, a filled container
+  the last; one style fills every layer; the other modes ignore a second style;
+- `variableValue` at seven values on wifi, cellularbars and speaker.wave.*: parts above the
+  value are drawn at 0.3;
+- symbol effects at rest: `.disappear` and `.appear` hide the symbol in its frame, and
+  `.symbolEffectsRemoved()` between the effect and the symbol draws it again;
+- 144 of the names the preview draws as look-alikes, for reference.
+
+`tests/symbols-runtime.test.ts` cites these.
+
+24 light images in [native/iphone18pro-chrome](native/iphone18pro-chrome/measurements.json),
+paired with `tests/fixtures/ios27-chrome-6c.swift`, measure what Wave 6c draws around the screen
+and in iOS 27's bars. Each screen prints the frames of what it measures, kept by launching through
+`simctl launch --console-pty`, and every popover is up 0.6 s after launch. They cover:
+- `Tab(role: .search)`, which iOS 27.0 draws as an ordinary item at the bar's end, labelled
+  Search with a magnifying glass, not as a circle of its own; alone, after three tabs, and with
+  `.tabViewBottomAccessory`, a glass capsule 48 tall above the bar, which then stretches to it;
+- `ToolbarSpacer(.fixed)` splitting a group into two capsules 11 apart, in the top and bottom
+  bars, and `.flexible` pushing groups apart;
+- `DefaultToolbarItem(kind: .search, placement: .bottomBar)`, the search field in the bottom bar,
+  alone and between two items, and the empty capsule iOS draws for it in `.topBarTrailing`;
+- `GlassEffectContainer`, which lays out what it holds as a centred VStack does;
+- `.navigationSubtitle` under an inline and a large title;
+- `.navigation`, `.primaryAction`, `.secondaryAction` (an ellipsis menu), `.confirmationAction`
+  (semibold), `.cancellationAction` and `.status` (centred in the bottom bar);
+- `.presentationCompactAdaptation(.popover)`: a bubble its content's size, above its source when
+  it fits and below otherwise;
+- a floating button in a `ZStack` beside a NavigationStack, a view under a NavigationStack or a
+  TabView in a `VStack`, an `.overlay` on a NavigationStack, and a capsule over a TabView.
+
+`tests/chrome-runtime.test.ts` cites these.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh

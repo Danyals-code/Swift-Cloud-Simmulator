@@ -2,7 +2,7 @@ import { createContext, useContext, useId, useState, useRef, useLayoutEffect, us
 import { ScrollIndicator } from './ScrollIndicator'
 import { ShapeView, VectorPathView } from './ShapeView'
 import { SliderView, ControlStyles } from './SliderView'
-import { inlineSymbolBox, placeholderWords, symbolMetrics, shapePath, type Point, type Size } from '@studio/shared'
+import { inlineSymbolBox, placeholderWords, symbolLayerColors, symbolLayerStyles, symbolMetrics, shapePath, type Point, type Size, type SymbolLayerStyle } from '@studio/shared'
 import { memo, useMemo, type CSSProperties, type ReactNode } from 'react'
 import {
   cssAnimation,
@@ -21,7 +21,7 @@ import {
   type TextRun,
   type UIEvent,
 } from '@studio/shared'
-import { symbolAsset, symbolStrokeScale } from './symbols'
+import { symbolAsset, symbolStrokeScale, type SymbolAsset } from './symbols'
 import { beginContextPress } from './context-press'
 import { finishExit, keyOf, reconcilePresence, type Passage, type PresentNode, type RenderGroups } from './transition-presence'
 import { matchedMorphs, rollsUp, textChange, type Morphs } from './motion'
@@ -1369,29 +1369,36 @@ function runStyle(run: TextRun, size?: Size, at?: Point): CSSProperties {
 function ImageContent({ node }: { node: RenderNode }) {
   const image = node.image!
   const maskId = useId().replaceAll(':', '')
-  const asset = image.symbol ? symbolAsset(image.symbol, maskId) : null
+  const paint = image.symbolPaint
+  const mode = paint?.mode
+  const asset = image.symbol ? symbolAsset(image.symbol, maskId, { layered: mode !== undefined, variableValue: paint?.variableValue }) : null
   if (image.bitmap) return <img src={image.bitmap.url} alt={image.bitmap.name} draggable={false} style={{ display: 'block', width: '100%', height: '100%', objectFit: 'fill', userSelect: 'none' }} />
   const metrics = symbolMetrics(image.symbol)
   const title = image.symbol ? `${image.symbol} (${asset?.source === 'ionicons' ? 'Ionicons approximation' : asset ? 'vector approximation' : 'unsupported symbol'})` : undefined
   if (image.foregroundFill && asset) {
     const viewWidth = node.frame.width, viewHeight = node.frame.height
+    const background = cssFill(image.foregroundFill, node.frame)
+    const weight = symbolStrokeScale(image.font.weight)
+    if (mode) return <SymbolLayers asset={asset} maskId={maskId} title={title} width={viewWidth} height={viewHeight} weight={weight} background={background} mode={mode} styles={symbolLayerStyles(paint)} />
     return <svg width="100%" height="100%" viewBox={`0 0 ${viewWidth} ${viewHeight}`} aria-hidden>
       <defs><mask id={`${maskId}-foreground`} maskUnits="userSpaceOnUse" x="0" y="0" width={viewWidth} height={viewHeight}>
-        <svg width={viewWidth} height={viewHeight} viewBox={asset.viewBox} fill="white" color="white" style={{ '--symbol-weight': symbolStrokeScale(image.font.weight) } as CSSProperties} dangerouslySetInnerHTML={{ __html: asset.body }} />
+        <svg width={viewWidth} height={viewHeight} viewBox={asset.viewBox} fill="white" color="white" style={{ '--symbol-weight': weight } as CSSProperties} dangerouslySetInnerHTML={{ __html: asset.body }} />
       </mask></defs>
       <foreignObject width={viewWidth} height={viewHeight} mask={`url(#${maskId}-foreground)`}>
-        <div title={title} style={{ width: '100%', height: '100%', background: cssFill(image.foregroundFill, node.frame) }} />
+        <div title={title} style={{ width: '100%', height: '100%', background }} />
       </foreignObject>
     </svg>
   }
   const height = image.resizable ? node.frame.height : image.font.size * metrics.heightEm * (image.symbolScale ?? 1)
   const width = image.resizable ? node.frame.width : image.font.size * metrics.widthEm * (image.symbolScale ?? 1)
+  // A rendering mode paints the second and third layers through custom properties (Wave 6b).
+  const layers = mode ? symbolLayerColors(image) : undefined
   return (
-    <div title={title} style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: cssColor(image.color), userSelect: 'none' }}>
+    <div title={title} style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: cssColor(layers?.[0] ?? image.color), userSelect: 'none' }}>
       {asset ? (
         <svg width={width} height={height} viewBox={asset.viewBox} fill="currentColor"
-          preserveAspectRatio="xMidYMid meet" aria-hidden
-          style={{ display: 'block', '--symbol-weight': symbolStrokeScale(image.font.weight) } as CSSProperties}
+          preserveAspectRatio="xMidYMid meet" aria-hidden data-symbol-mode={mode}
+          style={{ display: 'block', '--symbol-weight': symbolStrokeScale(image.font.weight), '--symbol-2': layers && cssColor(layers[1]), '--symbol-3': layers && cssColor(layers[2]) } as CSSProperties}
           dangerouslySetInnerHTML={{ __html: asset.body }} />
       ) : (
         <svg width={width} height={height} viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1401,6 +1408,28 @@ function ImageContent({ node }: { node: RenderNode }) {
       )}
     </div>
   )
+}
+
+/**
+ * A symbol whose layers a rendering mode paints apart, under a gradient foreground style: one
+ * mask a layer, the layer white and the others black, so a layer above cuts the one under it,
+ * filled with its own colour or the gradient at its strength (Wave 6b).
+ */
+function SymbolLayers({ asset, maskId, title, width, height, weight, background, mode, styles }: {
+  asset: SymbolAsset; maskId: string; title: string | undefined; width: number; height: number; weight: number; background: string
+  mode: string; styles: readonly SymbolLayerStyle[]
+}) {
+  const shown = (level: number, at: number) => level === at ? 'white' : 'black'
+  return <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} aria-hidden data-symbol-mode={mode}>
+    <defs>{styles.map((_, index) => <mask key={index} id={`${maskId}-layer${index + 1}`} maskUnits="userSpaceOnUse" x="0" y="0" width={width} height={height}>
+      <svg width={width} height={height} viewBox={asset.viewBox} fill="currentColor"
+        style={{ color: shown(index + 1, 1), '--symbol-2': shown(index + 1, 2), '--symbol-3': shown(index + 1, 3), '--symbol-weight': weight } as CSSProperties}
+        dangerouslySetInnerHTML={{ __html: asset.body }} />
+    </mask>)}</defs>
+    {styles.map((style, index) => <foreignObject key={index} width={width} height={height} mask={`url(#${maskId}-layer${index + 1})`}>
+      <div title={title} style={{ width: '100%', height: '100%', background: style.color ? cssColor(style.color) : background, opacity: style.opacity }} />
+    </foreignObject>)}
+  </svg>
 }
 
 /**

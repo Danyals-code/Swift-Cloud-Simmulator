@@ -1,4 +1,4 @@
-import { alignmentOf, alignmentSides, type Alignment9, type Point, type CornerRadii, type CornerStyle, type PlaceholderPayload, type Rect, type ShapeOutline, type ShapeStroke, type ShapeTrim, type SliderPayload, type FilterSpec, type Fill, type ResolvedFont, type RGBA, type ShapeKind, type Size, type SourceSpan, type TransitionSpec, type ContentTransitionSpec, type MatchedGeometry } from '@studio/shared'
+import { alignmentOf, alignmentSides, type Alignment9, type Point, type CornerRadii, type CornerStyle, type PlaceholderPayload, type Rect, type ShapeOutline, type ShapeStroke, type ShapeTrim, type SliderPayload, type FilterSpec, type Fill, type ResolvedFont, type RGBA, type ShapeKind, type Size, type SourceSpan, type TransitionSpec, type ContentTransitionSpec, type MatchedGeometry, type SymbolPaint } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -206,6 +206,7 @@ export interface ImageElement extends ElementBase {
    */
   readonly symbol?: string
   readonly symbolScale?: number
+  readonly symbolPaint?: SymbolPaint
 }
 
 /**

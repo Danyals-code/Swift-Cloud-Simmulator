@@ -14,7 +14,22 @@ export const SURFACES = {
   list: { row: 52, rowX: 16, rowY: 15, inset: 16, regularMaxWidth: 720, corner: 26,
     sidebarTop: 10, bottom: 24, sectionGap: 53 / 3, plainSectionGap: 22, unheadedGap: 35, afterFooterGap: 71 / 3, afterFooterHeaderGap: 6, headerTop: 10, headerBottom: 10, footerTop: 8 },
   navigation: { height: 54, largeTitle: 52, inset: 16, titleInset: 16, buttonGap: 8 },
+  // `.navigationSubtitle`, measured in the iOS 27 simulator (docs/parity/native/iphone18pro-chrome,
+  // Wave 6c): inline, the title and its subtitle overlap their line boxes by `inlineGap`; large, the
+  // title is `largeTop` below the bar's row and the subtitle `largeGap` below it, the content
+  // `largeExtra` lower than without one.
+  subtitle: { inlineGap: -3, largeTop: 7, largeGap: -14 / 3, largeBottom: 8, largeExtra: 58 / 3 },
+  // Toolbar groups a `ToolbarSpacer` splits are `spacerGap` apart, and a `.status` item's capsule is
+  // `statusPadding` wider than it each side (Wave 6c).
+  toolbar: { spacerGap: 11, statusPadding: 6 },
+  // A popover a phone keeps as one, `.presentationCompactAdaptation(.popover)` (Wave 6c): a bubble its
+  // content's size with corners of `radius`, its arrow `arrow` tall and `arrowWidth` wide at its base,
+  // the tip on the source's edge, never nearer the screen's edges than `margin`.
+  popover: { radius: 28, arrow: 13, arrowWidth: 26, margin: 8 },
   tab: { height: 62, margin: 12, bottom: 8, inset: 4, itemWidth: 90, safeAreaOverlap: 21, selectedRadius: 999, regularWidth: 520 },
+  // `.tabViewBottomAccessory`'s capsule, measured in the iOS 27 simulator (iphone18pro-chrome, Wave 6c):
+  // `height` tall, `gap` above the tab bar, `margin` in from the screen's edges, as wide as the bar is then.
+  accessory: { height: 48, gap: 23 / 3, margin: 61 / 3 },
   // The capsule is a phone's search at the bottom of the screen, measured in the iOS 27
   // simulator (docs/parity/native/iphone18pro-misrenders).
   // In the bar's drawer the field sits right under the title, 10 pt above what follows.

@@ -19,6 +19,8 @@ import {
   rgba,
   ROUNDED_FAMILY,
   SERIF_FAMILY,
+  symbolMulticolor,
+  isSymbolRenderingMode,
   UI_FONT_FAMILY,
   type CornerRadii,
   type CornerStyle,
@@ -27,6 +29,8 @@ import {
   type ShapeKind,
   type ShapeOutline,
   type Size,
+  type SymbolPaint,
+  type SymbolRenderingMode,
   type TransitionPart,
 } from '@studio/shared'
 import {
@@ -75,6 +79,7 @@ import {
   BOTTOM_BAR,
   TAB_ITEM,
   dotsBackground,
+  type NavigationBar,
   type Overlay,
   type ResolvedUI,
   type SearchField,
@@ -146,9 +151,10 @@ export interface ConversionResult {
 /**
  * Where a search field is drawn: at the top of an iPad's content; in the drawer under the
  * title; in an iPad's toolbar; or at the bottom of a phone's screen, in a glass capsule
- * on the tab bar's line.
+ * on the tab bar's line; or `bar`, in the bottom bar between its items, where
+ * `DefaultToolbarItem(kind: .search, placement: .bottomBar)` puts it (Wave 6c).
  */
-type SearchPlacement = 'top' | 'drawer' | 'toolbar' | 'bottom'
+type SearchPlacement = 'top' | 'drawer' | 'toolbar' | 'bottom' | 'bar'
 
 /** A whole screen: content, the bars around it, and anything presented over it. */
 export interface ScreenLayout {
@@ -164,6 +170,8 @@ export interface ScreenLayout {
   readonly background: RGBA
   readonly navigationBar: { readonly element: LayoutElement; readonly height: number; readonly large: boolean } | null
   readonly tabBar: LayoutElement | null
+  /** How tall the tab bar's region is when it isn't `TAB_BAR_HEIGHT`: with a bottom accessory above it (Wave 6c). */
+  readonly tabBarHeight?: number
   /** The toolbar's `.bottomBar` items, in the tab bar's row (Wave 4b). */
   readonly bottomBar?: LayoutElement | null
   readonly search?: { readonly element: LayoutElement; readonly placement: 'top' | 'bottom'; readonly height: number }
@@ -174,6 +182,8 @@ export interface ScreenLayout {
     readonly detent: number
     readonly detents?: readonly number[]
     readonly anchorId?: string
+    /** A popover a phone keeps as one, beside the view at `source`, its arrow painted `fill` (Wave 6c). */
+    readonly compact?: { readonly source: string; readonly fill: RGBA }
     /** A view's context menu, by the path of the view it is open on (Wave 4a). */
     readonly contextMenu?: string
     readonly dismissId: string | null
@@ -185,6 +195,12 @@ export interface ScreenLayout {
     readonly screen?: ScreenLayout
   } | null
   readonly hitTargets: ReadonlyMap<string, string>
+  /**
+   * The views around the screen's container (Wave 6c): laid out in the safe area with the
+   * container at `slot`, its path, a flexible slot (`slotIds`) where the screen is laid out;
+   * drawn on `background`, the window's.
+   */
+  readonly outer?: { readonly element: LayoutElement; readonly slot: string; readonly background: RGBA }
 }
 
 const SHAPES: Readonly<Record<string, ShapeKind>> = {
@@ -313,9 +329,11 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   // On a phone, iOS 27 puts the search field at the bottom of the screen, where a tab
   // bar would be. Where there is one, or a bottom bar, it goes in the drawer under the title instead.
   const compact = (options.viewportWidth ?? 393) < 600
-  const drawerSearch = ui.search && (['navigationBarDrawer', 'sidebar'].includes(ui.search.placement) || ui.search.placement === 'automatic' && compact && !!(ui.tabBar || ui.bottomBar))
+  // `DefaultToolbarItem(kind: .search, placement: .bottomBar)` puts the field in the bottom bar, and nowhere else (Wave 6c).
+  const barSearch = ui.search && ui.bottomBar?.items.some(isSearchItem) ? converter.searchField(ui.search, 'bar') : null
+  const drawerSearch = ui.search && !barSearch && (['navigationBarDrawer', 'sidebar'].includes(ui.search.placement) || ui.search.placement === 'automatic' && compact && !!(ui.tabBar || ui.bottomBar))
   const toolbarSearch = ui.search && !drawerSearch && !compact && ui.navigationBar ? converter.searchField(ui.search, 'toolbar') : null
-  const search = ui.search && !drawerSearch && !toolbarSearch
+  const search = ui.search && !barSearch && !drawerSearch && !toolbarSearch
     ? compact
       ? { element: converter.searchField(ui.search, 'bottom'), placement: 'bottom' as const, height: TAB_BAR_HEIGHT }
       : { element: converter.searchField(ui.search, 'top'), placement: 'top' as const, height: SURFACES.search.height + 12 }
@@ -332,12 +350,14 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
     ? {
         element: converter.navigationBar(ui.navigationBar, toolbarSearch, navigationBarFill(ui.content, scheme)),
         large: ui.navigationBar.large,
-        height: NAV_BAR_HEIGHT + (ui.navigationBar.large ? Math.max(LARGE_TITLE_HEIGHT, fontForToken('largeTitle', options.dynamicTypeSize ?? options.typeScale ?? 1)!.lineHeight + 11) : 0),
+        height: NAV_BAR_HEIGHT + (ui.navigationBar.large ? Math.max(LARGE_TITLE_HEIGHT, fontForToken('largeTitle', options.dynamicTypeSize ?? options.typeScale ?? 1)!.lineHeight + 11) + (ui.navigationBar.subtitle ? SURFACES.subtitle.largeExtra : 0) : 0),
       }
     : null
 
-  const tabBar = ui.tabBar && !paged ? converter.tabBar(ui.tabBar) : null
-  const bottomBar = ui.bottomBar ? converter.bottomBar(ui.bottomBar) : null
+  // A bottom accessory is drawn above a phone's tab bar, which grows by it (Wave 6c).
+  const accessory = compact && ui.tabBar?.accessory && !paged
+  const tabBar = ui.tabBar && !paged ? converter.tabBar(ui.tabBar, !!accessory) : null
+  const bottomBar = ui.bottomBar ? converter.bottomBar(ui.bottomBar, barSearch) : null
   const attached = !!ui.overlay && attachedSheet(ui.overlay, options.viewportWidth ?? 393)
 
   const overlay = ui.overlay
@@ -348,6 +368,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
         detent: ui.overlay.detent,
         detents: ui.overlay.detents,
         anchorId: ui.overlay.anchorId,
+        compact: ui.overlay.compact ? { source: ui.overlay.compact.source, fill: converter.popoverFill } : undefined,
         ...(ui.overlay.contextMenu ? { contextMenu: ui.overlay.contextMenu } : {}),
         backgroundInteraction: ui.overlay.backgroundInteraction,
         dismissId: ui.overlay.dismissId,
@@ -355,8 +376,8 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
         showsDragIndicator: ui.overlay.showsDragIndicator,
         ...(ui.overlay.background ? { background: resolveFillArg(ui.overlay.background, scheme) ?? undefined } : {}),
         ...(MATERIALS[tokenName(ui.overlay.background) ?? ''] ? { material: { ...MATERIALS[tokenName(ui.overlay.background)!]!, light: scheme === 'light' } } : {}),
-        ...(ui.overlay.screen && ['sheet', 'cover', 'popover'].includes(ui.overlay.kind) ? {
-          screen: screenToLayout({ ...ui, ...ui.overlay.screen }, { ...options, sheetSurface: ui.overlay.kind !== 'cover', viewportWidth: ui.overlay.kind === 'cover' || attached ? options.viewportWidth : Math.min(SURFACES.sheet.maxWidth, (options.viewportWidth ?? 393) - SURFACES.sheet.margin * 2), safeArea: { ...safeArea, top: ui.overlay.kind === 'cover' ? safeArea.top : sheetContentTop(ui.overlay, attached, !!ui.overlay.screen.navigationBar) } }),
+        ...(ui.overlay.screen && !ui.overlay.compact && ['sheet', 'cover', 'popover'].includes(ui.overlay.kind) ? {
+          screen: screenToLayout({ ...ui, ...ui.overlay.screen, outer: undefined }, { ...options, sheetSurface: ui.overlay.kind !== 'cover', viewportWidth: ui.overlay.kind === 'cover' || attached ? options.viewportWidth : Math.min(SURFACES.sheet.maxWidth, (options.viewportWidth ?? 393) - SURFACES.sheet.margin * 2), safeArea: { ...safeArea, top: ui.overlay.kind === 'cover' ? safeArea.top : sheetContentTop(ui.overlay, attached, !!ui.overlay.screen.navigationBar) } }),
         } : {}),
       }
     : null
@@ -365,8 +386,10 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
     content,
     search,
     background,
+    outer: ui.outer ? { element: joinRoot(converter.around(ui.outer.views, ui.outer.slot), 'vertical'), slot: ui.outer.slot, background: systemBackground(scheme) } : undefined,
     navigationBar,
     tabBar,
+    tabBarHeight: accessory ? TAB_BAR_HEIGHT + SURFACES.accessory.height + SURFACES.accessory.gap : undefined,
     bottomBar,
     overlay,
     hitTargets,
@@ -472,6 +495,12 @@ interface ControlStyles {
   readonly buttonBorderShape?: string
   /** `.symbolVariant(.fill.circle)`, as one chain (Wave 6a). */
   readonly symbolVariant?: string
+  /** `.symbolRenderingMode(.palette)` (Wave 6b). */
+  readonly symbolMode?: SymbolRenderingMode
+  /** The nearest `.foregroundStyle`, whose styles palette paints a symbol's layers in, read only at a symbol (Wave 6b). */
+  readonly symbolForeground?: ModifierValue
+  /** A `.symbolEffect` that hides its symbols, `.disappear` or `.appear` while active (Wave 6b). */
+  readonly symbolHidden?: boolean
   /** Whether a `foregroundStyle` or `foregroundColor` is set on this view or one around it, which a button's title takes over its tint. */
   readonly foregroundSet?: boolean
   /** A toolbar item drawn in a capsule it shares with the items beside it, so without a glass of its own. */
@@ -518,9 +547,33 @@ function withStyles(outer: ControlStyles, view: ViewValue, scheme: ColorScheme):
     const name = tokenName(modifierArg(view, modifier, 0))
     if (name !== null) next = { ...next, [key]: name }
   }
+  const mode = tokenName(modifierArg(view, 'symbolRenderingMode', 0)) ?? undefined
+  if (isSymbolRenderingMode(mode)) next = { ...next, symbolMode: mode }
   const tint = view.modifiers.find((modifier) => modifier.name === 'tint' || modifier.name === 'accentColor')
   if (tint) next = { ...next, tint: resolveColorArg(tint.args[0]?.value, scheme, outer.tint) ?? undefined }
-  if (view.modifiers.some((modifier) => modifier.name === 'foregroundStyle' || modifier.name === 'foregroundColor')) next = { ...next, foregroundSet: true }
+  const foreground = view.modifiers.find((modifier) => modifier.name === 'foregroundStyle' || modifier.name === 'foregroundColor')
+  if (foreground) next = { ...next, foregroundSet: true, symbolForeground: foreground }
+  return symbolEffects(next, view)
+}
+
+/**
+ * `.symbolEffect(.disappear)` and `.symbolEffect(.appear)` hide the symbols they reach while
+ * active, keeping their frames, as iOS 27 draws them at rest; every other effect draws the
+ * symbol as it is. `.symbolEffectsRemoved()` between the effect and the symbol draws it
+ * again, and one around the effect doesn't (Wave 6b). Modifiers are read outermost first.
+ */
+function symbolEffects(styles: ControlStyles, view: ViewValue): ControlStyles {
+  let next = styles
+  for (let index = view.modifiers.length - 1; index >= 0; index--) {
+    const modifier = view.modifiers[index]!
+    if (modifier.name === 'symbolEffect' && /^(dis)?appear(\.|$)/.test(tokenName(positional(modifier.args, 0)) ?? '')) {
+      const active = labelled(modifier.args, 'isActive')
+      if (!(active?.kind === 'bool' && !active.value)) next = { ...next, symbolHidden: true }
+    } else if (modifier.name === 'symbolEffectsRemoved' && next.symbolHidden) {
+      const removed = modifier.args[0]?.value
+      if (!(removed?.kind === 'bool' && !removed.value)) next = { ...next, symbolHidden: false }
+    }
+  }
   return next
 }
 
@@ -683,15 +736,62 @@ class Converter {
     this.styles = withStyles(outer, bar.view, this.scheme)
     // iOS 27 draws a Label in the toolbar as its icon alone, unless a label style says otherwise.
     this.styles = { ...this.styles, container: 'toolbar', label: this.styles.label ?? 'iconOnly' }
-    try { return this.navigationBarContent(bar, search, fill) } finally { this.styles = outer }
+    this.confirmItems = bar.confirm
+    try { return this.navigationBarContent(bar, search, fill) } finally { this.styles = outer; this.confirmItems = undefined }
   }
 
-  /** System bar controls keep a compact font; content still follows Dynamic Type. */
-  private chromeContent(id: string, build: () => LayoutElement): LayoutElement {
+  /**
+   * The inline title, with its `.navigationSubtitle` under it when it has one: the title smaller,
+   * semibold, the subtitle a secondary caption, the two centred together on the bar's row (Wave 6c,
+   * iphone18pro-chrome subtitle).
+   */
+  private inlineTitle(bar: NavigationBar): LayoutElement {
+    if (!bar.subtitle) return this.styledText('navbar-title', bar.title, 'headline', 'label')
+    return { kind: 'stack', id: 'navbar-titles', axis: 'vertical', spacing: SURFACES.subtitle.inlineGap, alignment: CENTER, children: [
+      this.styledText('navbar-title', bar.title, 'callout', 'label', 600),
+      this.styledText('navbar-subtitle', bar.subtitle, 'caption', 'secondaryLabel'),
+    ] }
+  }
+
+  /** System bar controls keep a compact font; content still follows Dynamic Type. A `weight` is a `.confirmationAction`'s (Wave 6c). */
+  private chromeContent(id: string, build: () => LayoutElement, weight?: number): LayoutElement {
     const outer = this.styles
     this.styles = { ...outer, dynamicTypeSize: 'large' }
-    try { return { kind: 'modified', id, modifier: { kind: 'font', font: bodyFont('large') }, child: build() } }
+    try { return { kind: 'modified', id, modifier: { kind: 'font', font: weight ? { ...bodyFont('large'), weight } : bodyFont('large') }, child: build() } }
     finally { this.styles = outer }
+  }
+
+  /** A compact popover's bubble and arrow: white, as measured, or the raised grey of a dark screen (Wave 6c). */
+  get popoverFill(): RGBA {
+    return this.scheme === 'light' ? rgba(255, 255, 255) : this.color('secondarySystemBackground')
+  }
+
+  /** The path of the container the screen is laid out in, while the views around it are converted (Wave 6c). */
+  private slot: string | undefined
+
+  /** The views around a screen's container, the container a slot that takes all it is offered (Wave 6c). */
+  around(views: readonly ViewValue[], slot: string): LayoutElement[] {
+    this.slot = slot
+    try { return this.convertList(views, 'v', 'vertical') } finally { this.slot = undefined }
+  }
+
+  /** The navigation bar's `.confirmationAction` items, drawn semibold, while it is converted (Wave 6c). */
+  private confirmItems: ReadonlySet<ViewValue> | undefined
+
+  /**
+   * One side of the bar, split where a `ToolbarSpacer` is into groups `SURFACES.toolbar.spacerGap`
+   * apart, each drawn as `toolbarSide` draws a side (Wave 6c). A search item draws nothing up here,
+   * as iOS 27 draws an empty capsule for it.
+   */
+  private toolbarGroups(items: readonly ViewValue[], prefix: string): LayoutElement[] {
+    if (!items.some(item => item.name === 'ToolbarSpacer' || item.name === 'DefaultToolbarItem')) return this.toolbarSide(items, prefix)
+    const runs: ViewValue[][] = [[]]
+    for (const item of items) {
+      if (item.name === 'ToolbarSpacer') runs.push([])
+      else if (item.name !== 'DefaultToolbarItem') runs[runs.length - 1]!.push(item)
+    }
+    const groups = runs.filter(run => run.length).map((run, i) => this.toolbarSide(run, `${prefix}${i}-`)).flat()
+    return groups.length < 2 ? groups : [{ kind: 'stack', id: `${prefix}groups`, axis: 'horizontal', spacing: SURFACES.toolbar.spacerGap, alignment: CENTER, children: groups }]
   }
 
   /**
@@ -699,7 +799,7 @@ class Converter {
    * capsule, 3 pt in at its ends and 10 pt apart, each without a glass of its own.
    */
   private toolbarSide(items: readonly ViewValue[], prefix: string): LayoutElement[] {
-    const item = (view: ViewValue, i: number) => this.chromeContent(`${prefix}${i}-font`, () => this.convert(view, `${prefix}${i}`, 'horizontal'))
+    const item = (view: ViewValue, i: number) => this.chromeContent(`${prefix}${i}-font`, () => this.convert(view, `${prefix}${i}`, 'horizontal'), this.confirmItems?.has(view) ? 600 : undefined)
     if (items.length < 2) return items.map(item)
     const outer = this.styles
     this.styles = { ...outer, toolbarGroup: true }
@@ -715,7 +815,7 @@ class Converter {
    * line a tab bar or a bottom search field takes. A `Spacer` splits them into a capsule for
    * each side; items with none between them share one, centred, as the bar's sides do.
    */
-  bottomBar(bar: NonNullable<ResolvedUI['bottomBar']>): LayoutElement {
+  bottomBar(bar: NonNullable<ResolvedUI['bottomBar']>, search: LayoutElement | null = null): LayoutElement {
     const outer = this.styles
     this.styles = { ...withStyles(outer, bar.view, this.scheme), container: 'toolbar', bottomBar: true }
     this.styles = { ...this.styles, label: this.styles.label ?? 'iconOnly' }
@@ -723,22 +823,49 @@ class Converter {
       const children: LayoutElement[] = []
       let run: ViewValue[] = []
       const close = () => { if (run.length) children.push(...this.toolbarSide(run, `bottombar-${children.length}-`)); run = [] }
+      /** A gap of `SURFACES.toolbar.spacerGap`, where a fixed `ToolbarSpacer` is, or any spacer beside a search field (Wave 6c). */
+      const gap = (id: string): LayoutElement => ({ kind: 'modified', id: `${id}gap`, modifier: { kind: 'frame', width: SURFACES.toolbar.spacerGap, alignment: CENTER }, child: { kind: 'empty', id } })
+      let status: ViewValue[] | undefined
       for (const item of bar.items) {
-        if (item.name !== 'Spacer') { run.push(item); continue }
+        if (bar.status?.has(item)) { (status ??= []).push(item); continue }
+        // A search item is the search field, in the space left between the items around it (Wave 6c).
+        if (item.name === 'DefaultToolbarItem') {
+          close()
+          if (search && isSearchItem(item)) children.push(search)
+          continue
+        }
+        if (item.name !== 'Spacer' && item.name !== 'ToolbarSpacer') { run.push(item); continue }
         close()
-        children.push({ kind: 'spacer', id: item.path ?? `bottombar-${children.length}`, axis: 'horizontal', minLength: 0 })
+        const id = item.path ?? `bottombar-${children.length}`
+        // `ToolbarSpacer` is flexible unless written `.fixed`, which splits the capsules a fixed gap apart (Wave 6c).
+        children.push(search || item.name === 'ToolbarSpacer' && tokenName(positional(item.args, 0)) === 'fixed' ? gap(id) : { kind: 'spacer', id, axis: 'horizontal', minLength: 0 })
       }
       close()
-      const spaced = children.some(child => child.kind === 'spacer') ? children
+      // A `.status` item is centred, so the items beside it go to the leading edge (Wave 6c).
+      const spaced = search || children.some(child => child.kind === 'spacer') ? children
+        : status ? [...children, { kind: 'spacer' as const, id: 'bottombar-trail', axis: 'horizontal' as const, minLength: 0 }]
         : [{ kind: 'spacer' as const, id: 'bottombar-lead', axis: 'horizontal' as const, minLength: 0 }, ...children, { kind: 'spacer' as const, id: 'bottombar-trail', axis: 'horizontal' as const, minLength: 0 }]
       // Centred on the tab bar's line, in the space a tab bar takes, as a bottom search field is.
       const centring = (SURFACES.tab.height - SURFACES.search.capsuleHeight) / 2
+      const row: LayoutElement = { kind: 'stack', id: 'bottombar-row', axis: 'horizontal', spacing: 0, alignment: CENTER, children: spaced, debugName: BOTTOM_BAR }
       return {
         kind: 'modified', id: 'bottombar-outer',
         modifier: { kind: 'padding', insets: insets(centring, SURFACES.search.capsuleMargin, centring + SURFACES.tab.bottom, SURFACES.search.capsuleMargin) },
-        child: { kind: 'stack', id: 'bottombar-row', axis: 'horizontal', spacing: 0, alignment: CENTER, children: spaced, debugName: BOTTOM_BAR },
+        child: status ? { kind: 'modified', id: 'bottombar-status', modifier: { kind: 'overlay', alignment: CENTER, content: this.statusCapsule(status) }, child: row } : row,
       }
     } finally { this.styles = outer }
+  }
+
+  /**
+   * A toolbar's `.status` items, as iOS 27 draws them in the bottom bar: centred in a glass
+   * capsule of their own, as tall as the bar's others, hugging what they show (Wave 6c,
+   * iphone18pro-chrome placements).
+   */
+  private statusCapsule(items: readonly ViewValue[]): LayoutElement {
+    const row: LayoutElement = { kind: 'stack', id: 'bottombar-status-row', axis: 'horizontal', spacing: 8, alignment: CENTER,
+      children: items.map((item, i) => this.chromeContent(`bottombar-status-${i}-font`, () => this.convert(item, item.path ?? `bottombar-status-${i}`, 'horizontal'))) }
+    const padded: LayoutElement = { kind: 'modified', id: 'bottombar-status-pad', modifier: { kind: 'padding', insets: insets(0, SURFACES.toolbar.statusPadding, 0, SURFACES.toolbar.statusPadding) }, child: row }
+    return this.glassSurface({ kind: 'modified', id: 'bottombar-status-height', modifier: { kind: 'frame', height: SURFACES.search.capsuleHeight, alignment: CENTER }, child: padded }, 'bottombar-status-', 999, 'circular')
   }
 
   /** iOS 27's glass behind a toolbar control, or a group of them: a thin material, clipped to its corners and outlined. */
@@ -769,16 +896,16 @@ class Converter {
           spacing: 8,
           alignment: CENTER,
           children: [
-            ...this.toolbarSide(bar.leading, 'navbar-l'),
+            ...this.toolbarGroups(bar.leading, 'navbar-l'),
             { kind: 'spacer', id: 'navbar-gap-l', axis: 'horizontal', minLength: 0 },
             ...(search ? [{ kind: 'modified' as const, id: 'navbar-search-width', modifier: { kind: 'frame' as const, width: Math.min(280, this.viewportWidth * 0.34), alignment: CENTER }, child: search }] : []),
-            ...this.toolbarSide(bar.trailing, 'navbar-t'),
+            ...this.toolbarGroups(bar.trailing, 'navbar-t'),
           ],
         },
         // A principal item takes the title's place, centred in the row (Wave 4b, iphone18pro-system-ui).
         bar.principal.length ? this.chromeContent('navbar-principal-font', () => ({ kind: 'stack', id: 'navbar-principal', axis: 'horizontal', spacing: 8, alignment: CENTER, children: this.convertList(bar.principal, 'navbar-p', 'horizontal') }))
         // Both titles exist so the DOM can cross-fade them without evaluating Swift.
-        : search ? { kind: 'modified', id: 'navbar-title-inset', modifier: { kind: 'padding', insets: insets(0, bar.leading.length ? 90 : 0, 0, Math.min(280, this.viewportWidth * 0.34) + bar.trailing.length * 100) }, child: this.chromeContent('navbar-title-font', () => this.styledText('navbar-title', bar.title, 'headline', 'label')) } : this.chromeContent('navbar-title-font', () => this.styledText('navbar-title', bar.title, 'headline', 'label')),
+        : search ? { kind: 'modified', id: 'navbar-title-inset', modifier: { kind: 'padding', insets: insets(0, bar.leading.length ? 90 : 0, 0, Math.min(280, this.viewportWidth * 0.34) + bar.trailing.length * 100) }, child: this.chromeContent('navbar-title-font', () => this.inlineTitle(bar)) } : this.chromeContent('navbar-title-font', () => this.inlineTitle(bar)),
       ],
     }
 
@@ -806,10 +933,18 @@ class Converter {
               child: strip,
             },
             {
+              // A subtitle goes under the large title, which moves down for it (Wave 6c, iphone18pro-chrome subtitle).
               kind: 'modified',
               id: 'navbar-large-pad',
-              modifier: { kind: 'padding', insets: insets(4, SURFACES.navigation.titleInset, 3, SURFACES.navigation.titleInset) },
-              child: this.styledText('navbar-large-title', bar.title, 'largeTitle', 'label', 700),
+              modifier: { kind: 'padding', insets: bar.subtitle
+                ? insets(SURFACES.subtitle.largeTop, SURFACES.navigation.titleInset, SURFACES.subtitle.largeBottom, SURFACES.navigation.titleInset)
+                : insets(4, SURFACES.navigation.titleInset, 3, SURFACES.navigation.titleInset) },
+              child: bar.subtitle
+                ? { kind: 'stack', id: 'navbar-large-titles', axis: 'vertical', spacing: SURFACES.subtitle.largeGap, alignment: { horizontal: 'leading', vertical: 'center' }, children: [
+                    this.styledText('navbar-large-title', bar.title, 'largeTitle', 'label', 700),
+                    this.styledText('navbar-large-subtitle', bar.subtitle, 'caption', 'secondaryLabel'),
+                  ] }
+                : this.styledText('navbar-large-title', bar.title, 'largeTitle', 'label', 700),
             },
           ],
         }
@@ -987,13 +1122,32 @@ class Converter {
   }
 
   /** The tab bar: evenly divided items, the selected one tinted. */
-  tabBar(bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
+  tabBar(bar: NonNullable<ResolvedUI['tabBar']>, accessory = false): LayoutElement {
     const outer = this.styles
     this.styles = withStyles(outer, bar.view, this.scheme)
-    try { return this.tabBarContent(bar) } finally { this.styles = outer }
+    try { return accessory ? this.withAccessory(this.tabBarContent(bar, true), bar.accessory!) : this.tabBarContent(bar, false) } finally { this.styles = outer }
   }
 
-  private tabBarContent(bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
+  /**
+   * The tab bar with `.tabViewBottomAccessory` above it, as iOS 27 draws it on a phone: what it
+   * shows laid out in a glass capsule `SURFACES.accessory.height` tall, `gap` above the bar, as
+   * wide as the bar, which stretches to it (Wave 6c, iphone18pro-chrome accessory).
+   */
+  private withAccessory(tabBar: LayoutElement, views: readonly ViewValue[]): LayoutElement {
+    const { height, gap, margin } = SURFACES.accessory
+    const content: LayoutElement = { kind: 'modified', id: 'accessory-frame', modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, height, alignment: CENTER },
+      child: joinRoot(this.convertList(views, 'accessory', 'vertical'), 'vertical') }
+    const capsule: LayoutElement = { kind: 'modified', id: 'accessory-margin', modifier: { kind: 'padding', insets: insets(0, margin, gap, margin) },
+      child: this.glassCapsule(content, 'accessory-surface', 'accessory-outline') }
+    return { kind: 'stack', id: 'accessory-column', axis: 'vertical', spacing: 0, alignment: CENTER, children: [capsule, tabBar] }
+  }
+
+  /**
+   * `withAccessory` stretches the bar to the widest a phone's is, `SURFACES.accessory.margin`
+   * in from each edge, which a bar of four tabs or more is anyway (iphone18pro-system-ui,
+   * iphone18pro-chrome).
+   */
+  private tabBarContent(bar: NonNullable<ResolvedUI['tabBar']>, withAccessory: boolean): LayoutElement {
     const items = bar.items.map((item, index) => {
       const selected = boolArg(labelled(item.args, 'selected'))
       const tint = selected ? this.color('accentColor') : this.color('label')
@@ -1059,7 +1213,7 @@ class Converter {
     const surface = this.glassCapsule({ kind: 'modified', id: 'tabbar-inset', modifier: { kind: 'padding', insets: uniformInsets(SURFACES.tab.inset) }, child: row }, 'tabbar-surface', 'tabbar-outline')
     return {
       kind: 'modified', id: 'tabbar-margin', modifier: { kind: 'padding', insets: insets(0, SURFACES.tab.margin, SURFACES.tab.bottom, SURFACES.tab.margin) },
-      child: { kind: 'modified', id: 'tabbar-width', modifier: { kind: 'frame', maxWidth: Math.min(this.viewportWidth >= 600 ? SURFACES.tab.regularWidth : this.viewportWidth - SURFACES.tab.margin * 2, bar.items.length * SURFACES.tab.itemWidth + SURFACES.tab.inset * 2), height: SURFACES.tab.height, alignment: CENTER }, child: surface },
+      child: { kind: 'modified', id: 'tabbar-width', modifier: { kind: 'frame', maxWidth: Math.min(this.viewportWidth >= 600 ? SURFACES.tab.regularWidth : this.viewportWidth - SURFACES.accessory.margin * 2, withAccessory ? Infinity : bar.items.length * SURFACES.tab.itemWidth + SURFACES.tab.inset * 2), height: SURFACES.tab.height, alignment: CENTER }, child: surface },
     }
   }
 
@@ -1120,6 +1274,10 @@ class Converter {
   /** A sheet, cover, alert, dialog or menu, laid out as its own little screen. */
   overlay(overlay: Overlay): LayoutElement {
     const body = overlay.views.map((v, i) => this.convert(v, `ov-${i}`, 'vertical'))
+
+    // A popover a phone keeps as one is its content at its own size, on a bubble (Wave 6c); the
+    // layout puts it beside its source, with its arrow.
+    if (overlay.compact) return this.chromeOutline(this.background(joinRoot(body, 'vertical'), 'ov-bubble', this.popoverFill, SURFACES.popover.radius), 'ov-bubble-outline', SURFACES.popover.radius)
 
     if (overlay.kind === 'menu') return this.menuSurface(overlay)
 
@@ -1244,7 +1402,7 @@ class Converter {
       // modifiers it carries - `.onDelete`, `.onMove` - describe the *collection*
       // rather than a box around it. Treating it as opaque made an entire list
       // collapse into one unrecognised view.
-      if (isTransparent(view)) {
+      if (isTransparent(view) && view.path !== this.slot) {
         out.push(...this.convertList(view.children.map((child) => inheritVisualStyle(child, visualModifiers(view))), path, axis))
         return
       }
@@ -1449,6 +1607,13 @@ class Converter {
   }
 
   private baseElement(view: ViewValue, path: string, parentAxis: Axis): LayoutElement {
+    // The container a screen is laid out in, among the views around it (Wave 6c): a frame that
+    // takes all it is offered, marked by a clear fill, so where it is painted is known too.
+    if (path === this.slot) {
+      const ids = slotIds(path)
+      return { kind: 'modified', id: ids.frame, modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, maxHeight: Number.POSITIVE_INFINITY, alignment: CENTER },
+        child: { kind: 'fill', id: ids.fill, fill: { kind: 'solid', color: rgba(0, 0, 0, 0) } } }
+    }
     const origin = {
       ...(view.span ? { origin: view.span } : {}),
       debugName: view.name,
@@ -1486,6 +1651,11 @@ class Converter {
           ...origin,
         }
       }
+
+      // Lays out what it holds as a centred VStack does, as iOS 27 does; its `spacing:` is how
+      // near glass shapes merge, not a stack's spacing (Wave 6c, iphone18pro-chrome).
+      case 'GlassEffectContainer':
+        return { kind: 'stack', id: path, axis: 'vertical', spacing: null, alignment: CENTER, children: this.convertList(view.children, path, 'vertical'), ...origin }
 
       case 'ZStack':
         return {
@@ -2433,7 +2603,9 @@ class Converter {
 
     const named = systemName && variantSymbol(systemName, this.styles.symbolVariant)
     const symbol = resolveSymbol(named ?? '')
-    return {
+    const value = numberArg(labelled(view.args, 'variableValue'))
+    const paint = this.symbolPaint(named, value === null ? undefined : Math.min(1, Math.max(0, value)))
+    return this.shownSymbol({
       kind: 'image',
       id: path,
       glyph: symbol.glyph,
@@ -2441,9 +2613,33 @@ class Converter {
       resizable,
       approximated: symbol.approximated,
       ...(named ? { symbol: named } : {}),
+      symbolPaint: paint,
       ...origin,
       ...(systemName ? { debugName: `Image(systemName: "${systemName}")` } : {}),
-    }
+    }, path)
+  }
+
+  /**
+   * How a symbol's layers are painted (Wave 6b): in the mode written around it, or in palette
+   * where the nearest `.foregroundStyle` gives two styles and no mode is written, as iOS 27
+   * draws it (docs/parity/native/iphone18pro-symbols); and how full its variable value is.
+   * The styles are resolved here, in the symbol's own scheme and tint, as SwiftUI resolves them
+   * where the symbol is drawn, and only for a symbol.
+   */
+  private symbolPaint(name: string | null, variableValue?: number): SymbolPaint | undefined {
+    const written = this.styles.symbolMode
+    const styles = this.styles.symbolForeground?.args.filter((arg) => arg.label === null)
+    const mode = written === 'monochrome' ? undefined : written ?? (styles && styles.length > 1 ? 'palette' : undefined)
+    if (!mode && variableValue === undefined) return undefined
+    const scheme = this.styles.colorScheme ?? this.scheme
+    const colors = mode === 'palette' ? styles?.map((arg) => resolveColorArg(arg.value, scheme, this.styles.tint))
+      : mode === 'multicolor' && name ? symbolMulticolor(name)?.map((color) => color ? this.color(color) : null) : undefined
+    return { mode, colors, variableValue }
+  }
+
+  /** A symbol a `.symbolEffect` hides, drawn clear in its frame (Wave 6b). */
+  private shownSymbol(element: LayoutElement, id: string): LayoutElement {
+    return this.styles.symbolHidden ? { kind: 'modified', id: `${id}effect`, modifier: { kind: 'opacity', value: 0 }, child: element } : element
   }
 
   private label(view: ViewValue, path: string, origin: object): LayoutElement {
@@ -2462,7 +2658,8 @@ class Converter {
     const icon = symbol ? [] : argViews(view, 'icon')
     const children: LayoutElement[] = wantsIcon ? this.convertList(icon, `${path}icon`, 'horizontal') : []
     if (symbol && wantsIcon) {
-      children.push({
+      const paint = this.symbolPaint(systemImage)
+      children.push(this.shownSymbol({
         kind: 'image',
         id: `${path}icon`,
         glyph: symbol.glyph,
@@ -2471,7 +2668,8 @@ class Converter {
         resizable: false,
         approximated: symbol.approximated,
         ...(systemImage ? { symbol: systemImage } : {}),
-      })
+        symbolPaint: paint,
+      }, `${path}icon`))
     }
     // Centred in a column 24 pt wide, with the title 16 pt after it, at 72 on the phone.
     // The column is a line of text tall: the icon reaches past it, and the row keeps
@@ -3734,8 +3932,9 @@ class Converter {
       child: row,
     }
 
-    if (placement === 'bottom') {
+    if (placement === 'bottom' || placement === 'bar') {
       const capsule = this.glassCapsule({ kind: 'modified', id: `${path}height`, modifier: { kind: 'frame', minHeight: SURFACES.search.capsuleHeight, alignment: CENTER }, child: padded }, `${path}surface`, `${path}outline`)
+      if (placement === 'bar') return { kind: 'modified', id: `${path}outer`, modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, alignment: CENTER }, child: capsule }
       // Centred on the tab bar's line, in the space a tab bar takes.
       const centring = (SURFACES.tab.height - SURFACES.search.capsuleHeight) / 2
       return {
@@ -4529,6 +4728,18 @@ function actionParts(button: ViewValue): { readonly shown: ViewValue; readonly t
   const shown = button.args.flatMap(arg => arg.label === 'label' ? asView(arg.value) ?? [] : [])[0] ?? button.children[0] ?? button
   const image = shown.name === 'Image'
   return { shown, title: image ? null : stringArg(shown.args.find(arg => arg.label === null || arg.label === 'title')?.value), icon: stringArg(labelled(shown.args, image ? 'systemName' : 'systemImage')) }
+}
+
+/**
+ * The elements the container at `path` is drawn as among the views around it (Wave 6c): a
+ * frame that takes all it is offered, and in it a clear fill, whose place in the paint order
+ * says which of the views around it are painted before the screen.
+ */
+export const slotIds = (path: string) => ({ frame: `${path}slotframe`, fill: `${path}slot` })
+
+/** Whether a toolbar item is `DefaultToolbarItem(kind: .search, …)`, the search field's place (Wave 6c). */
+function isSearchItem(view: ViewValue): boolean {
+  return view.name === 'DefaultToolbarItem' && tokenName(labelled(view.args, 'kind')) === 'search'
 }
 
 /**

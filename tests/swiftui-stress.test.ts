@@ -34,7 +34,7 @@ const gaps: Record<string, string> = {
   'state-initializer': "Cannot find '_count'",
   'value-textfield': 'value/format/formatter', 'multiline-textfield': 'axis-based multiline',
   'grid-cell-span': 'gridCellColumns', 'safe-area-padding': 'safeAreaPadding',
-  'preferred-scheme': 'preferredColorScheme', 'symbol-effects': 'symbolEffect',
+  'preferred-scheme': 'preferredColorScheme',
   'scroll-reader': 'ScrollViewReader', 'custom-environment': '@Environment(featureEnabled)',
   'dateformatter': 'DateFormatter', 'timeline-context': 'timeline runs only once',
   'async-phase': 'remote loading and image phases', 'map-placeholder': 'Map',

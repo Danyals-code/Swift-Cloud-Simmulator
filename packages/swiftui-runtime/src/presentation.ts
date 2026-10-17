@@ -121,11 +121,17 @@ export interface NavigationBar {
   /** A `.principal` item, drawn in the title's place (Wave 4b). */
   readonly principal: readonly ViewValue[]
   readonly view: ViewValue
+  /** `.navigationSubtitle`, drawn under the title, inline or large (Wave 6c). */
+  readonly subtitle?: string
+  /** The `.confirmationAction` items, whose titles iOS 27 draws semibold (Wave 6c). */
+  readonly confirm?: ReadonlySet<ViewValue>
 }
 
 export interface TabBar {
   readonly items: readonly ViewValue[]
   readonly view: ViewValue
+  /** What `.tabViewBottomAccessory` shows, in a capsule above the bar (Wave 6c). */
+  readonly accessory?: readonly ViewValue[]
 }
 
 /** A screen's toolbar items by where they are drawn: a principal item in place of the title (Wave 4b). */
@@ -134,6 +140,9 @@ interface Toolbar {
   readonly trailing: readonly ViewValue[]
   readonly principal: readonly ViewValue[]
   readonly bottom: readonly ViewValue[]
+  /** Which of the bottom items are `.status` ones, and which of the bar's `.confirmationAction` ones (Wave 6c). */
+  readonly status?: ReadonlySet<ViewValue>
+  readonly confirm?: ReadonlySet<ViewValue>
 }
 
 /** No views, shared, so a screen without a toolbar allocates nothing for one each pass (Wave 4b). */
@@ -149,6 +158,8 @@ function toolbarViews(bar: Pick<NavigationBar, 'leading' | 'trailing' | 'princip
 export interface BottomBar {
   readonly items: readonly ViewValue[]
   readonly view: ViewValue
+  /** Which items are `.status` ones, centred in a capsule of their own (Wave 6c). */
+  readonly status?: ReadonlySet<ViewValue>
 }
 
 export type OverlayKind = 'sheet' | 'cover' | 'alert' | 'dialog' | 'popover' | 'menu'
@@ -165,6 +176,11 @@ export interface Overlay {
   readonly detent: number
   readonly detents?: readonly number[]
   readonly anchorId?: string
+  /**
+   * A popover drawn as one on a phone, `.presentationCompactAdaptation(.popover)`, rather than
+   * as a sheet (Wave 6c): beside `source`, the path of the view it is written on.
+   */
+  readonly compact?: { readonly source: string }
   readonly cornerRadius?: number
   readonly background?: SwiftValue
   /** Omitted disables interaction; a number enables it through that encoded detent. */
@@ -238,6 +254,12 @@ export interface ResolvedUI {
   readonly lifecycle: readonly LifecycleHook[]
   /** What was written around the screen's containers and isn't drawn (see `notDrawn`). */
   readonly notDrawn?: readonly NotDrawn[]
+  /**
+   * The views around the screen's outermost container, when something is written beside it or
+   * on it (Wave 6c): the window's views, with the container at `slot`, its path, where the
+   * screen, its bars included, is laid out.
+   */
+  readonly outer?: { readonly views: readonly ViewValue[]; readonly slot: string }
   /** What resolving the screen found that the checker can't see, such as a Picker that can't select. */
   readonly warnings?: readonly Diagnostic[]
   /**
@@ -306,6 +328,7 @@ export function stoppedFailures(ui: Pick<ResolvedUI, 'content' | 'navigationBar'
     shown.navigationBar?.trailing.forEach(visit)
     shown.bottomBar?.items.forEach(visit)
     shown.tabBar?.items.forEach(visit)
+    shown.tabBar?.accessory?.forEach(visit)
     if (shown.overlay?.screen) screen(shown.overlay.screen)
     else shown.overlay?.views.forEach(visit)
   }
@@ -693,16 +716,19 @@ class Resolver {
     this.route = route && (asProjection(route)?.get() ?? route)
     this.around = containersAbove(stamped, tabs, withTabs.content, nav)
     const searchAround = searchContainers(withTabs.content, nav, screen.navigationBar)
-    this.notDrawn.push(
-      ...(tabs ? notDrawnAround(stamped, tabs) : []),
-      ...(nav ? notDrawnAround(withTabs.content, nav) : []),
-    )
+    // What is beside or on the outermost container is drawn around the screen, which is laid out
+    // in the container's place (Wave 6c); beside a stack inside a tab's page, it still isn't.
+    let slot: ViewValue | null = null
+    if (tabs) {
+      if (notDrawnAround(stamped, tabs).length) slot = tabs
+      if (nav) this.notDrawn.push(...notDrawnAround(withTabs.content, nav))
+    } else if (nav && notDrawnAround(withTabs.content, nav).length) slot = nav
 
     // A menu sits above everything, including a sheet: it is the thing the user just
     // opened, and it is the only one they can interact with while it is up.
     const overlay = this.forced ? this.findOverlay(screen.content, 0, this.around)
-      : this.basePage ? this.menuOverlay(screen.content, this.revealedMenu)
-      : this.findOverlay(screen.content, 0, this.around) ?? this.menuOverlay(screen.content, this.revealedMenu ?? this.ctx.state.openMenu())
+      : this.basePage ? this.menuOverlay(screen.content, this.revealedMenu, screen)
+      : this.findOverlay(screen.content, 0, this.around) ?? this.menuOverlay(screen.content, this.revealedMenu ?? this.ctx.state.openMenu(), screen)
 
     // A screen's toolbar items are one Toolbar layer, wherever each is drawn: a click on one
     // in the bar, in the title's place or in the bottom bar finds it there (Wave 4b).
@@ -713,7 +739,12 @@ class Resolver {
         ...(items.length ? [{ id: `${(bar ?? bottom)!.view.path}/layers`, name: 'Toolbar', type: 'Toolbar', children: viewLayers(items) }] : []),
       ]
     }
-    const activeLayers = this.ctx.includeViewHierarchy === false ? [] : screenLayers(screen.content, screen.navigationBar, screen.bottomBar)
+    const activeLayers: ViewLayer[] = this.ctx.includeViewHierarchy === false ? [] : screenLayers(screen.content, screen.navigationBar, screen.bottomBar)
+    // The views drawn around the container are layers of the page shown, with the container left out (Wave 6c).
+    if (slot && this.ctx.includeViewHierarchy !== false) activeLayers.push(...besideLayers(viewLayers(stamped), slot.path!))
+    // What the bottom accessory shows is a layer a click on it finds, on whichever tab is shown (Wave 6c).
+    const accessory = withTabs.tabBar?.accessory
+    if (accessory && this.ctx.includeViewHierarchy !== false) activeLayers.push({ id: `${withTabs.tabBar!.view.path}/accessory`, name: 'Bottom accessory', type: 'Toolbar', children: viewLayers(accessory) })
     const pageLayers: ViewLayer[] = this.ctx.includeViewHierarchy === false ? [] : withTabs.pages.length ? withTabs.pages.map((page, index) => {
       const item = withTabs.tabBar?.items[index]
       const active = index === withTabs.selected
@@ -754,6 +785,7 @@ class Resolver {
       ...(this.armed.length ? { armed: this.armed } : {}),
       lifecycle: this.lifecycle,
       ...(this.notDrawn.length ? { notDrawn: this.notDrawn } : {}),
+      outer: slot ? { views: stamped, slot: slot.path! } : undefined,
       ...(this.warnings.length ? { warnings: this.warnings } : {}),
       ...(this.ctx.reveal !== undefined ? { reveal: { modifiers: [...this.revealable.values()], drawn: this.revealedRow || this.revealedPage || !!this.revealedMenu && overlay?.kind === 'menu' } } : {}),
     }
@@ -1676,12 +1708,13 @@ class Resolver {
    * a form - an approximation of position, never of content, and recorded as one in
    * the coverage matrix.
    */
-  private menuOverlay(views: readonly ViewValue[], open: string | null): Overlay | null {
+  private menuOverlay(views: readonly ViewValue[], open: string | null, bars?: { readonly navigationBar: NavigationBar | null; readonly bottomBar: BottomBar | null }): Overlay | null {
     if (!open) return null
 
     const isContextMenu = open.endsWith('/context-menu')
     const ownerPath = isContextMenu ? open.slice(0, -'/context-menu'.length) : open
-    const control = findByPath(views, ownerPath)
+    // A menu in the toolbar opens as one in the screen does, the ellipsis menu among them (Wave 6c).
+    const control = findByPath(views, ownerPath) ?? (bars ? findByPath(toolbarViews(bars.navigationBar, bars.bottomBar?.items), ownerPath) : null)
     if (!control) {
       // The control is gone - a filter changed, a row was deleted. Closing is the
       // honest response; leaving it open would dim the screen over nothing.
@@ -1866,6 +1899,11 @@ class Resolver {
     const title =
       stringArg(explicitTitle?.args[0]?.value) ?? (depth === 0 ? titles[0]! : titles[depth]!)
 
+    // `.navigationSubtitle` takes a string or a Text (Wave 6c); a Text with no words the preview can read isn't drawn, and says so.
+    const writtenSubtitle = collectModifier(screen, 'navigationSubtitle')
+    const subtitle = writtenSubtitle ? wordsIn(writtenSubtitle.args[0]?.value) : ''
+    if (writtenSubtitle && !subtitle && writtenSubtitle.args[0]?.value.kind !== 'string') this.warnings.push({ span: writtenSubtitle.span, severity: 'warning', code: 'unsupported_swiftui_modifier', feature: '.navigationSubtitle', message: "The preview doesn't draw this .navigationSubtitle: it can't read its Text's words. It still appears in the app." })
+
     const backId = depth > 0 ? this.register(`${stackId}/back`, back) : null
     // One walk finds the screen's toolbars and the bars it hides (Wave 4b).
     const toolbars = toolbarsOf(screen)
@@ -1895,6 +1933,8 @@ class Resolver {
       leading: backButton ? [backButton] : toolbar.leading,
       trailing: toolbar.trailing,
       principal: toolbar.principal,
+      subtitle: subtitle || undefined,
+      confirm: toolbar.confirm,
       view: {
         name: NAV_BAR,
         args: [{ label: 'title', value: { kind: 'string', value: title } }],
@@ -1912,6 +1952,7 @@ class Resolver {
       title.length > 0 || depth > 0 || toolbar.leading.length > 0 || toolbar.trailing.length > 0 || toolbar.principal.length > 0
     const bottomBar: BottomBar | null = toolbar.bottom.length && !(toolbars.hidden & HIDES.bottomBar) ? {
       items: toolbar.bottom,
+      status: toolbar.status,
       view: { name: BOTTOM_BAR, args: [], children: toolbar.bottom, modifiers: visualModifiers(stack), action: null, span: stack.span, path: `${stackId}/bottom` },
     } : null
 
@@ -1955,7 +1996,11 @@ class Resolver {
   private resolveToolbar(owners: readonly ToolbarOwner[], stackId: string): Toolbar {
     if (!owners.length) return NO_TOOLBAR
     let leading: ViewValue[] | undefined, trailing: ViewValue[] | undefined, principal: ViewValue[] | undefined, bottom: ViewValue[] | undefined
-    let index = 0
+    /** `.secondaryAction` items, unstamped, which go in the trailing ellipsis menu (Wave 6c). */
+    let secondary: ViewValue[] | undefined
+    /** Where in `bottom` each `.status` item is, and in `trailing` each `.confirmationAction` one (Wave 6c). */
+    let status: Set<number> | undefined, confirm: Set<number> | undefined
+    let index = 0, menuSpan: SourceSpan | undefined
     for (const { view, modifier } of owners) {
       const style = visualModifiers(view)
       for (const item of toolbarItemsIn(this.ctx.build(modifier.closure!, [], modifier.environment, 'Toolbar'))) {
@@ -1965,20 +2010,35 @@ class Resolver {
         // The keyboard's bar is up only while a field is being typed in, which a preview never is.
         if (placement === 'keyboard') continue
         const contents = item.name === 'ToolbarItem' || item.name === 'ToolbarItemGroup' ? item.children : [item]
-        const bucket = placement === 'principal' ? principal ??= [] : placement === 'bottomBar' ? bottom ??= []
+        if (placement === 'secondaryAction') {
+          menuSpan ??= item.span
+          for (const content of contents) (secondary ??= []).push(inheritVisualStyle(content, style))
+          continue
+        }
+        const bucket = placement === 'principal' ? principal ??= [] : placement === 'bottomBar' || placement === 'status' ? bottom ??= []
           : placement && LEADING_PLACEMENTS.has(placement) ? leading ??= [] : trailing ??= []
+        const marks = placement === 'status' ? status ??= new Set() : placement === 'confirmationAction' ? confirm ??= new Set() : undefined
         contents.forEach((content, inner) => {
           // A helper whose `if` drew nothing is an empty group, and no item (Wave 5a).
           if (content.name === 'Group' && !content.children.length) return
+          marks?.add(bucket.length)
           bucket.push(this.stamp(inheritVisualStyle(content, style), `${stackId}/tb-${at}-${inner}`))
         })
       }
     }
+    // iOS 27 folds `.secondaryAction` items into an ellipsis menu after the trailing items (Wave 6c).
+    if (secondary) (trailing ??= []).push(this.stamp(moreMenu(secondary, menuSpan!), `${stackId}/tb-more`))
+    const linked = (views: ViewValue[] | undefined) => views ? this.attachPushIntents(views, stackId) : NO_VIEWS
+    /** The views at `marks`, once their push intents are attached. */
+    const marked = (views: readonly ViewValue[], marks: Set<number> | undefined) => marks && new Set(views.filter((_, i) => marks.has(i)))
+    const shownTrailing = linked(trailing), shownBottom = linked(bottom)
     return {
-      leading: leading ? this.attachPushIntents(leading, stackId) : NO_VIEWS,
-      trailing: trailing ? this.attachPushIntents(trailing, stackId) : NO_VIEWS,
-      principal: principal ? this.attachPushIntents(principal, stackId) : NO_VIEWS,
-      bottom: bottom ? this.attachPushIntents(bottom, stackId) : NO_VIEWS,
+      leading: linked(leading),
+      trailing: shownTrailing,
+      principal: linked(principal),
+      bottom: shownBottom,
+      status: marked(shownBottom, status),
+      confirm: marked(shownTrailing, confirm),
     }
   }
 
@@ -2054,7 +2114,7 @@ class Resolver {
       const badge = page.modifiers.find(m => m.name === 'badge')?.args[0]?.value
       const modernLabel = page.args.filter(a => a.label === 'label').map(a => asView(a.value)).filter((v): v is ViewValue => !!v)
       const label: readonly ViewValue[] = paged ? [] : page.name === 'Tab'
-        ? modernLabel.length ? modernLabel : [{ name: 'Label', args: page.args.filter(a => a.label === null || a.label === 'systemImage'), children: [], modifiers: [], action: null, span: page.span }]
+        ? modernLabel.length ? modernLabel : [{ name: 'Label', args: tabLabelArgs(page), children: [], modifiers: [], action: null, span: page.span }]
         : item?.closure ? this.ctx.build(item.closure, [], item.environment, 'Tab item') : []
       const path = `${tabId}/tab-${i}`
       const intent = intents[i]!
@@ -2078,11 +2138,16 @@ class Resolver {
       } satisfies ViewValue
     })
 
+    const written = paged ? null : modifierOn(tabs, 'tabViewBottomAccessory')
+    // `isEnabled: false` hides it, as Apple documents (Wave 6c).
+    const enabled = written && labelled(written.args, 'isEnabled')
+    const accessory = written?.closure && !(enabled?.kind === 'bool' && !enabled.value) ? this.stampList(this.ctx.build(written.closure, [], written.environment, 'Bottom accessory'), `${tabId}/accessory`, visualModifiers(tabs)) : NO_VIEWS
     return {
       pages, selected,
       content: [pages[selected]!],
       tabBar: {
         items,
+        accessory: accessory.length ? accessory : undefined,
         view: {
           name: TAB_BAR,
           // A root pager's dots, hidden as `.page(indexDisplayMode:)` says (Wave 4c).
@@ -2222,6 +2287,7 @@ class Resolver {
         background: collectModifier(overlayViews, 'presentationBackground')?.args[0]?.value,
         backgroundInteraction: backgroundInteractionOf(overlayViews),
         ...(kind === 'dialog' && view.intent && view.path ? { anchorId: handlerIdFor(view.path) } : {}),
+        ...(kind === 'popover' && view.path && compactPopover(overlayViews) ? { compact: { source: view.path } } : {}),
         screen: {
           content: resolved.content, navigationBar: resolved.navigationBar, bottomBar: resolved.bottomBar,
           overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content, this.ctx.state.openMenu()),
@@ -2321,8 +2387,29 @@ const OVERLAY_KINDS: Readonly<Record<string, OverlayKind>> = {
 }
 
 const LEADING_PLACEMENTS: ReadonlySet<string> = new Set([
-  'navigationBarLeading', 'topBarLeading', 'cancellationAction', 'leading',
+  'navigationBarLeading', 'topBarLeading', 'cancellationAction', 'leading', 'navigation',
 ])
+
+/**
+ * Whether a popover stays one on a phone: `.presentationCompactAdaptation(.popover)`, or `.none`,
+ * which doesn't adapt, either for both size classes or `horizontal:`, a portrait phone's compact
+ * one (Wave 6c). Any other is the sheet a phone adapts a popover to.
+ */
+function compactPopover(views: readonly ViewValue[]): boolean {
+  const written = collectModifier(views, 'presentationCompactAdaptation')
+  const adaptation = written && tokenName(written.args[0]?.label === null ? written.args[0].value : labelled(written.args, 'horizontal'))
+  return adaptation === 'popover' || adaptation === 'none'
+}
+
+/**
+ * The menu iOS 27 draws for a toolbar's `.secondaryAction` items: an ellipsis button named
+ * More after the trailing items, sharing their capsule, which opens on them (Wave 6c,
+ * iphone18pro-chrome placements).
+ */
+function moreMenu(items: readonly ViewValue[], span: SourceSpan): ViewValue {
+  const label: ViewValue = { name: 'Label', args: [{ label: null, value: { kind: 'string', value: 'More' } }, { label: 'systemImage', value: { kind: 'string', value: 'ellipsis' } }], children: [], modifiers: [], action: null, span }
+  return { name: 'Menu', args: [{ label: 'label', value: asSwiftValue(label) }], children: items, modifiers: [], action: null, span }
+}
 
 /**
  * Presentation detents, as a fraction of screen height.
@@ -2486,6 +2573,17 @@ function flattenForEach(views: readonly ViewValue[]): ViewValue[] {
   return views.flatMap((v) => (v.name === 'ForEach' ? flattenForEach(v.children) : [v]))
 }
 
+/**
+ * What a `Tab(…)`'s item is labelled with: its title and symbol, or for `Tab(role: .search)`
+ * written without them, iOS 27's own, Search with a magnifying glass, as an ordinary item at
+ * the bar's end (Wave 6c, iphone18pro-chrome).
+ */
+function tabLabelArgs(page: ViewValue): readonly ViewArg[] {
+  const args = page.args.filter(a => a.label === null || a.label === 'systemImage')
+  if (args.length || tokenName(labelled(page.args, 'role')) !== 'search') return args
+  return [{ label: null, value: { kind: 'string', value: 'Search' } }, { label: 'systemImage', value: { kind: 'string', value: 'magnifyingglass' } }]
+}
+
 /** The app's tabs: the first TabView that isn't drawn in place as a pager (Wave 4c). */
 function findTabs(views: readonly ViewValue[]): ViewValue | null {
   for (const view of views) {
@@ -2643,6 +2741,18 @@ function containersAbove(
   nav: ViewValue | null,
 ): ViewValue[] {
   return [...(tabs ? pathTo(root, tabs) : []), ...(nav ? pathTo(page, nav) : [])]
+}
+
+/**
+ * The layers of the views around a screen's container, without it: its ancestors, holding
+ * what is beside it, and nothing at all where nothing is (Wave 6c).
+ */
+function besideLayers(layers: readonly ViewLayer[], container: string): ViewLayer[] {
+  return layers.flatMap(layer => {
+    if (layer.id === container) return []
+    const children = besideLayers(layer.children, container)
+    return children.length === layer.children.length && children.every((child, i) => child === layer.children[i]) ? [layer] : [{ ...layer, children }]
+  })
 }
 
 /** Modifiers that draw, and are left out when they are written on a screen's container. */

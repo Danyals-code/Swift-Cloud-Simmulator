@@ -378,10 +378,16 @@ export function colorInputText(color: ColorValue, swatches: Readonly<Record<stri
   return hex.slice(0, 7).toUpperCase() + (alpha === 255 ? '' : alpha.toString(16).padStart(2, '0').toUpperCase())
 }
 
-/** Where a toolbar item sits (Wave 4b): the bar's leading or trailing side, in place of the title, the bottom bar, or where iOS puts it. */
-export type ToolbarPlacement = 'leading' | 'trailing' | 'principal' | 'bottom' | 'automatic'
-/** Each placement in a designer's words, as the Placement field and the Bars section name it (Wave 4b). */
-export const TOOLBAR_PLACEMENT_WORDS: Readonly<Record<ToolbarPlacement, string>> = { leading: 'Leading', trailing: 'Trailing', principal: 'Title', bottom: 'Bottom', automatic: 'Automatic' }
+/**
+ * Each placement Bars sets in a designer's words, as the Placement field and the Bars section
+ * name it, in the order they list them (Wave 4b): the bar's leading or trailing side, in place
+ * of the title, the bottom bar, and (Wave 6c) where a sidebar or back button goes and the
+ * middle of the bottom bar, as `.navigation` and `.status` put it, then where iOS puts it. A
+ * placement added here is written as Swift by sema's `TOOLBAR_PLACEMENTS`.
+ */
+export const TOOLBAR_PLACEMENT_WORDS = { leading: 'Leading', trailing: 'Trailing', principal: 'Title', bottom: 'Bottom', navigation: 'Navigation', status: 'Status', automatic: 'Automatic' } as const
+/** Where a toolbar item sits (Wave 4b), one of `TOOLBAR_PLACEMENT_WORDS`. */
+export type ToolbarPlacement = keyof typeof TOOLBAR_PLACEMENT_WORDS
 
 /** One of a screen's toolbar items, as its Bars section lists it (Wave 4b). */
 export interface ScreenBarItem {
@@ -413,6 +419,12 @@ export interface ScreenBars {
   readonly problem?: string
   /** Why the search field can't be switched on here, when it can't. */
   readonly searchProblem?: string
+  /**
+   * The search tab of the tab bar the screen holds (Wave 6c), on the screen whose views hold
+   * the TabView alone: whether it has a `Tab(role: .search)`, that Tab's layer to select, and
+   * why it can't be switched here when it can't.
+   */
+  readonly searchTab?: { readonly on: boolean; readonly node?: string; readonly problem?: string }
 }
 
 export type AuthoringOperation = ResourceOperation | ModifierOperation | NavigationOperation | LayerSetOperation
@@ -421,6 +433,9 @@ export type AuthoringOperation = ResourceOperation | ModifierOperation | Navigat
   /** A search field on the screen, searching text kept in the screen's state (Wave 4b). */
   | { readonly kind: 'searchable-add'; readonly prompt: string }
   | { readonly kind: 'searchable-remove' }
+  /** A search tab, `Tab(role: .search)`, as the last of the tabs the screen holds, or taken away again (Wave 6c). */
+  | { readonly kind: 'search-tab-add' }
+  | { readonly kind: 'search-tab-remove' }
   /** A value of the Main each copy can set: text as before, or a symbol, image, colour, number, or whether a view is shown (Wave 5b). */
   | { readonly kind: 'component-expose'; readonly control: string; readonly name: string; readonly as?: ComponentInputKind }
   /** A variant property on the Main: a nested enum of two cases and a property of it, defaulting to the first (Wave 5b). */

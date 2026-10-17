@@ -29,7 +29,7 @@ import {
 import { LEGACY_STYLE_TOKENS, SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS, isKnownGlobal } from '@studio/swift-sema'
 import { ZERO_INSETS } from '@studio/swiftui-layout'
 import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
-import { isSymbolVariant } from './sf-symbols'
+import { isSymbolEffectOption, isSymbolVariant } from './sf-symbols'
 import { attributedMember, attributedRange, attributedSlice, attributedText, changeAttributed, isAttributed, isAttributeScope, joinAttributed, makeAttributed, markModifiers } from './attributed'
 import { CORNER_NAMES, cornerRadii, cornerRadiiOf, radiiValue } from './corners'
 import { containable, toFailure } from './failures'
@@ -175,6 +175,7 @@ const NAMESPACES: ReadonlySet<string> = new Set([
   'Color', 'Font', 'Alignment', 'Edge', 'Edge.Set', 'Angle', 'UnitPoint', 'Axis',
   'Animation', 'AnyTransition', 'Text', 'Image', 'ContentMode',
   'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
+  'SymbolRenderingMode', 'SymbolVariants',
   'CGSize', 'CGPoint', 'CGRect', 'CGFloat', 'Material', 'Glass',
   'Task', 'MainActor', 'Gradient', 'StrokeStyle',
   // `Color(UIColor.systemGray6)`: UIKit's colours, bridged by name like `Color(.systemGray6)`.
@@ -1781,6 +1782,8 @@ export class SwiftUIHost implements InterpreterHost {
     // `.fill.circle`: a symbol variant chain, one token naming both (Wave 6a).
     const variant = tokenNameOf(target)
     if (variant !== null && isSymbolVariant(variant) && isSymbolVariant(member)) return token(`${variant}.${member}`)
+    // `.disappear.down`, `.scale.up.byLayer`: a symbol effect and its options, as one token (Wave 6b).
+    if (variant !== null && isSymbolEffectOption(variant, member)) return token(`${variant}.${member}`)
 
     // `value.translation.width`, `value.location.x`, `size.width` …
     const geometry = geometryMember(target, member)

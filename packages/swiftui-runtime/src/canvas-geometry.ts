@@ -184,10 +184,13 @@ export class Placements {
   readonly rects = new Map<string, { readonly rect: Rect; readonly space: string | null }>()
   constructor(private readonly ids: ReadonlySet<string>) {}
 
-  observer(pass: Pick<PassRoot, 'prefix' | 'root'>): PlaceObserver {
+  /** A pass laid out from a `shift`ed corner, a slot's beside views (Wave 6c), has the rects in no node's space moved by it. */
+  observer(pass: Pick<PassRoot, 'prefix' | 'root'> & { readonly shift?: { readonly x: number; readonly y: number } }): PlaceObserver {
+    const shift = pass.shift
     return (element, rect, space) => {
       if (!this.ids.has(element.id)) return
-      this.rects.set(pass.prefix + element.id, { rect, space: space === null ? pass.root : pass.prefix + space })
+      const placed = space === null && shift ? { x: rect.x + shift.x, y: rect.y + shift.y, width: rect.width, height: rect.height } : rect
+      this.rects.set(pass.prefix + element.id, { rect: placed, space: space === null ? pass.root : pass.prefix + space })
     }
   }
 }

@@ -264,7 +264,7 @@ describe('a toolbar item’s Placement', () => {
   const set = (value: string) => ({ kind: 'property' as const, control: 'toolbar:placement', value })
 
   it('reads Leading, Trailing, Title, Bottom or Automatic, the older names for the bar’s sides too', () => {
-    expect(placementOf(INBOX, ITEM)).toMatchObject({ kind: 'select', label: 'Placement', value: 'Leading', options: ['Leading', 'Trailing', 'Title', 'Bottom', 'Automatic'] })
+    expect(placementOf(INBOX, ITEM)).toMatchObject({ kind: 'select', label: 'Placement', value: 'Leading', options: ['Leading', 'Trailing', 'Title', 'Bottom', 'Navigation', 'Status', 'Automatic'] })
     const older = INBOX.replace('.topBarLeading', '.navigationBarTrailing')
     expect(placementOf(older, ITEM.replace('.topBarLeading', '.navigationBarTrailing'))?.value).toBe('Trailing')
     const bare = INBOX.replace('ToolbarItem(placement: .topBarLeading) {', 'ToolbarItem {')
@@ -282,7 +282,7 @@ describe('a toolbar item’s Placement', () => {
 
   it('shows any other placement as written, read only, saying why', () => {
     const confirm = INBOX.replace('.topBarLeading', '.confirmationAction')
-    expect(placementOf(confirm, ITEM.replace('.topBarLeading', '.confirmationAction'))).toMatchObject({ kind: 'text', value: '.confirmationAction', disabledReason: 'Bars sets Leading, Trailing, Title, Bottom and Automatic. Change this placement in Code.' })
+    expect(placementOf(confirm, ITEM.replace('.topBarLeading', '.confirmationAction'))).toMatchObject({ kind: 'text', value: '.confirmationAction', disabledReason: 'Bars sets Leading, Trailing, Title, Bottom, Navigation, Status and Automatic. Change this placement in Code.' })
   })
 })
 
