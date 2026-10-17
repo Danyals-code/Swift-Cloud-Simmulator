@@ -88,6 +88,11 @@ export interface ResolvedFont {
   readonly smallCaps?: boolean
 }
 
+/** The family a font's CSS stack leads with, unquoted: `Avenir Next` for `"Avenir Next", -apple-system`, or '' for a stack that leads with the system font. */
+export function leadingFamily(family: string): string {
+  return /^"([^"]+)"/.exec(family)?.[1] ?? ''
+}
+
 export type TextAlignment = 'leading' | 'center' | 'trailing'
 
 /**

@@ -1,5 +1,5 @@
 import type { Diagnostic, DiagnosticCode, FixIt, SourceSpan } from '@studio/shared'
-import { MASK_PAINTS, MASK_RECEIVER_MODIFIERS, MASK_SHAPES, MASK_SHAPE_MODIFIERS, SYMBOL_MAP, TEXT_STYLES, iosFont, isSymbolRenderingMode, symbolDefinition, symbolDrawsMode, symbolDrawsVariableValue, symbolVariantName } from '@studio/shared'
+import { MASK_PAINTS, MASK_RECEIVER_MODIFIERS, MASK_SHAPES, MASK_SHAPE_MODIFIERS, SYMBOL_MAP, TEXT_STYLES, iosFont, isSymbolRenderingMode, symbolDefinition, symbolDrawsMode, symbolDrawsVariableValue, symbolVariantName, projectFont, type PreviewFontAsset } from '@studio/shared'
 import type {
   Block,
   CallExpr,
@@ -120,8 +120,11 @@ export class Checker {
   /** Non-zero inside a closure, where `$0` shorthand is legal. */
   private closureDepth = 0
 
-  static check(files: readonly SourceFileNode[]): SemanticModel {
-    return new Checker().run(files)
+  /** The project's own font files (Wave 6f), whose names `.custom(…)` finds as iOS's own. */
+  private constructor(private readonly fonts?: readonly PreviewFontAsset[]) {}
+
+  static check(files: readonly SourceFileNode[], fonts?: readonly PreviewFontAsset[]): SemanticModel {
+    return new Checker(fonts).run(files)
   }
 
   private run(files: readonly SourceFileNode[]): SemanticModel {
@@ -1055,10 +1058,9 @@ export class Checker {
     const onFont = isFontExpression(callee.base)
     const feature = `Font.${callee.member}`
     if (callee.member === 'custom' && (callee.base === null || isFontType(callee.base)) && expr.args[0]?.label === null) {
-      const name = expr.args[0].value
-      const family = name.kind === 'stringLiteral' && name.segments.every(segment => segment.kind === 'text') ? name.segments.map(segment => segment.kind === 'text' ? segment.value : '').join('') : undefined
-      // A family iOS ships needs no file, and the preview draws it (Wave 6a).
-      if (family !== undefined && iosFont(family)) return
+      const family = literalText(expr.args[0].value)
+      // A family iOS ships needs no file, and the preview draws it (Wave 6a), as it does a file of the project's (Wave 6f).
+      if (family !== undefined && (iosFont(family) || projectFont(family, this.fonts))) return
       const written = family !== undefined ? `'${family}' ` : ''
       this.report(expr.span, 'warning', 'unsupported_swiftui_modifier', `Custom font ${written}is not in this project; the preview draws the system font at the same size.`, feature)
     } else if (onFont && callee.member === 'width') {

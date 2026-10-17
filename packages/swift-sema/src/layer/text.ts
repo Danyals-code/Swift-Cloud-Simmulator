@@ -1,8 +1,9 @@
-import { TEXT_STYLES, isConditional, type ColorValue, type Conditional, type FontValue, type LayerChange, type LayerText, type LayerValue } from '@studio/shared'
+import { DESIGN_NEEDS_SYSTEM, TEXT_STYLES, TEXT_STYLE_POINTS, isConditional, type ColorValue, type Conditional, type FontValue, type LayerChange, type LayerText, type LayerValue } from '@studio/shared'
 import type { CallExpr, Expr, VarDecl } from '@studio/swift-syntax'
 import { modifierName } from '../authoring-border'
 import { SLOT } from '../authoring-modifiers'
 import { keepsText } from '../builtins'
+import { literalText, swiftString } from '../design-controls'
 import { STYLE_OPTIONS } from '../design-advanced-controls'
 import { insertCalls, insertionIndex, lineEnding, lineStart, replaceRun, type Patch } from './chain-edit'
 import { colorSource, keptColor, readColor, sameColor } from './color'
@@ -75,9 +76,11 @@ function fontOf(value: Expr, ctx: LayerContext, declared = false): FontValue | u
     const onFont = !value.base || value.base.kind === 'identifier' && value.base.name === 'Font'
     return style && onFont ? { style } : undefined
   }
-  if (value.kind !== 'call' || value.trailingClosure || value.callee.kind !== 'memberAccess' || value.callee.member !== 'system') return undefined
+  if (value.kind !== 'call' || value.trailingClosure || value.callee.kind !== 'memberAccess') return undefined
   const base = value.callee.base
-  if (base && !(base.kind === 'identifier' && base.name === 'Font')) return undefined
+  if (base && !onFont(base)) return undefined
+  if (value.callee.member === 'custom') return familyOf(value, ctx, declared)
+  if (value.callee.member !== 'system') return undefined
   const labels = value.args.map(arg => arg.label)
   const arg = (label: string | null) => value.args.find(item => item.label === label)?.value
   const weight = arg('weight'), design = arg('design')
@@ -100,6 +103,22 @@ function fontOf(value: Expr, ctx: LayerContext, declared = false): FontValue | u
   return scaled ? { style: null, size: scaled.size, relativeTo: scaled.relativeTo, ...parts } : undefined
 }
 
+/**
+ * `.custom("Brand", size: 28, relativeTo: .title)` (Wave 6f): its family, in the style whose
+ * own size it has or at a size that follows one. A plain `size:` follows Body from iOS 14 and
+ * stays fixed below it, where a size a style has reads as that style; `fixedSize:` is fixed.
+ */
+function familyOf(value: CallExpr, ctx: LayerContext, declared: boolean): FontValue | undefined {
+  const [name, size, relative, more] = value.args
+  const face = name?.label === null ? literalText(name.value) : undefined
+  const points = size && (declared ? literalNumber(size.value) : numberOf(size.value, ctx))
+  if (face === undefined || points === undefined || more || !(size!.label === 'size' || size!.label === 'fixedSize' && !relative)) return undefined
+  const follows = relative ? relative.label === 'relativeTo' ? memberIn(relative.value, TEXT_STYLES) : undefined : size!.label === 'size' && ctx.target >= 14 ? 'body' : null
+  if (follows === undefined) return undefined
+  const style = follows ? TEXT_STYLE_POINTS[follows] === points && follows : size!.label === 'size' && TEXT_STYLES.find(style => style !== 'headline' && TEXT_STYLE_POINTS[style] === points)
+  return style ? { style, face } : { style: null, size: points, relativeTo: follows, face }
+}
+
 /** The font a text inherits from the views around it, when it is a plain style; Body otherwise. */
 function inheritedFont(ctx: LayerContext): FontValue {
   const written = ctx.node.properties.find(property => property.id.endsWith(':inherited-font'))?.expression ?? ''
@@ -120,9 +139,9 @@ function readFont(slots: ChainSlots, ctx: LayerContext): LayerValue<FontValue> {
   const written = fonts[0]?.calls[0]
   const argument = written && written.args.length === 1 && written.args[0]!.label === null && !written.trailingClosure ? written.args[0]!.value : undefined
   const font = !written ? { style: fallback.style } : argument && (fontOf(argument, ctx) ?? fontToken(argument, ctx))
-  if (!font) return code('This text’s font is a custom font or worked out in Swift.')
-  // A custom face behind a token is shown as it is, with its name (Wave 3b).
-  if (font.face) return { value: font, state: 'code', from, disabledReason: `This text’s font, ${font.token}, is ${font.face}, a custom face the panel doesn’t offer. ${CODE}` }
+  if (!font) return code(familyWorkedOut(argument) ? 'This text’s font family is worked out in Swift.' : 'This text’s font is worked out in Swift.')
+  // A family behind a token is shown as it is, with its name (Wave 3b): the token writers set no family, so the panel can't edit it there (Wave 6f).
+  if (font.face && font.token) return { value: font, state: 'code', from, disabledReason: `This text’s font, ${font.token}, is in the ${font.face} family, which a text style token doesn’t set. ${CODE}` }
   const one = (runs: SlotRun[], read: (call: CallExpr) => string | boolean | undefined, field: 'weight' | 'design' | 'italic') => {
     if (!runs.length) return undefined
     if (runs.length > 1 || font[field] !== undefined) return null
@@ -133,10 +152,23 @@ function readFont(slots: ChainSlots, ctx: LayerContext): LayerValue<FontValue> {
   const design = one(designs, call => call.args.length === 1 ? memberIn(call.args[0]!.value, DESIGNS) : undefined, 'design')
   const italic = one(italics, call => call.args.length ? undefined : true, 'italic')
   if (weight === null || design === null || italic === null) return code('This text’s weight, design or italic is set in more than one place, or worked out in Swift.')
+  // A design on or beside a family is one the panel doesn't show, and an edit would take it away (Wave 6f).
+  if (font.face && (font.design !== undefined || design !== undefined)) return code('This text sets a design beside its font family, which the panel doesn’t show.')
   return {
     value: { ...font, ...(weight !== undefined ? { weight: weight as string } : {}), ...(design !== undefined ? { design: design as string } : {}), ...(italic !== undefined ? { italic: true } : {}) },
     state: font.token ? 'token' : 'literal', from,
   }
+}
+
+/**
+ * Whether a font is `.custom(…)` whose family is not a plain string, `.custom(family, size:
+ * 17)` or `.custom("Brand\(name)", …)`, under any modifiers on it (Wave 6f).
+ */
+function familyWorkedOut(value: Expr | undefined): boolean {
+  while (value?.kind === 'call' && value.callee.kind === 'memberAccess' && value.callee.member !== 'custom' && value.callee.base) value = value.callee.base
+  if (value?.kind !== 'call' || value.callee.kind !== 'memberAccess' || value.callee.member !== 'custom') return false
+  const base = value.callee.base, name = value.args[0]
+  return (!base || base.kind === 'identifier' && base.name === 'Font') && name?.label === null && literalText(name.value) === undefined
 }
 
 /**
@@ -158,9 +190,10 @@ function fontToken(value: Expr, ctx: LayerContext): FontValue | undefined {
 function customFace(value: Expr): FontValue | undefined {
   if (value.kind !== 'call' || value.trailingClosure || value.callee.kind !== 'memberAccess' || value.callee.member !== 'custom') return undefined
   const base = value.callee.base, [name, size] = value.args
-  if (base && !(base.kind === 'identifier' && base.name === 'Font') || name?.label !== null || name.value.kind !== 'stringLiteral' || !name.value.segments.every(segment => segment.kind === 'text')) return undefined
+  const face = name?.label === null ? literalText(name.value) : undefined
+  if (base && !(base.kind === 'identifier' && base.name === 'Font') || face === undefined) return undefined
   const points = size && (size.label === 'size' || size.label === 'fixedSize') ? literalNumber(size.value) : undefined
-  return { style: null, ...points !== undefined ? { size: points } : {}, face: name.value.segments.map(segment => segment.kind === 'text' ? segment.value : '').join('') }
+  return { style: null, ...points !== undefined ? { size: points } : {}, face }
 }
 
 /** A text modifier that takes one value: `.tracking(1)`, `.textCase(.uppercase)`. */
@@ -221,9 +254,15 @@ export function readText(slots: ChainSlots, ctx: LayerContext): LayerText | unde
 /** The calls that write a font: the font itself, and on iOS 16 and later its weight, design and italic beside it. */
 export function fontCalls(font: FontValue, inherited: string, size: string | null, ctx: LayerContext): string[] {
   const separate = ctx.target >= 16, separateDesign = ctx.target >= 16.1
-  // A weight is written unless it is the one the style already has: Headline's is semibold.
-  const weight = font.weight && font.weight !== (font.style === 'headline' ? 'semibold' : 'regular') ? font.weight : undefined
+  // A weight is written unless it is the one the style already has: Headline's is semibold, and a family's regular.
+  const weight = font.weight && font.weight !== (font.style === 'headline' && !font.face ? 'semibold' : 'regular') ? font.weight : undefined
   const design = font.design && font.design !== 'default' ? font.design : undefined
+  if (font.face) {
+    // A family keeps the style as the size it follows from iOS 14 (Wave 6f); below it a custom font's size is fixed.
+    const name = swiftString(font.face), follows = font.style ?? font.relativeTo, points = font.style ? TEXT_STYLE_POINTS[font.style] : size
+    const base = `.custom(${name}, ${ctx.target < 14 ? `size: ${points}` : follows ? `size: ${points}, relativeTo: .${follows}` : `fixedSize: ${points}`})`
+    return [`.font(${base}${separate ? '' : `${weight ? `.weight(.${weight})` : ''}${font.italic ? '.italic()' : ''}`})`, ...separate && weight ? [`.fontWeight(.${weight})`] : [], ...separate && font.italic ? ['.italic()'] : []]
+  }
   if (font.style !== null) {
     const folded = !separate && (weight || font.italic) || !separateDesign && design
     let base = design && !separateDesign ? `.system(.${font.style}, design: .${design})` : `.${font.style}`
@@ -268,17 +307,21 @@ function writeFont(slots: ChainSlots, change: Partial<FontValue>, ctx: LayerCont
   const current = readFont(slots, ctx)
   if (current.disabledReason) throw new Error(current.disabledReason)
   // A font read through a constant is written as the font itself, at this text only (Detach, Wave 3b).
-  const { token: _token, ...was } = current.value, { token: _asked, ...asked } = change
-  const next: FontValue = { ...was, ...asked }
+  const { token: _token, face: wasFace, ...was } = current.value, { token: _asked, face: askedFace, ...asked } = change
+  // A family (Wave 6f): System, null, takes it away, and a font file has its own design, which the font is written without.
+  const face = askedFace === undefined ? wasFace : askedFace
+  if (face !== null && face !== undefined && !face.trim()) throw new Error('Choose a font family.')
+  if (face && asked.design && asked.design !== 'default') throw new Error(DESIGN_NEEDS_SYSTEM)
+  const next: FontValue = { ...was, ...asked, ...face ? { face } : {} }
   if (next.style !== null && next.style !== undefined && !TEXT_STYLES.includes(next.style)) throw new Error('Choose one of the text styles.')
   if (next.style === null && !(typeof next.size === 'number' && next.size > 0)) throw new Error('A font size is more than 0 points.')
+  if (next.style === null && next.relativeTo && !TEXT_STYLES.includes(next.relativeTo)) throw new Error('Choose the text style the size follows.')
   const scaled = scaledIn(slots, ctx)
   const shared = scaled && readsOf(scaled.name, ctx) > 1
   const patches: Patch[] = []
   let size: string | null = null
-  if (next.style === null && next.relativeTo) {
-    if (ctx.target < 14) throw new Error('A size that follows Dynamic Type needs iOS 14. Choose a text style, or a fixed size.')
-    if (!TEXT_STYLES.includes(next.relativeTo)) throw new Error('Choose the text style the size follows.')
+  if (next.style === null && next.relativeTo && ctx.target < 14) throw new Error('A size that follows Dynamic Type needs iOS 14. Choose a text style, or a fixed size.')
+  if (next.style === null && next.relativeTo && !next.face) {
     const declaration = `@ScaledMetric(relativeTo: .${next.relativeTo}) private var `
     if (scaled) {
       if (shared && (scaled.size !== next.size || scaled.relativeTo !== next.relativeTo)) throw new Error('This size is shared with other text in this view. Change it in Code.')

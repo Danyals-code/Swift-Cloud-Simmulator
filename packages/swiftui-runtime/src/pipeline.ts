@@ -50,6 +50,7 @@ import {
 import { AppRuntime, type EvaluationResult } from './app-runtime'
 import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } from './style'
+import { setProjectFonts } from './font-token'
 import { appendPlaced, nodeKeys, placedToRenderTree, type KeyOf } from './to-render'
 import { screenToLayout, slotIds, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
 import { reveals, shownView, stoppedFailures, type NestedPage, type NotDrawn, type OverlayKind, type ResolvedUI, type Revealable } from './presentation'
@@ -256,7 +257,7 @@ function analyse(request: CompileRequest): Analysis {
   const parseMs = performance.now() - parseStart
 
   const checkStart = performance.now()
-  const model = Checker.check(files)
+  const model = Checker.check(files, request.fonts)
 
   // The strictness pass runs only on code that parsed cleanly. On a half-typed file
   // its inference would be working from a broken tree, and a warning derived from
@@ -1058,6 +1059,7 @@ function toResult(
 
 export function compile(request: CompileRequest): CompileResult {
   setAssetColors(request.colors)
+  setProjectFonts(request.fonts)
   // New source: a drag's places were in the old one, and so were the trees a draft redraws.
   draft = null
   drawn = null

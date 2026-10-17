@@ -1,6 +1,7 @@
 import { isAccentColorSetName, type AppAccent } from '@studio/shared'
 import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
 import { assetCatalog } from './resources'
+import { appFonts, fontFolder, putFonts } from './fonts'
 import type { Project } from '@studio/project-model'
 import { generatePbxproj, targetRelativePath } from './pbxproj'
 import {
@@ -129,6 +130,10 @@ export function buildExportBundle(project: Project, accent?: AppAccent): ExportB
   add(`${name}/Assets.xcassets/AppIcon.appiconset/Contents.json`, appIconContents())
   // An app with its own colour set of this name already has the folder.
   if (!project.colors?.some(color => isAccentColorSetName(color.name))) add(`${name}/Assets.xcassets/AccentColor.colorset/Contents.json`, accentColorContents(accent))
+
+  putFonts(project, fontFolder('xcodeproj', `${root}/${name}`), put)
+  const plist = appFonts(project)
+  if (plist) put(`${root}/${name}/Info.plist`, plist)
 
   add('.gitignore', gitignoreContents())
   add('README.md', readme(project, plan.sourcePaths))

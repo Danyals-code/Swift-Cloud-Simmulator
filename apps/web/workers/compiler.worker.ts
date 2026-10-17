@@ -29,11 +29,14 @@ import type {
   CopiedView,
   FileId,
   MeasuredFontData,
+  PreviewFontAsset,
+  ProjectFontFile,
   SourceFile,
   SourceSpan,
   SymbolInfo,
   UIEvent,
 } from '@studio/shared'
+import { replaceProjectFonts } from '@studio/shared'
 import { workerTextMeasurer } from '../lib/workerFontMetrics'
 
 /**
@@ -47,6 +50,10 @@ import { workerTextMeasurer } from '../lib/workerFontMetrics'
  * evaluate, lay out. Nothing outside this file has changed across three phases,
  * which is what the Phase 0 boundary was for.
  */
+
+/** The faces the page measured, and the project fonts loaded here (Wave 6f). */
+let measuredFonts: readonly MeasuredFontData[] = []
+let projectFonts: readonly PreviewFontAsset[] = []
 
 const api: CompilerApi = {
   async validateResourceRemoval(files, names, colors) { return validateResourceRemoval(files, names, colors) },
@@ -69,7 +76,14 @@ const api: CompilerApi = {
   },
 
   async setFontMetrics(fonts: readonly MeasuredFontData[]): Promise<void> {
-    setFontMetrics(fonts, workerTextMeasurer(fonts), true)
+    measuredFonts = fonts
+    setFontMetrics(fonts, workerTextMeasurer(fonts, projectFonts), true)
+  },
+  // Wave 6f: the project's font files, loaded here too so the worker measures text in them
+  // itself. Text measured in the faces they replace is measured again.
+  async setProjectFonts(fonts: readonly ProjectFontFile[]): Promise<void> {
+    projectFonts = await replaceProjectFonts(self.fonts, fonts)
+    setFontMetrics(measuredFonts, workerTextMeasurer(measuredFonts, projectFonts), true)
   },
   async setTextMeasurements(data, revision, generation) { return setTextMeasurements(data, revision, generation) },
   async relayout(revision) { return relayout(revision) },

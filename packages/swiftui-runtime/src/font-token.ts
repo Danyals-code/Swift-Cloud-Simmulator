@@ -1,4 +1,5 @@
-import { iosFont } from '@studio/shared'
+import { iosFont, projectFont, projectFontFamily, type PreviewFontAsset } from '@studio/shared'
+import { setProjectFontHeights } from '@studio/swiftui-layout'
 import { IOS_27 } from './appearance/ios27'
 
 /**
@@ -28,7 +29,10 @@ export interface FontSpec {
   /** `tight`, `loose`, or '' for the style's own. */
   readonly leading: string
   readonly smallCaps: boolean
-  /** `.custom(name, …)` of a family iOS ships (Wave 6a): the family, and a PostScript name's weight. */
+  /**
+   * `.custom(name, …)` of a family iOS ships (Wave 6a), or of a project font's CSS family
+   * (Wave 6f): the family, and a PostScript name's weight.
+   */
   readonly family?: string
   readonly faceWeight?: number
 }
@@ -58,11 +62,23 @@ export function fontTokenName(font: FontSpec): string {
 }
 
 /**
- * `.custom("Avenir Next", size: 24, relativeTo: .title)`: a family or PostScript name iOS
- * ships is drawn in that face (Wave 6a), and any other in the system face, as iOS draws a
- * font the app doesn't bundle.
+ * The project's font files, for the compile in progress (Wave 6f). Held here as the asset
+ * colours are in `style.ts`: `.custom(…)` is resolved while the view runs, and the pipeline
+ * sets them before it does.
+ */
+let projectFonts: readonly PreviewFontAsset[] | undefined
+export function setProjectFonts(fonts: readonly PreviewFontAsset[] | undefined): void {
+  projectFonts = fonts
+  setProjectFontHeights(fonts)
+}
+
+/**
+ * `.custom("Avenir Next", size: 24, relativeTo: .title)`: a face the project has a file for
+ * is drawn in it (Wave 6f), then a family or PostScript name iOS ships in that face (Wave
+ * 6a), and any other in the system face, as iOS draws a font the app doesn't bundle.
  */
 export function customFont(size: number, relativeTo: string | null, name?: string | null): FontSpec {
-  const face = name ? iosFont(name) : undefined
+  const own = name && projectFonts?.length ? projectFont(name, projectFonts) : undefined
+  const face = own ? { family: projectFontFamily(own.family), weight: own.weight, italic: own.italic } : name ? iosFont(name) : undefined
   return { ...PLAIN, style: null, size, relativeTo, ...face ? { family: face.family, italic: face.italic, ...face.weight ? { faceWeight: face.weight } : {} } : {} }
 }

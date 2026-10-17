@@ -48,11 +48,11 @@ export function readArchiveEntries(bytes: Uint8Array): Map<string, Uint8Array> {
     const localLength = data.getUint16(offset + 26, true), localExtra = data.getUint16(offset + 28, true)
     if (offset + 30 + localLength + localExtra + data.getUint32(position + 20, true) > start || decoder.decode(bytes.subarray(offset + 30, offset + 30 + localLength)) !== path || data.getUint16(offset + 8, true) !== data.getUint16(position + 10, true)) return fail()
     if ((data.getUint32(position + 38, true) >>> 16 & 0xf000) === 0xa000) throw new Error('That archive contains a symbolic link.')
-    const selected = /\.(swift|json|png|jpe?g)$/i.test(path)
+    const selected = /\.(swift|json|png|jpe?g|ttf|otf)$/i.test(path)
     if (selected) declared += size
     if (path.endsWith('.swift')) swiftBytes += size
     if (swiftBytes > 8 * 1024 * 1024) throw new Error('That archive holds more Swift than a project can.')
-    if (declared > MAX_EXPANDED_BYTES || selected && size > (path.endsWith('.json') ? 22 : path.endsWith('.swift') ? 8 : 4) * 1024 * 1024) throw new Error('That archive expands beyond the project resource limits.')
+    if (declared > MAX_EXPANDED_BYTES || selected && size > (path.endsWith('.json') ? 22 : /\.(swift|ttf|otf)$/i.test(path) ? 8 : 4) * 1024 * 1024) throw new Error('That archive expands beyond the project resource limits.')
     headers.set(path, { size, crc: data.getUint32(position + 16, true), selected, offset })
     position = next
   }

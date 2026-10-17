@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { AuthoringNode, LayerChange, LayerProperties, SharedStyle, Size } from '@studio/shared'
+import type { ProjectFace } from '../../lib/fonts'
 import type { FeatureChange } from '../AuthoringFeatures'
 
 /** What every section of the layer panel is given. */
@@ -14,6 +15,8 @@ export interface SectionProps {
   readonly measure?: Size
   /** The project's tokens, as the token fields get them; each section offers the kinds it takes. */
   readonly tokens: readonly SharedStyle[]
+  /** The project's font files, by name, weight and slant: Text's Family offers them first (Wave 6f). */
+  readonly fonts?: readonly ProjectFace[]
   /** Another kind of edit, for a value a layer change cannot make, such as a native Card's own fill. */
   readonly command: FeatureChange
   /**

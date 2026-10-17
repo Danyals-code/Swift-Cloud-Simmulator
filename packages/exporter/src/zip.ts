@@ -7,6 +7,7 @@ import { attachExportReview, type ExportReview } from './handoff-report'
 import { targetRelativePath } from './pbxproj'
 import { attachHandoff, type HandoffExtras } from './portable'
 import { assetCatalog } from './resources'
+import { fontFolder, putFonts } from './fonts'
 
 /** Zip an already-built bundle. Separated from `buildExportBundle` so tests can assert on file contents without unzipping. */
 /**
@@ -41,7 +42,7 @@ export function exportProjectZip(project: Project, format: ExportFormat = 'xcode
   const name = project.manifest.name, root = format === 'swiftpm' ? `${name}.swiftpm` : name
   const sourceRoot = format === 'xcodeproj' ? `${root}/${name}` : format === 'xcodegen' ? `${root}/Sources` : `${root}/Sources/${name}`
   const catalog = `${sourceRoot}/${format === 'spm' || format === 'swiftpm' ? 'Resources/' : ''}Assets.xcassets`
-  const bundle = attachHandoff(project, bundleFor(project, format, accent), root, id => `${sourceRoot}/${targetRelativePath(id)}`, catalog, { build, events })
+  const bundle = attachHandoff(project, bundleFor(project, format, accent), { root, sourcePath: id => `${sourceRoot}/${targetRelativePath(id)}`, catalog, fonts: fontFolder(format, sourceRoot) }, { build, events })
   if (review && format !== 'xcodeproj') throw new Error('The complete bundle uses the Xcode project format.')
   return zipBundle(review ? attachExportReview(project, bundle, review, build) : bundle)
 }
@@ -65,5 +66,7 @@ export function exportEditableZip(project: Project, extras: HandoffExtras = {}):
   const root = project.manifest.name
   const files = assetCatalog(project, `${root}/Assets.xcassets`)
   for (const file of project.files) files.set(`${root}/${file.id}`, encodeText(file.text))
-  return zipBundle(attachHandoff(project, files, root, id => `${root}/${id}`, `${root}/Assets.xcassets`, extras))
+  const fonts = `${root}/Fonts`
+  putFonts(project, fonts, (path, bytes) => files.set(path, bytes))
+  return zipBundle(attachHandoff(project, files, { root, sourcePath: id => `${root}/${id}`, catalog: `${root}/Assets.xcassets`, fonts }, extras))
 }

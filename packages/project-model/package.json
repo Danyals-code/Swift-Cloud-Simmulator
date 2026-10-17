@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./templates": "./src/templates.ts",
     "./storage-names": "./src/storage-names.ts",
-    "./backup": "./src/backup.ts"
+    "./backup": "./src/backup.ts",
+    "./fonts": "./src/fonts.ts"
   },
   "types": "./src/index.ts",
   "scripts": {

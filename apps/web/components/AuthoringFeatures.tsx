@@ -9,6 +9,7 @@ import { parseRecordDrafts } from '../lib/recordDrafts'
 import { newValueDefaults } from '../lib/newValue'
 import { repeatsOverRange, settingsVisualChildren } from '../lib/authoringSettings'
 import { sourceLayerLabel } from '../lib/sourceLayers'
+import type { ProjectFace } from '../lib/fonts'
 import styles from './AuthoringInspector.module.css'
 import { ComponentVariants } from './ComponentVariants'
 import { ChangeablePerCopy, CopyActions, Variants } from './ComponentParts'
@@ -18,6 +19,8 @@ export type FeatureChange = (operation: AuthoringOperation | { kind: 'insert'; s
 export interface FeatureProps {
   node: AuthoringNode
   assets?: readonly { readonly name: string; readonly id: string }[]
+  /** The project's font files, which Typography's Family offers before iOS's own (Wave 6f). */
+  fonts?: readonly ProjectFace[]
   snapshot?: AuthoringSnapshot
   onCommand?: FeatureChange
   onNodeCommand?: (node: AuthoringNode, operation: Parameters<FeatureChange>[0]) => Promise<string | null>

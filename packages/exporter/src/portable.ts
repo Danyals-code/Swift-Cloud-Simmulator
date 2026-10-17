@@ -1,4 +1,4 @@
-import { newProjectId, normalizeProject, normalizeProjectName, normalizeFileName, normalizeFolderPath, readColorSet, readImage, readStudioMetadata, validateAssets, validateColors, type ColorAsset, type Project, type ProjectManifest, type ImageAsset, type StudioMetadata } from '@studio/project-model'
+import { fontAsset, fontFileName, newProjectId, normalizeProject, normalizeProjectName, normalizeFileName, normalizeFolderPath, readColorSet, readImage, readStudioMetadata, validateAssets, validateColors, validateFonts, type ColorAsset, type FontAsset, type Project, type ProjectManifest, type ImageAsset, type StudioMetadata } from '@studio/project-model'
 import { DEVICES } from '@studio/sim-shell'
 import { isPreviewTarget, type SourceFile } from '@studio/shared'
 import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
@@ -17,6 +17,13 @@ export interface HandoffExtras {
   /** The project's event log, as JSON lines. Reading an archive leaves it where it is. */
   readonly events?: string
 }
+/** Where a format puts what the handoff records: the archive's root, each source, the asset catalog and the font files. */
+export interface HandoffPaths {
+  readonly root: string
+  readonly sourcePath: (id: string) => string
+  readonly catalog: string
+  readonly fonts: string
+}
 /** Where an archive keeps the event log, below its root. */
 export const EVENT_LOG = '.swiftstudio/events.jsonl'
 export interface Handoff {
@@ -27,11 +34,13 @@ export interface Handoff {
    * unchecked, so older and newer builds open each other's archives alike.
    */
   readonly generator?: { readonly name: 'Swift Web Studio'; readonly build: StudioBuild }
-  readonly project: Omit<Project, 'files' | 'assets' | 'studio' | 'colors'>
+  readonly project: Omit<Project, 'files' | 'assets' | 'studio' | 'colors' | 'fonts'>
   readonly sources: readonly { readonly id: string; readonly path: string; readonly base: string }[]
   readonly assets: readonly ResourceEntry[]
   /** Colour sets, read back from the catalog so a developer's edit there returns too. */
   readonly colors?: readonly { readonly name: string; readonly path: string }[]
+  /** Font files, by id and where the export put them. Absent when there are none, so older readers see no change. */
+  readonly fonts?: readonly { readonly id: string; readonly path: string }[]
   readonly baseManifest: ProjectManifest
   readonly baseStudio?: StudioMetadata
 }
@@ -58,9 +67,10 @@ export function validatePortableProject(value: unknown): asserts value is Projec
   if (value.studio !== undefined && readStudioMetadata(value.studio).status !== 'valid') throw new Error('Unsupported or invalid Studio metadata. Use a compatible Studio.')
   validateAssets((value.assets ?? []) as ImageAsset[])
   validateColors((value.colors ?? []) as ColorAsset[])
+  validateFonts((value.fonts ?? []) as FontAsset[])
 }
 /** Source files and resources stay outside the optional Studio metadata. */
-export function attachHandoff(project: Project, bundle: ExportBundle, root: string, sourcePath: (id: string) => string, catalogPath: string, { build, events }: HandoffExtras = {}): ExportBundle {
+export function attachHandoff(project: Project, bundle: ExportBundle, { root, sourcePath, catalog: catalogPath, fonts: fontFolder }: HandoffPaths, { build, events }: HandoffExtras = {}): ExportBundle {
   const normalized = normalizeProject(project)
   validatePortableProject(normalized)
   const files = new Map(bundle)
@@ -71,6 +81,7 @@ export function attachHandoff(project: Project, bundle: ExportBundle, root: stri
     sources: project.files.map(f => ({ id: f.id, path: sourcePath(f.id), base: f.text })),
     assets: (project.assets ?? []).map(a => ({ id: a.id, name: a.name, scale: a.scale, light: `${catalogPath}/${a.name}.imageset/light.${a.light.mime === 'image/png' ? 'png' : 'jpg'}`, ...(a.dark ? { dark: `${catalogPath}/${a.name}.imageset/dark.${a.dark.mime === 'image/png' ? 'png' : 'jpg'}` } : {}) })),
     ...(project.colors?.length ? { colors: project.colors.map(color => ({ name: color.name, path: `${catalogPath}/${color.name}.colorset/Contents.json` })) } : {}),
+    ...(project.fonts?.length ? { fonts: project.fonts.map(font => ({ id: font.id, path: `${fontFolder}/${fontFileName(font)}` })) } : {}),
     baseManifest: project.manifest, baseStudio: project.studio,
   }
   const put = (path: string, bytes: Uint8Array) => { if (files.has(path)) throw new Error('The project conflicts with an export metadata path.'); files.set(path, bytes) }
@@ -86,7 +97,7 @@ export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project
   const documentPath = candidates[0]!, root = documentPath.slice(0, -PROJECT_DOCUMENT.length)
   const value: unknown = JSON.parse(decodeText(entries.get(documentPath)!))
   if (!object(value) || value.format !== 'swift-web-studio' || value.version !== 1) throw new Error('Unsupported editable-project version. Use a compatible Studio.')
-  if (!object(value.project) || !Array.isArray(value.sources) || !Array.isArray(value.assets) || value.assets.length > 64 || value.sources.length > 256 || value.colors !== undefined && (!Array.isArray(value.colors) || value.colors.length > 256)) throw new Error('Invalid editable-project manifest.')
+  if (!object(value.project) || !Array.isArray(value.sources) || !Array.isArray(value.assets) || value.assets.length > 64 || value.sources.length > 256 || value.colors !== undefined && (!Array.isArray(value.colors) || value.colors.length > 256) || value.fonts !== undefined && (!Array.isArray(value.fonts) || value.fonts.length > 32)) throw new Error('Invalid editable-project manifest.')
   const used = new Set<string>()
   const read = (path: unknown) => {
     if (!safePath(path) || !path.startsWith(root) || used.has(path)) throw new Error('Invalid or duplicate resource reference.')
@@ -128,6 +139,11 @@ export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project
     if (!entries.has(c.path)) return []
     try { return [readColorSet(c.name, decodeText(read(c.path)))] } catch { return [] }
   })
+  // A font is read from its file again, as one added in Assets is: the record says only which file and which id.
+  const fonts = (Array.isArray(value.fonts) ? value.fonts : []).map(f => {
+    if (!object(f) || typeof f.id !== 'string') throw new Error('Invalid font reference.')
+    return fontAsset(f.id, read(f.path))
+  })
   // The handoff is a baseline, not an inventory of the developer's current catalog.
   // Read additions too, while retaining stable IDs for resources in the baseline.
   const knownDirectories = new Set<string>()
@@ -147,7 +163,7 @@ export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project
   const metadata = entries.get(`${root}.swiftstudio/studio.json`)
   const { colors: _ignored, ...identity } = value.project as Record<string, unknown>
   void _ignored
-  const project = { ...identity, files, assets, ...(colors.length ? { colors } : {}), ...(metadata ? { studio: JSON.parse(decodeText(metadata)) as unknown } : {}) }
+  const project = { ...identity, files, assets, ...(colors.length ? { colors } : {}), ...(fonts.length ? { fonts } : {}), ...(metadata ? { studio: JSON.parse(decodeText(metadata)) as unknown } : {}) }
   validatePortableProject(project)
   // Baselines are untrusted too. They are used only for a visible merge proposal.
   const baseline = { ...project, manifest: value.baseManifest, studio: value.baseStudio, files: value.sources.map(s => ({ id: (s as { id: string }).id, text: (s as { base: string }).base })) }
@@ -176,15 +192,22 @@ export function reviewImport(local: Project, incoming: Project, handoff: Handoff
     changedFiles.push(id)
     if (a !== base && b !== base) conflicts.push({ key: id, label: id, local: a ?? '(deleted)', incoming: b ?? '(deleted)' })
   }
-  for (const [key, label, base] of [['manifest', 'App settings', handoff.baseManifest], ['studio', 'Designer metadata', handoff.baseStudio], ['assets', 'Bundled images', undefined], ['colors', 'Colour tokens', undefined], ['folders', 'Empty groups', undefined], ['chatHistory', 'Prompt conversation', undefined]] as const) {
+  for (const [key, label] of MERGED) {
     // A list nobody has is the same list, however it is spelled. Without this, every
     // project with no images conflicted with itself over having none.
-    const list = key === 'assets' || key === 'colors' || key === 'folders' || key === 'chatHistory'
+    const base = baseOf(handoff, key), list = key !== 'manifest' && key !== 'studio'
     const ours = list ? local[key] ?? [] : local[key], theirs = list ? incoming[key] ?? [] : incoming[key]
-    if (!same(ours, theirs) && (list || !same(ours, base) && !same(theirs, base))) conflicts.push({ key: `$${key}`, label, local: key === 'assets' ? describeAssets(local) : JSON.stringify(local[key], null, 2) ?? '(none)', incoming: key === 'assets' ? describeAssets(incoming) : JSON.stringify(incoming[key], null, 2) ?? '(none)' })
+    if (!same(ours, theirs) && (list || !same(ours, base) && !same(theirs, base))) conflicts.push({ key: `$${key}`, label, local: describe(local, key), incoming: describe(incoming, key) })
   }
   return { sameIdentity: true, conflicts, changedFiles }
 }
+/** What an import merges besides the files, each with the label a conflict over it shows. */
+const MERGED = [['manifest', 'App settings'], ['studio', 'Designer metadata'], ['assets', 'Bundled images'], ['colors', 'Colour tokens'], ['fonts', 'Font files'], ['folders', 'Empty groups'], ['chatHistory', 'Prompt conversation']] as const
+type MergedKey = typeof MERGED[number][0]
+/** What the handoff recorded for a part, which only the manifest and the Studio metadata have. */
+const baseOf = (handoff: Handoff, key: MergedKey): unknown => key === 'manifest' ? handoff.baseManifest : key === 'studio' ? handoff.baseStudio : undefined
+/** A side of a conflict as a person reads it: images and fonts by name and size, not by byte. */
+const describe = (p: Project, key: MergedKey) => key === 'assets' ? describeAssets(p) : key === 'fonts' ? (p.fonts ?? []).map(f => `${f.postScriptName} · ${f.bytes.length} bytes`).join('\n') || '(none)' : JSON.stringify(p[key], null, 2) ?? '(none)'
 const describeAssets = (p: Project) => (p.assets ?? []).map(a => `${a.name} · ${a.light.width} × ${a.light.height} · ${a.light.bytes.length} bytes${a.dark ? ' · dark variant' : ''}`).join('\n') || '(none)'
 export function resolveImport(local: Project, incoming: Project, handoff: Handoff, choices: Readonly<Record<string, 'local' | 'incoming'>>, copy = false): Project {
   validatePortableProject(incoming)
@@ -197,8 +220,8 @@ export function resolveImport(local: Project, incoming: Project, handoff: Handof
     const selected = choices[id] === 'local' ? a : choices[id] === 'incoming' ? b : a?.text === base ? b : a
     if (selected) files.push(selected)
   }
-  const choose = <K extends 'manifest' | 'studio' | 'assets' | 'colors' | 'folders' | 'chatHistory'>(key: K, base: unknown): Project[K] => choices[`$${key}`] === 'local' ? local[key] : choices[`$${key}`] === 'incoming' || same(local[key], base) ? incoming[key] : local[key]
-  const result = { ...local, files, manifest: choose('manifest', handoff.baseManifest), studio: choose('studio', handoff.baseStudio), assets: choose('assets', undefined), colors: choose('colors', undefined), folders: choose('folders', undefined), chatHistory: choose('chatHistory', undefined), updatedAt: Date.now() }
+  const choose = (key: MergedKey): unknown => choices[`$${key}`] === 'local' ? local[key] : choices[`$${key}`] === 'incoming' || same(local[key], baseOf(handoff, key)) ? incoming[key] : local[key]
+  const result = { ...local, files, ...Object.fromEntries(MERGED.map(([key]) => [key, choose(key)])) as Pick<Project, MergedKey>, updatedAt: Date.now() }
   validatePortableProject(result)
   return result
 }

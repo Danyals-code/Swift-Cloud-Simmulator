@@ -373,6 +373,15 @@ struct MessageScreen: View {
     expect(preview.renderTree?.nodes.some(node => node.kind === 'placeholder')).toBe(false)
   })
 
+  it('steers a typeface to a family iOS ships, never a font file the AI cannot add, and the preview draws it without a warning (Wave 6f)', () => {
+    expect(SWIFTUI_GUIDANCE).toContain('.font(.custom("Avenir Next", size: 17, relativeTo: .body))')
+    expect(SWIFTUI_GUIDANCE).toContain('never a font file’s name, which the app would not have')
+    resetPipelineState()
+    const text = 'import SwiftUI\n@main struct A: App { var body: some Scene { WindowGroup { V() } } }\nstruct V: View { var body: some View { VStack { Text("Menu").font(.custom("Avenir Next", size: 17, relativeTo: .body)); Text("Hi").font(.custom("Georgia", size: 28, relativeTo: .title)) } } }'
+    const preview = compile({ files: [{ id: 'App.swift', text }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1 })
+    expect([...preview.diagnostics.map(d => d.message), ...preview.logs.filter(log => log.level === 'error' || log.level === 'warn').map(log => log.message)]).toEqual([])
+  })
+
   it('offers only SF Symbols the preview draws and Apple ships', () => {
     const symbols = offered()
 

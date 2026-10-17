@@ -50,6 +50,7 @@ export function attachExportReview(project: Project, bundle: ExportBundle, revie
     signing: { style: 'Automatic', developmentTeam: null },
     studio: project.studio ?? null, colors: project.colors ?? [],
     images: (project.assets ?? []).map(image => ({ name: image.name, scale: image.scale, width: image.light.width, height: image.light.height, darkVariant: !!image.dark })),
+    ...(project.fonts?.length ? { fonts: project.fonts.map(font => ({ postScriptName: font.postScriptName, family: font.family, weight: font.weight, italic: font.italic, bytes: font.bytes.length })) } : {}),
     sourceFiles: project.files.map(file => ({ path: file.id, bytes: encodeText(file.text).length })),
     diagnostics: review.diagnostics,
   })
@@ -92,7 +93,7 @@ ${screens.map(screen => `- ${line(screen.name)} (${screen.kind}): ${screen.path}
 
 ${project.files.map(file => `- ${line(file.id)}`).join('\n')}
 
-${project.assets?.length ?? 0} bundled images; ${project.colors?.length ?? 0} color sets; ${project.studio?.components.length ?? 0} documented components; ${project.studio?.scenarios.length ?? 0} saved preview scenarios.
+${project.assets?.length ?? 0} bundled images; ${project.fonts?.length ? `${project.fonts.length} font files (${project.fonts.map(font => line(font.postScriptName)).join(', ')}); ` : ''}${project.colors?.length ?? 0} color sets; ${project.studio?.components.length ?? 0} documented components; ${project.studio?.scenarios.length ?? 0} saved preview scenarios.
 
 ## Preview diagnostics
 

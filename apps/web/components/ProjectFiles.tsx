@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { imageDataURL, type ColorAsset, type ImageAsset, type ImageVariant, type TreeNode } from '@studio/project-model'
+import { imageDataURL, type ColorAsset, type FontAsset, type ImageAsset, type ImageVariant, type TreeNode } from '@studio/project-model'
 import type { FileId } from '@studio/shared'
+import { fontLabel } from '../lib/fonts'
 import { ASSET_DRAG_TYPE, draggingFiles } from '../lib/images'
 import { Icon } from './ui/Icon'
 import { MenuButton } from './ui/Menu'
@@ -12,6 +13,8 @@ import styles from './ProjectFiles.module.css'
 export interface AssetsFolderProps {
   images: readonly ImageAsset[]
   colors: readonly ColorAsset[]
+  /** The project's font files, each one face, which `.custom(…)` and Typography's Family use. */
+  fonts: readonly FontAsset[]
   busy: boolean
   /** Adds picked or dropped files to the folder; resolves to what to tell the user, or null. */
   onImport: (files: readonly File[]) => Promise<string | null>
@@ -19,6 +22,8 @@ export interface AssetsFolderProps {
   onInsert: (name: string) => Promise<string | null>
   /** The App's image settings, where an image is renamed, given a dark version or deleted. */
   onManage: () => void
+  /** Takes a font file out of the project; resolves to what to tell the user, or null. */
+  onRemoveFont: (id: string) => Promise<string | null>
 }
 
 const INDENT = 16
@@ -36,6 +41,8 @@ function thumbnail(variant: ImageVariant): string {
 
 /** The Swift that shows an asset, which is also what a row carries when dropped into code. */
 export const imageReference = (name: string) => `Image(${JSON.stringify(name)})`
+/** The Swift that sets a project font, for its row's Copy. */
+const fontReference = (postScriptName: string) => `.font(.custom(${JSON.stringify(postScriptName)}, size: 17, relativeTo: .body))`
 
 /**
  * The project's Assets folder: everything bundled with the app that is not Swift.
@@ -44,23 +51,24 @@ export const imageReference = (name: string) => `Image(${JSON.stringify(name)})`
  * a drop anywhere else in the studio - so the project keeps one place for them, and
  * it is the asset catalog an Xcode export writes. A row can be dragged onto a view
  * on the canvas to place it, or into the code editor, where it lands as `Image("…")`.
+ * Font files are listed by face, with their file's name, and removed from their row.
  * Colours are listed for completeness; they are edited in the App's settings.
  */
-export function AssetsFolder({ images, colors, busy, onImport, onInsert, onManage }: AssetsFolderProps) {
+export function AssetsFolder({ images, colors, fonts, busy, onImport, onInsert, onManage, onRemoveFont }: AssetsFolderProps) {
   const [open, setOpen] = useState(true)
   const [over, setOver] = useState(false)
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null)
-  const [working, setWorking] = useState(false)
+  const [working, setWorking] = useState<string | null>(null)
   const [previewing, setPreviewing] = useState<ImageAsset | null>(null)
-  const disabled = busy || working
-  async function run(task: () => Promise<string | null>, success: string | null = null) {
+  const disabled = busy || !!working
+  async function run(task: () => Promise<string | null>, success: string | null = null, doing = 'Adding…') {
     if (disabled) return
-    setWorking(true); setMessage(null)
+    setWorking(doing); setMessage(null)
     try { const problem = await task(); setMessage(problem ? { text: problem, error: true } : success ? { text: success, error: false } : null) }
     catch (error) { setMessage({ text: error instanceof Error ? error.message : 'That did not work.', error: true }) }
-    finally { setWorking(false) }
+    finally { setWorking(null) }
   }
-  const count = images.length + colors.length
+  const count = images.length + fonts.length + colors.length
 
   return <section className={styles.folder} aria-label="Assets" data-testid="assets-folder" data-drop={over || undefined}
     onDragOver={event => { if (!draggingFiles(event.dataTransfer)) return; event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; setOver(true) }}
@@ -76,9 +84,9 @@ export function AssetsFolder({ images, colors, busy, onImport, onInsert, onManag
         <span className={styles.disclosure}><Icon name="chevron-right" size={12} /></span>
         <Icon name="folder" size={14} /><span>Assets</span>{count > 0 && <small>{count}</small>}
       </button>
-      <label className={styles.add} title="Add PNG or JPEG images" aria-label="Add images" aria-disabled={disabled || undefined}>
+      <label className={styles.add} title="Add PNG or JPEG images, or TTF or OTF font files" aria-label="Add images" aria-disabled={disabled || undefined}>
         <Icon name="plus" size={14} />
-        <input type="file" accept="image/png,image/jpeg" multiple hidden disabled={disabled} data-testid="assets-import"
+        <input type="file" accept="image/png,image/jpeg,.ttf,.otf,font/ttf,font/otf" multiple hidden disabled={disabled} data-testid="assets-import"
           onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; if (files.length) { setOpen(true); void run(() => onImport(files)) } }} />
       </label>
     </div>
@@ -108,13 +116,26 @@ export function AssetsFolder({ images, colors, busy, onImport, onInsert, onManag
           else onManage()
         }}><Icon name="ellipsis" size={14} /></MenuButton></span>
       </li>)}
+      {fonts.map(font => <li key={font.id} className={styles.row} style={{ paddingLeft: BASE + INDENT + LEAF }} data-testid="asset-font"
+        tabIndex={0} aria-label={`${fontLabel(font)}, font`} title={`Choose it in Typography's Family, or use it in code as ${fontReference(font.postScriptName)}`}>
+        <Icon name="text-lines" size={14} />
+        <span className={styles.name}>{fontLabel(font)}</span>
+        <small>{font.postScriptName}.{font.format}</small>
+        <span className={styles.actions}><MenuButton label={`Actions for ${fontLabel(font)}`} items={[
+          { value: 'copy', label: `Copy ${fontReference(font.postScriptName)}` },
+          { value: 'remove', label: 'Remove from project', disabled, separated: true },
+        ]} onSelect={value => {
+          if (value === 'copy') void navigator.clipboard?.writeText(fontReference(font.postScriptName))
+          else void run(() => onRemoveFont(font.id), `Removed ${fontLabel(font)}.`, 'Removing…')
+        }}><Icon name="ellipsis" size={14} /></MenuButton></span>
+      </li>)}
       {colors.map(color => <li key={`color:${color.name}`} className={styles.row} style={{ paddingLeft: BASE + INDENT + LEAF }} data-testid="asset-color">
         <span className={styles.swatch} style={{ background: color.light }} aria-hidden="true" />
         <span className={styles.name}>{color.name}</span><small>Colour</small>
       </li>)}
-      {!count && <li className={styles.empty} style={{ paddingLeft: BASE + INDENT + LEAF }}>Drop PNG or JPEG images here, or use +.</li>}
+      {!count && <li className={styles.empty} style={{ paddingLeft: BASE + INDENT + LEAF }}>Drop PNG or JPEG images here, or TTF or OTF font files, or use +.</li>}
     </ul>}
-    {(working || message) && <p className={message?.error ? styles.error : styles.status} role={message?.error ? 'alert' : 'status'}>{working ? 'Adding…' : message?.text}</p>}
+    {(working || message) && <p className={message?.error ? styles.error : styles.status} role={message?.error ? 'alert' : 'status'}>{working ?? message?.text}</p>}
     {previewing && <AssetPreview key={previewing.id} asset={images.find(asset => asset.id === previewing.id) ?? previewing} onClose={() => setPreviewing(null)} />}
   </section>
 }
