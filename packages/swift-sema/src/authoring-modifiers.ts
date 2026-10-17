@@ -2,7 +2,8 @@ import { DEFAULT_DEPLOYMENT_TARGET, DOTS_BACKGROUND, authoringCapability, deploy
 import { Parser, afterOffMarkers, commentFollows, hasHumanComment, offMarker, offMarkerText, offMarkersIn, type CallExpr, type Expr, DIRECTIVE_LINE } from '@studio/swift-syntax'
 import { roundedCorners, viewCallChain } from './design-controls'
 import { NEW_BORDER, borderOf, borderSource, cornersOf, type Corners } from './authoring-border'
-import { authoringViewMinimum } from './authoring-view'
+import { authoringViewMinimum, needsNewer } from './authoring-view'
+import { drawnOnChart } from './chart-checks'
 import { indentAt } from './authoring-context'
 import { APPLE_VIEW_MODIFIERS, KEEPS_TEXT, MODIFIER_CATEGORIES, SUPPORTED_MODIFIERS, isAppleCall } from './builtins'
 import { modifierPrefix } from './layer/chain-edit'
@@ -303,7 +304,7 @@ function heldInPlace(parsed: { base: CallExpr; end: number }, text: string, file
  * false while the view's source has a problem to resolve first, and a run of joined text
  * (`node.textRun`) takes only what keeps it a Text (`KEEPS_TEXT`).
  */
-export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, allowEdits = true, row = false, tab = false, presented }: { deploymentTarget?: string; allowEdits?: boolean; row?: boolean; tab?: boolean; presented?: 'sheet' | 'cover' } = {}): { modifiers: AuthoringModifier[]; modifierCatalog: readonly ModifierCatalogEntry[] } {
+export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, allowEdits = true, row = false, tab = false, presented }: { deploymentTarget?: string; allowEdits?: boolean; row?: boolean; tab?: boolean; presented?: 'sheet' | 'cover' } = {}): { modifiers: AuthoringModifier[]; modifierCatalog: readonly ModifierCatalogEntry[]; chartTooNew?: string } {
   const run = !!node.textRun
   const parsed = segmentsOf(expr, text)
   if (!parsed) return { modifiers: [], modifierCatalog: [] }
@@ -312,9 +313,9 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { d
   const minimumViewVersion = authoringViewMinimum(node)
   const editable = allowEdits && minimumViewVersion !== undefined && Number.isFinite(version) && version >= minimumViewVersion
   // Why nothing in the chain can change, named as what is in the way: a diagnostic only when there is one.
+  const tooNew = minimumViewVersion !== undefined && version < minimumViewVersion ? needsNewer(node.name, minimumViewVersion) : undefined
   const locked = !allowEdits ? 'Resolve source diagnostics or edit this view in Code.'
-    : minimumViewVersion !== undefined && version < minimumViewVersion ? `${node.name} needs iOS ${minimumViewVersion} or newer. Change the deployment target to edit it here.`
-      : 'This view is kept exactly as written, so its modifiers are changed in Code.'
+    : tooNew ?? 'This view is kept exactly as written, so its modifiers are changed in Code.'
   const { commented, conditional } = heldInPlace(parsed, text, node.source.file)
   const pinned = commented || conditional
   const pinnedReason = conditional ? 'A #if in this modifier chain decides which builds apply these modifiers. Change their order in Code.' : undefined
@@ -353,7 +354,8 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { d
     const reason = !editable ? locked : pinnedReason ?? (commented ? 'Comments in this modifier chain need to stay attached. Change values here or reorder in Code.' : !movable[index] ? category(name) === 'behavior' ? 'This behavior stays in its source position.' : !known ? 'This modifier is preserved; its structure is edited in Code.' : 'This modifier has type or content requirements. Change its structure in Code.' : undefined)
     const propertyIds = node.properties.filter(p => p.source && p.source.start >= start && p.source.end <= call.span.end).map(p => p.id)
     const linked = node.properties.find(p => p.source && p.source.start >= start && p.source.end <= call.span.end && p.valueKind === 'token')
-    const drawn = SUPPORTED_MODIFIERS.has(name) || !isAppleCall(name)
+    // A chart's axes, legend and scale are drawn in the forms Wave 6e draws.
+    const drawn = SUPPORTED_MODIFIERS.has(name) || !isAppleCall(name) || node.kind === 'view' && node.name === 'Chart' && drawnOnChart(name, call)
     const summary = controls.filter(c => !c.id.startsWith('fill:')).map(c => c.value || 'Default').join(' · ') || (linked ? linked.expression : !drawn ? NOT_DRAWN : category(name) === 'custom' ? 'Custom modifier' : call.trailingClosure ? category(name) === 'behavior' ? 'Configured action' : 'View content' : call.args.length ? 'Linked or advanced value' : 'On')
     const { remove, duplicate, moveUp, moveDown, toggle } = capabilitiesOf(reason)
     const fillsIn = onlyStroke(segment)
@@ -368,7 +370,9 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { d
   const unknown = segments.some(segment => segment.call && !isAppleCall(nameOf(segment.call)))
   const available = editable && !unknown
   // What is no view takes no view's modifier (Wave 4b).
-  return { modifiers, modifierCatalog: isNonView(node) ? [] : catalogOf({ name: OFFERED_TO.has(node.name) ? node.name : '', run, row, tab, presented, available, unknown, version, allowEdits, locked }) }
+  const modifierCatalog = isNonView(node) ? [] : catalogOf({ name: OFFERED_TO.has(node.name) ? node.name : '', run, row, tab, presented, available, unknown, version, allowEdits, locked })
+  // A Chart below iOS 16 takes no layer change either (Wave 6e); other views newer than the target keep theirs.
+  return node.name === 'Chart' && node.kind === 'view' && tooNew ? { modifiers, modifierCatalog, chartTooNew: tooNew } : { modifiers, modifierCatalog }
 }
 
 /** What holds rows: a view in one is a row of a list (Wave 4a). */

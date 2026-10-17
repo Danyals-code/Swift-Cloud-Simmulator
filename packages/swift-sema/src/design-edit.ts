@@ -17,6 +17,7 @@ import { Checker } from './checker'
 import { nextTag, retagDuplicate, tagProblem } from './authoring-picker-tags'
 import { callAt, layerContext, layerProject, writeLayer } from './layer'
 import { pagesThrough } from './page-style'
+import { chartTooNew } from './authoring-view'
 
 /** The operations that act on a view's whole statement - its place, its copies, whether it is there at all - as the structural check knows them. */
 const STRUCTURAL: Partial<Record<DesignEditRequest['operation']['kind'], StructuralKind>> = { delete: 'delete', move: 'move', moveTo: 'moveTo', insert: 'insert', paste: 'insert', hide: 'hide', show: 'show', 'layer-duplicate': 'duplicate', 'layer-wrap': 'wrap', 'layer-reparent': 'reparent', 'make-tappable': 'wrap', 'layer-unwrap': 'unwrap' }
@@ -135,6 +136,8 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   if (operation.kind === 'layer-set' && node) {
     const expression = callAt(ast, node.source)
     if (!expression || !node.layer) return reject('This view no longer has an editable modifier chain. Select it again.')
+    const tooNew = chartTooNew(node, request.deploymentTarget)
+    if (tooNew) return reject(tooNew)
     try {
       const parent = model.nodes.find(n => n.id === node.parentId)
       const written = writeLayer(expression, operation.changes, layerContext(layerProject(ast, request.deploymentTarget, request.files), node, parent, file.text))

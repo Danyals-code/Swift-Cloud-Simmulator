@@ -39,7 +39,7 @@ export const stressCases: [string, string, string?][] = [
   ['timeline-context', stressApp('TimelineView(.periodic(from: .now, by: 1)) { context in Text(context.date, style: .time) }')],
   ['async-phase', stressApp('AsyncImage(url: URL(string: "https://example.com/image.png")) { phase in if let image = phase.image { image.resizable() } else { ProgressView() } }')],
   ['map-placeholder', stressApp('VStack { Text("Before"); Map(); Text("After") }')],
-  ['chart-placeholder', stressApp('Chart { BarMark(x: .value("Name", "A"), y: .value("Value", 3)) }')],
+  ['chart', stressApp('Chart { BarMark(x: .value("Name", "A"), y: .value("Value", 3)) }')],
   ['uneven-shape', stressApp('UnevenRoundedRectangle(topLeadingRadius: 20, bottomTrailingRadius: 20).fill(.blue)')],
   ['negative-array', stressApp('Text("\\(values.count)")', 'let values = Array(repeating: 1, count: -2)')],
   ['negative-string', stressApp('Text(String(repeating: "x", count: -2))')],

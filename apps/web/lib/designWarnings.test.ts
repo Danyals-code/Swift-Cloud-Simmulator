@@ -56,7 +56,7 @@ struct HomeScreen: View {
 ${extra}`
 
 it.each([
-  ['a view drawn as a box', 'Chart { }', 'preview', 'The preview shows a labelled box in its place. The app draws it.'],
+  ['a view drawn as a box', 'EditButton()', 'preview', 'The preview shows a labelled box in its place. The app draws it.'],
   ['a view nobody declares', 'Sparkline()', 'xcode', "The preview doesn't know 'Sparkline' and shows a box for it. If it isn't SwiftUI's or the project's, the app won't build."],
   ['a modifier nobody declares', 'Text("A").glow()', 'xcode', "The preview doesn't know .glow and leaves it out. If it isn't SwiftUI's, the app won't build."],
   ['a view the preview runs only in part', 'TimelineView(.everyMinute) { context in Text("Now") }', 'preview', 'The timeline runs only once, for the moment it is drawn, and does not advance its schedule.'],
@@ -64,6 +64,23 @@ it.each([
   ['an argument the modifier does not take', 'Text("A").blur(radius: 4, amount: 2)', 'xcode', "'.blur' has no argument 'amount:', so the preview ignores it. The app won't build with it: change it in Code."],
 ])('says %s plainly (D11)', (_, body, kind, sentence) => {
   expect(run(screen(body)).map(row => [row.kind, row.sentence])).toEqual([[kind, sentence]])
+})
+
+/** A Chart with its marks, whose warnings sit on the Chart, as its marks are no layers. */
+const chart = (marks: string, after = '') => screen(`Chart {
+        ${marks}
+      }${after}
+      .frame(height: 200)`).replace('import SwiftUI', 'import SwiftUI\nimport Charts')
+
+it.each([
+  ['a mark it leaves out of the chart', chart('RectangleMark(x: .value("Day", "Mon"), y: .value("Steps", 40))'), [['preview', 'Chart', 'The preview leaves it out of the chart. The app draws it as written.']]],
+  ['custom axis marks, keeping the default axis', chart('BarMark(x: .value("Day", "Mon"), y: .value("Steps", 40))', '\n      .chartXAxis { AxisMarks() }'), [
+    ['preview', 'Chart', "The preview doesn't apply .chartXAxis. The app does."],
+    ['preview', 'Chart', 'The preview keeps the chart’s default axis. The app draws it as written.'],
+  ]],
+  ['series colours it does not apply', chart('BarMark(x: .value("Day", "Mon"), y: .value("Steps", 40)).foregroundStyle(by: .value("Kind", "A"))', '\n      .chartForegroundStyleScale(["A": .red])'), [['preview', 'Chart', "The preview doesn't apply .chartForegroundStyleScale. The app does."]]],
+])('says what a chart leaves out: %s (Wave 6e)', (_, text, rows) => {
+  expect(run(text).map(row => [row.kind, row.what, row.sentence])).toEqual(rows)
 })
 
 it('files a screen the canvas leaves out under the preview, wherever it is written (D11)', () => {

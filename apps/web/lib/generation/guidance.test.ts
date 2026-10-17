@@ -166,6 +166,86 @@ struct PlannerScreen: View {
     }
 }`
 
+/** The charts the guidance asks for since Wave 6e, over a screen's own records: stacked bars, a line with its points, a donut, grouped bars under a goal, a bare area, and bars by day. */
+const CHARTS = `import SwiftUI
+import Charts
+@main struct SalesApp: App { var body: some Scene { WindowGroup { NavigationStack { SalesScreen() } } } }
+struct Sale: Identifiable {
+    let id: Int
+    var month: String
+    var product: String
+    var amount: Double
+}
+struct Run: Identifiable {
+    let id: Int
+    var day: Date
+    var miles: Double
+}
+struct SalesScreen: View {
+    @State private var sales: [Sale] = [
+        Sale(id: 1, month: "Jan", product: "Tea", amount: 40),
+        Sale(id: 2, month: "Jan", product: "Coffee", amount: 25),
+        Sale(id: 3, month: "Feb", product: "Tea", amount: 55),
+        Sale(id: 4, month: "Feb", product: "Coffee", amount: 30),
+        Sale(id: 5, month: "Mar", product: "Tea", amount: 35),
+        Sale(id: 6, month: "Mar", product: "Coffee", amount: 45),
+    ]
+    @State private var runs: [Run] = [
+        Run(id: 1, day: Date.now.addingTimeInterval(-86_400 * 2), miles: 3.2),
+        Run(id: 2, day: Date.now.addingTimeInterval(-86_400), miles: 5),
+        Run(id: 3, day: Date.now, miles: 4.1),
+    ]
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                Chart(sales) { sale in
+                    BarMark(x: .value("Month", sale.month), y: .value("Sales", sale.amount))
+                        .foregroundStyle(by: .value("Product", sale.product))
+                }
+                .frame(height: 200)
+                Chart(sales) { sale in
+                    LineMark(x: .value("Month", sale.month), y: .value("Sales", sale.amount))
+                        .foregroundStyle(by: .value("Product", sale.product))
+                    PointMark(x: .value("Month", sale.month), y: .value("Sales", sale.amount))
+                        .foregroundStyle(by: .value("Product", sale.product))
+                }
+                .frame(height: 200)
+                Chart(sales) { sale in
+                    SectorMark(angle: .value("Sales", sale.amount), innerRadius: .ratio(0.6), angularInset: 1.5)
+                        .foregroundStyle(by: .value("Product", sale.product))
+                        .annotation(position: .overlay) { Text("\\(Int(sale.amount))").font(.caption2) }
+                }
+                .frame(height: 240)
+                Chart {
+                    ForEach(sales) { sale in
+                        BarMark(x: .value("Month", sale.month), y: .value("Sales", sale.amount))
+                            .foregroundStyle(by: .value("Product", sale.product))
+                            .position(by: .value("Product", sale.product))
+                    }
+                    RuleMark(y: .value("Goal", 50))
+                        .annotation(position: .top) { Text("Goal") }
+                }
+                .chartYScale(domain: 0...100)
+                .frame(height: 200)
+                Chart(sales) { sale in
+                    AreaMark(x: .value("Month", sale.month), y: .value("Sales", sale.amount))
+                        .foregroundStyle(by: .value("Product", sale.product))
+                }
+                .chartLegend(.hidden)
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .frame(height: 120)
+                Chart(runs) { run in
+                    BarMark(x: .value("Day", run.day, unit: .day), y: .value("Miles", run.miles))
+                }
+                .frame(height: 200)
+            }
+            .padding()
+        }
+        .navigationTitle("Sales")
+    }
+}`
+
 describe('the SwiftUI the AI is asked for', () => {
   it('says how iOS writes a number put into a title, and the forms that write it as meant', () => {
     expect(SWIFTUI_GUIDANCE).toContain('Text("\\(price)") shows a Double with six decimals (3.500000) and a whole number with separators (2,000, and a year as 2,026)')
@@ -265,10 +345,17 @@ struct MessageScreen: View {
     }
   })
 
-  it('keeps Charts out until the preview draws them, saying so rather than that Xcode rejects them (Wave 6a)', () => {
-    expect(SWIFTUI_GUIDANCE).toContain("leave it out for now: Charts, as the preview can't draw Charts yet")
+  it('asks for bar, line, sector and stacked charts with import Charts, which the preview draws as iOS does, and names what it does not draw (Wave 6e)', () => {
+    expect(SWIFTUI_GUIDANCE).not.toContain("the preview can't draw Charts yet")
     expect(SWIFTUI_GUIDANCE).not.toMatch(/never use them:[^\n]*Charts/)
-    expect(SWIFTUI_GUIDANCE).not.toMatch(/Charts[^\n]*(Xcode won.t|cannot be built)/)
+    for (const offered of ['Date.now.addingTimeInterval(-86_400 * 2)', 'BarMark(x: .value("Day", run.day, unit: .day), y: .value("Miles", run.miles))', 'or Date for a chart of days', 'Write unit: .day on every date', '.annotation(position: .overlay) { Text("40%") } on a sector', 'import Charts', 'Chart(sales) { sale in', 'BarMark(x: .value("Month", sale.month), y: .value("Sales", sale.amount))', '.foregroundStyle(by: .value("Product", sale.product))', 'LineMark', 'PointMark', 'SectorMark(angle: .value("Sales", sale.amount), innerRadius: .ratio(0.6), angularInset: 1.5)', '.position(by:', '.annotation(position: .top)', '.chartLegend(.hidden)', '.chartYScale(domain: 0...100)', '.frame(height: 200)']) expect(SWIFTUI_GUIDANCE).toContain(offered)
+    // Honest limits: what Xcode builds and the preview does not draw yet.
+    const limits = SWIFTUI_GUIDANCE.split('\n').find(line => line.includes("the preview can't draw yet")) ?? ''
+    for (const limit of ['.chartScrollableAxes', '.chartXSelection', 'AxisMarks', '.chartForegroundStyleScale', '.interpolationMethod']) expect(limits).toContain(limit)
+    resetPipelineState()
+    const preview = compile({ files: [{ id: 'App.swift', text: CHARTS }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1 })
+    expect([...preview.diagnostics.map(d => d.message), ...preview.logs.filter(log => log.level === 'error' || log.level === 'warn').map(log => log.message)]).toEqual([])
+    expect(preview.renderTree?.nodes.some(node => node.kind === 'placeholder')).toBe(false)
   })
 
   it('asks for DatePicker styles, ColorPicker, MeshGradient, content margins and view-aligned scrolling, which the preview draws as iOS does (Wave 6d)', () => {
@@ -350,8 +437,8 @@ describe.skipIf(!XCODE || !existsSync(APPLE_NAMES))('the SF Symbols the prompts 
   })
 })
 
-describe.skipIf(!XCODE)('the Wave 6d forms, in Xcode 27', () => {
+describe.skipIf(!XCODE)('the Wave 6d and 6e forms, in Xcode 27', () => {
   it('type-check with warnings as errors', () => {
-    typecheckInXcode([CONTROLS])
+    typecheckInXcode([CONTROLS, CHARTS])
   }, 300_000)
 })

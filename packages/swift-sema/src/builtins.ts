@@ -53,6 +53,8 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   'EmptyView', 'WindowGroup', 'ToolbarItem', 'ToolbarItemGroup',
   // Liquid Glass and the iOS 26 toolbar (Wave 6c): a DefaultToolbarItem is drawn as the bottom search field alone
   'GlassEffectContainer', 'ToolbarSpacer', 'DefaultToolbarItem',
+  // Swift Charts (Wave 6e), iOS 16: its marks are `DRAWN_CHART_MARKS`, which are no views
+  'Chart',
 ])
 
 /** Modifiers the preview applies. */
@@ -178,14 +180,22 @@ export const MODIFIER_LABELS: ReadonlyMap<string, ReadonlySet<string>> = new Map
 
 /** A chain rooted at one of these is a modifier chain the coverage check can judge. */
 export function isViewRoot(name: string): boolean {
-  return (SUPPORTED_VIEWS.has(name) || UNIMPLEMENTED_VIEWS.has(name)) && !GESTURE_TYPES.has(name)
+  return (DRAWN_VIEW_NAMES.has(name) || UNIMPLEMENTED_VIEWS.has(name)) && !GESTURE_TYPES.has(name)
 }
 
-/** What a `Chart` is drawn with: its marks, and the plots of a whole collection (iOS 18). */
-export const CHART_MARKS: ReadonlySet<string> = new Set([
-  'BarMark', 'LineMark', 'PointMark', 'AreaMark', 'RuleMark', 'RectangleMark', 'SectorMark',
-  'Plot', 'BarPlot', 'LinePlot', 'PointPlot', 'AreaPlot', 'RulePlot', 'RectanglePlot', 'SectorPlot',
-])
+/** The marks the preview draws a `Chart` with (Wave 6e). */
+const DRAWN_MARKS = ['BarMark', 'LineMark', 'PointMark', 'AreaMark', 'RuleMark', 'SectorMark']
+/** The other mark, and the plots of a whole collection (iOS 18), which the chart leaves out. */
+const UNDRAWN_MARKS = ['RectangleMark', 'Plot', 'BarPlot', 'LinePlot', 'PointPlot', 'AreaPlot', 'RulePlot', 'RectanglePlot', 'SectorPlot']
+export const DRAWN_CHART_MARKS: ReadonlySet<string> = /*#__PURE__*/ new Set(DRAWN_MARKS)
+/**
+ * Every name written where a view is that the preview draws: its views and a chart's drawn
+ * marks, which are no views. The coverage check, completion and the runtime read this one set,
+ * so a newly drawn mark is one edit, to `DRAWN_MARKS`.
+ */
+export const DRAWN_VIEW_NAMES: ReadonlySet<string> = /*#__PURE__*/ new Set([...SUPPORTED_VIEWS, ...DRAWN_MARKS])
+/** What a `Chart` is drawn with: its marks, and the plots. */
+export const CHART_MARKS: ReadonlySet<string> = /*#__PURE__*/ new Set([...DRAWN_MARKS, ...UNDRAWN_MARKS])
 
 /**
  * What only a chart's mark takes, each giving back the mark: real Swift Charts on a mark,
@@ -212,8 +222,8 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   'EquatableView',
   // data-driven
   'Table', 'TableColumn', 'OutlineGroup', 'MultiDatePicker',
-  // charts, and what an axis is drawn with
-  'Chart', ...CHART_MARKS, 'AxisMarks', 'AxisGridLine', 'AxisTick', 'AxisValueLabel',
+  // the chart marks and plots not drawn yet, and what an axis is drawn with
+  ...UNDRAWN_MARKS, 'AxisMarks', 'AxisGridLine', 'AxisTick', 'AxisValueLabel',
   // platform surfaces a browser has no analogue for
   'Map', 'Marker', 'Annotation', 'VideoPlayer', 'SceneView', 'PhotosPicker',
   // scenes other than the one WindowGroup the preview shows
@@ -667,7 +677,7 @@ export const KEYFRAME_TYPES: ReadonlySet<string> = new Set([
 
 export function isKnownGlobal(name: string): boolean {
   return (
-    SUPPORTED_VIEWS.has(name) ||
+    DRAWN_VIEW_NAMES.has(name) ||
     UNIMPLEMENTED_VIEWS.has(name) ||
     KNOWN_TYPES.has(name) ||
     KNOWN_FUNCTIONS.has(name) ||

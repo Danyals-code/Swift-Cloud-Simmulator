@@ -183,16 +183,16 @@ describe('uneven corners are drawn as written, so nothing is said', () => {
 
 describe('coverage diagnostics are honest, not wrong', () => {
   it('names an unimplemented view rather than calling it unresolved', () => {
-    // `Chart` is perfectly valid Swift. Saying "cannot find in scope" would be both
+    // `Map` is perfectly valid Swift. Saying "cannot find in scope" would be both
     // wrong and unhelpful - it is the preview that cannot draw it. The name checked
-    // here moves as coverage grows; what must not change is that a real SwiftUI name
-    // is never reported as unresolved.
-    const [warning] = warnings(app('        Chart { }'))
+    // here moves as coverage grows (it was `Chart` until Wave 6e drew charts); what must
+    // not change is that a real SwiftUI name is never reported as unresolved.
+    const [warning] = warnings(app('        Map { }'))
     expect(warning?.code).toBe('unsupported_swiftui_view')
-    expect(warning?.feature).toBe('Chart')
+    expect(warning?.feature).toBe('Map')
     // In a designer's words, as the canvas says it (D12).
-    expect(warning?.message).toBe("'Chart' isn't drawn in the preview yet, so it shows as a labelled box. Xcode draws it as written.")
-    expect(errors(app('        Chart { }'))).toEqual([])
+    expect(warning?.message).toBe("'Map' isn't drawn in the preview yet, so it shows as a labelled box. Xcode draws it as written.")
+    expect(errors(app('        Map { }'))).toEqual([])
   })
 
   it('names an unimplemented modifier', () => {

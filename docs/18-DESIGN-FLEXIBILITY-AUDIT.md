@@ -60,7 +60,7 @@ These break trust: the studio says "Design updated." and is wrong, or one ordina
 | 17 | `#if DEBUG` inside a view is a parse error: the preview is blank and every edit in that file is refused. | round trip 40 |
 | 18 | One unresolved name in an unrelated file draws nothing for the whole app and strips component, collection and token settings everywhere. | `authoring-features.ts:21` |
 | 19 | A generic container (`Card(title:) { ... }` with `@ViewBuilder var content`, or stored `Content` with two or more children) draws empty. | round trip 50, 61 |
-| 20 | A Chart, Map or PhotosPicker is locked, so even its own `.frame` cannot be changed, with the misleading reason "Resolve source diagnostics". | round trip 90 |
+| 20 | A Chart, Map or PhotosPicker is locked, so even its own `.frame` cannot be changed, with the misleading reason "Resolve source diagnostics". **Since Wave 6e** a Chart is drawn and is an ordinary layer: its Width and Height write its own `.frame` in place (Fixed 200 to 260 rewrites `.frame(height: 200)` as `.frame(height: 260)`), and its fill, corners, stroke and effects are set as on any view. Its data and marks stay in Code, read only, and below iOS 16 it says Chart needs iOS 16 or newer. Map and PhotosPicker are unchanged. | round trip 90 |
 
 ## Concern 1: designers lack the flexibility of code or Figma
 
@@ -121,7 +121,7 @@ Ranked by how common the construct is in real and AI-generated SwiftUI.
 | 6 | Gradient strokes draw black (above). | Approximate, silent |
 | 7 | **Markdown** in text literals shows raw asterisks; `AttributedString` is a blocking error. | Missing |
 | 8 | Toolbar `.bottomBar` and `.principal` placements are omitted. Drawn since Wave 4b; since Wave 6c `.navigation`, `.status`, `.secondaryAction`, `.confirmationAction` and `.primaryAction` are drawn where iOS 27 draws them, and the Placement field sets Navigation and Status. | Done (Wave 4b, 6c) |
-| 9 | Swift Charts draw a labelled box. | Placeholder |
+| 9 | Swift Charts draw a labelled box. **Since Wave 6e** bar, line, point, area, rule and sector marks are drawn as iOS 27 draws them, measured in the simulator, with Charts' axes, nice ticks, dashed grid, palette and legend, and hidden axes, a scale's domain and annotations. Scrolling, selection, custom axis marks, `.chartForegroundStyleScale` and mark styles warn that the preview doesn't draw them, and dates are drawn by day: a date with no `unit:` or another unit is a labelled box that says so. The AI is asked for bar, line, sector and stacked charts in the forms that draw, with `unit: .day` on every date and `.overlay` for a sector's label. | Drawn (Wave 6e) |
 | 10 | `Text(Image(...))` concatenation draws nothing for the image; `"\(Image(...))"` draws "View". | Missing |
 | 11 | Ordinary style chains that trap (above). | Missing, traps |
 | 12 | DatePicker `.graphical` and `.wheel` styles are not drawn; the default DatePicker is a text row; ColorPicker has no swatch. **Since Wave 6d** the default draws grey date and time capsules, `.graphical` the month in place and `.wheel` still columns, at the sizes measured in iOS 27, and a Style select in Design writes them (Compact and Graphical from iOS 14); ColorPicker draws its ringed swatch. There is still no time-of-day editor. | Drawn (Wave 6d) |
@@ -158,7 +158,7 @@ Ordered so each wave makes Design trustworthy before making it bigger. Each item
 
 **Wave 5: States, motion and components (two PRs).** Shown when that writes `if`; "Animate this change" on tap actions; per-view transitions; numeric text transitions; matched geometry between states; component props for booleans, images and colours, visual variants, instance swap and detach.
 
-**Wave 6: Rendering fidelity, long tail (ongoing).** SF Symbols coverage toward the most-used 600 names (look-alikes, see below); Liquid Glass and iOS 27 chrome (search tab, ToolbarSpacer, bottom accessory; done in 6c); custom font files in Assets, exported with `UIAppFonts`; Markdown and AttributedString; images in text; toolbar placements (done in 6c); date picker styles; symbol rendering modes; shape and text masks; `zIndex`; views beside NavigationStack (done in 6c) and embedded page TabViews (done in 4c); MeshGradient; scroll paging and content margins; basic Charts (BarMark, LineMark, SectorMark); popovers (the compact bubble, done in 6c).
+**Wave 6: Rendering fidelity, long tail (ongoing).** SF Symbols coverage toward the most-used 600 names (look-alikes, see below); Liquid Glass and iOS 27 chrome (search tab, ToolbarSpacer, bottom accessory; done in 6c); custom font files in Assets, exported with `UIAppFonts`; Markdown and AttributedString; images in text; toolbar placements (done in 6c); date picker styles; symbol rendering modes; shape and text masks; `zIndex`; views beside NavigationStack (done in 6c) and embedded page TabViews (done in 4c); MeshGradient; scroll paging and content margins; basic Charts (BarMark, LineMark, SectorMark; done in 6e); popovers (the compact bubble, done in 6c).
 
 ## Constraints that shape the roadmap
 

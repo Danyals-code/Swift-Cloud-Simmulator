@@ -54,6 +54,7 @@ export type LayoutElement =
   | FirstFitElement
   | PathElement
   | PlaceholderElement
+  | PlotElement
   | ModifiedElement
   | EmptyElement
 
@@ -301,6 +302,56 @@ export interface PathElement extends ElementBase {
   readonly fill: Fill | null
   readonly stroke: ShapeStroke | null
   readonly fillRule: 'nonzero' | 'evenodd'
+}
+
+/**
+ * A box whose items are placed at fractions of its size (Wave 6e): a chart's plot, where a
+ * bar's place and a line's points depend on the size the plot ends up with. Each place is a
+ * fraction of the box plus points, so a bar can be 0.7 of its band and a label 4 pt below the
+ * plot. Lines and wedges become path nodes once the size is known, so nothing new is painted.
+ */
+export interface PlotElement extends ElementBase {
+  readonly kind: 'plot'
+  readonly items: readonly PlotItem[]
+  /**
+   * Hugs its items' width instead of filling it: the widest `at` item plus this, rounded up
+   * to a whole point, which is how wide Charts makes a y axis.
+   */
+  readonly hugsWidth?: number
+  /** The size it takes along an axis nothing proposes, 100 for a Chart in a ScrollView. */
+  readonly ideal: number
+}
+
+/** A place in a plot: a fraction of its width and height, plus points. */
+export interface PlotPoint {
+  readonly x: number
+  readonly y: number
+  readonly dx?: number
+  readonly dy?: number
+}
+
+export type PlotItem =
+  /** An element filling the box between two places. */
+  | { readonly kind: 'box'; readonly from: PlotPoint; readonly to: PlotPoint; readonly element: LayoutElement }
+  /**
+   * An element at its own size, with the point `anchor` names (fractions of its size) at `at`.
+   * `square` measures the place in the square centred in the plot, as a pie's labels are.
+   */
+  | { readonly kind: 'at'; readonly at: PlotPoint; readonly anchor: Point; readonly element: LayoutElement; readonly square?: boolean }
+  /** A line through places, stroked, or closed and filled. */
+  | { readonly kind: 'line'; readonly id: string; readonly points: readonly PlotPoint[]; readonly fill?: Fill; readonly stroke?: ShapeStroke }
+  /**
+   * A wedge of the ring centred in the plot, its radius half the plot's shorter side: from
+   * `start` to `end` turns clockwise from 12 o'clock, hollow to `inner` of the radius, its
+   * straight sides moved `inset` points in, which leaves a gap of twice that between wedges.
+   */
+  | { readonly kind: 'wedge'; readonly id: string; readonly start: number; readonly end: number; readonly inner: number; readonly inset: number; readonly fill: Fill }
+
+/** The elements a plot's items hold. */
+export function plotElements(element: PlotElement): LayoutElement[] {
+  const held: LayoutElement[] = []
+  for (const item of element.items) if (item.kind === 'box' || item.kind === 'at') held.push(item.element)
+  return held
 }
 
 export interface PlaceholderElement extends ElementBase {
@@ -862,6 +913,8 @@ export function childrenOf(element: LayoutElement): readonly LayoutElement[] {
       return element.children
     case 'table':
       return element.rows.flat()
+    case 'plot':
+      return plotElements(element)
     case 'scroll':
       return [element.content]
     case 'modified': {
@@ -894,6 +947,17 @@ export function withChildren(element: LayoutElement, change: (element: LayoutEle
     case 'scroll': {
       const content = change(element.content)
       return content === element.content ? element : { ...element, content }
+    }
+    case 'plot': {
+      let changed = false
+      const items = element.items.map(item => {
+        if (item.kind !== 'box' && item.kind !== 'at') return item
+        const next = change(item.element)
+        if (next === item.element) return item
+        changed = true
+        return { ...item, element: next }
+      })
+      return changed ? { ...element, items } : element
     }
     case 'modified': {
       const child = change(element.child)

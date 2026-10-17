@@ -86,6 +86,7 @@ import {
   type SearchField,
 } from './presentation'
 import { asCornerRadii, cornerRadiiOf } from './corners'
+import { chartLayout, type ChartHost } from './charts'
 import { applyTrim, asCanvasContext, asPath, toSVGPath } from './paths'
 import { resolveSymbol, variantSymbol } from './sf-symbols'
 import {
@@ -1801,6 +1802,10 @@ class Converter {
           ...origin,
         }
       }
+
+      // Swift Charts (Wave 6e): marks, axes, legend and annotations as plots of shapes, paths and text.
+      case 'Chart':
+        return chartLayout(view, path, this.chartHost(view))
 
       case 'Canvas': {
         const context = asCanvasContext(positional(view.args, 0))
@@ -4967,6 +4972,20 @@ class Converter {
   }
 
   // ----------------------------------------------------------------- helpers
+
+  /** What a chart borrows from the converter: its colours, its labels and its way of drawing content. */
+  private chartHost(chart: ViewValue): ChartHost {
+    const style = (value: SwiftValue) => resolveFillArg(value, this.scheme, this.styles.tint)
+    const own = [...chart.modifiers].reverse().find(m => m.name === 'foregroundStyle' || m.name === 'foregroundColor')
+    return {
+      scheme: this.scheme,
+      color: name => this.color(name),
+      text: (id, words, textStyle, color) => this.styledText(id, words, textStyle, color),
+      content: (view, path) => this.convert(view, path, 'vertical'),
+      style,
+      foreground: own?.args[0] ? style(own.args[0].value) : null,
+    }
+  }
 
   private color(name: string): RGBA {
     if (this.sheetSurface) {

@@ -178,6 +178,31 @@ drag, and prints where a view-aligned ScrollView settles: on the nearest view's 
 a VStack, which both settle. Their screenshots aren't kept. `tests/controls-runtime.test.ts` and the render-dom `mesh` test cite
 these.
 
+41 images in [native/iphone18pro-charts](native/iphone18pro-charts/measurements.json), paired
+with `tests/fixtures/ios27-charts-6e.swift`, measure the Swift Charts Wave 6e draws. They are 36
+light images and 5 dark ones (the files ending `-dark`). Each screen prints the chart's frame, and
+through `chartOverlay` its plot frame and where each probed value lands. They cover:
+- bars: vertical, small values, horizontal, stacked and grouped by series, and by day over 3, 7,
+  14 and 30 days;
+- ten series for the palette's order, lines with points, a numeric x with a rule, series lines,
+  an area, a rule over bars, a pie and a donut with overlay annotations;
+- hidden axes, a hidden legend, a y scale domain, annotations above bars, a chart with no frame
+  and one in a ScrollView;
+- sixteen tops for where the ticks go, and the axis words as plain Text for their widths;
+- from the review: dates with no `unit:` (hourly points, daily and monthly bars), a sector's and
+  a rule's `.top` annotation, `chartXScale` domains of categories and of dates, stacks whose
+  series come in a different order each month, gradient lines and rules, and a chart with no data.
+  Their values are read from the screenshots, in the file's `edges`.
+
+Axis labels are `.caption2` in `secondaryLabel`: the y labels 4 after the plot, in a column as
+wide as the widest label plus 4, rounded up; the x labels in a row of 18, 4 below the plot. Grid
+lines are 0.5 pt in `tertiaryLabel`, solid across and dashed 2 on 2 down. Ticks step by 1, 2, 5
+or (from 25) 2.5 times a power of ten, at most 4 intervals, from 0. Series take blue, green,
+orange, purple, red, teal and yellow, with the legend below. Bars are 0.7 of their band, rounded
+2 pt at the far end, and stack in data order at each x; lines are 2 pt and points 8. A pie starts at 12 o'clock and runs clockwise;
+`angularInset` leaves a parallel-sided gap of twice itself. `tests/charts-runtime.test.ts` cites
+these.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh

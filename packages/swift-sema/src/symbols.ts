@@ -15,7 +15,7 @@ import { collectConformance, Lexer, typeName as typeNameOf } from '@studio/swift
 import {
   PROPERTY_WRAPPERS,
   SUPPORTED_MODIFIERS,
-  SUPPORTED_VIEWS,
+  DRAWN_VIEW_NAMES,
   UNIMPLEMENTED_MODIFIERS,
   UNIMPLEMENTED_VIEWS,
   KNOWN_ATTRIBUTES,
@@ -606,9 +606,16 @@ function stdlibItems(typeName: string): SymbolInfo[] {
 
 // ------------------------------------------------------------------ built-ins
 
-function viewItems(): SymbolInfo[] {
+/** The views, and a chart's drawn marks, offered where a view is written: built once, on first use. */
+let views: readonly SymbolInfo[] | undefined
+function viewItems(): readonly SymbolInfo[] {
+  return views ??= buildViewItems()
+}
+
+function buildViewItems(): SymbolInfo[] {
   const out: SymbolInfo[] = []
-  for (const name of SUPPORTED_VIEWS) {
+  // A chart's marks, drawn since Wave 6e, are written where its views would be.
+  for (const name of DRAWN_VIEW_NAMES) {
     out.push({ name, kind: 'view', detail: 'View', insert: `${name}(` })
   }
   for (const name of UNIMPLEMENTED_VIEWS) {
@@ -844,7 +851,7 @@ export function hoverAt(
   const name = nameAt(text, offset)
   if (!name) return null
 
-  if (SUPPORTED_VIEWS.has(name)) return { name, kind: 'view', detail: 'View' }
+  if (DRAWN_VIEW_NAMES.has(name)) return { name, kind: 'view', detail: 'View' }
   if (UNIMPLEMENTED_VIEWS.has(name)) {
     return {
       name,
