@@ -9,6 +9,7 @@ import { parseRecordDrafts } from '../lib/recordDrafts'
 import { newValueDefaults } from '../lib/newValue'
 import { repeatsOverRange, settingsVisualChildren } from '../lib/authoringSettings'
 import { sourceLayerLabel } from '../lib/sourceLayers'
+import { libraryChoices } from '../lib/library'
 import type { ProjectFace } from '../lib/fonts'
 import styles from './AuthoringInspector.module.css'
 import { ComponentVariants } from './ComponentVariants'
@@ -77,7 +78,8 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
     {/* An option inserted into a Picker takes the next tag, so choosing it selects it (Wave 4a). */}
     {section === 'basics' && node.name === 'Picker' && <button type="button" disabled={busy} onClick={() => void command({ kind: 'insert', snippet: 'Text("Option")' })}>Add option</button>}
 
-    {section === 'basics' && node.name === 'Image' && node.properties.some(p => ['argument 1', 'systemName'].includes(p.name) && p.valueKind === 'literal') && !!assets?.length && <label>Bundled image<select aria-label="Bundled image" disabled={busy} value={node.properties.find(p => p.name === 'argument 1')?.expression.replace(/^"|"$/g, '') ?? ''} onChange={e => void command({ kind: 'asset-use', name: e.target.value })}><option value="" disabled>Choose image</option>{assets.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}</select></label>}
+    {/* The project's own images, then the built-in Library's that it doesn't replace (Wave 7b). */}
+    {section === 'basics' && node.name === 'Image' && node.properties.some(p => ['argument 1', 'systemName'].includes(p.name) && p.valueKind === 'literal') && <label>Bundled image<select aria-label="Bundled image" disabled={busy} value={node.properties.find(p => p.name === 'argument 1')?.expression.replace(/^"|"$/g, '') ?? ''} onChange={e => void command({ kind: 'asset-use', name: e.target.value })}><option value="" disabled>Choose image</option>{assets?.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}<optgroup label="Library">{libraryChoices(assets ?? []).map(name => <option key={name} value={name}>{name}</option>)}</optgroup></select></label>}
     {section === 'basics' && node.component && <section><h3>Copy of {node.name}</h3><p>The fields above change only this copy. Everything else comes from its Main.</p>
       <button type="button" aria-expanded={shared} onClick={() => setShared(!shared)}>Edit the Main…</button>
       {shared && <div><p>Editing the Main changes all {node.component.callSites.length} copies, including repeated rows:</p><ul>{snapshot?.nodes.filter(n => n.definitionId === node.component!.definitionId).map((site, index) => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · copy {index + 1}</button></li>)}</ul><button type="button" onClick={() => { const definition = snapshot?.nodes.find(n => n.id === node.component!.definitionId); if (definition) onSelect?.(definition); else setError('The Main for this copy is not in the project any more. Open it in Code.') }}>Open the Main</button></div>}

@@ -1,9 +1,10 @@
 import * as Comlink from 'comlink'
 import { getDevice } from '@studio/sim-shell'
-import { imageDataURL, type Project } from '@studio/project-model'
+import type { Project } from '@studio/project-model'
 import type { CompileRequest, CompileResult, CompilerApi } from '@studio/shared'
 import { measureFontsWhenReady, measureTextBatch } from './fontMetrics'
 import { pageFonts, previewFonts } from './fonts'
+import { previewImages } from './library'
 
 /** A bounded, disposable compiler; never changes the user's live preview state. */
 export function compileSnapshot(project: Project, signal: AbortSignal, overrides: Partial<CompileRequest> = {}): Promise<CompileResult> {
@@ -27,7 +28,7 @@ export function compileSnapshot(project: Project, signal: AbortSignal, overrides
         projectId: project.id, files: project.files, revision: 1, deploymentTarget: project.manifest.deploymentTarget, previewTarget: project.manifest.previewTarget,
         canvas: { width: device.width, height: device.height }, safeArea: device.safeArea, colorScheme: project.manifest.colorScheme,
         designScreens: project.studio?.screens, componentDescriptions: project.studio?.components, colors: project.colors, fonts: previewFonts(project.fonts),
-        images: project.assets?.map(asset => ({ name: asset.name, width: asset.light.width / asset.scale, height: asset.light.height / asset.scale, light: imageDataURL(asset.light), dark: asset.dark ? imageDataURL(asset.dark) : undefined })),
+        images: previewImages(project),
         allPages: true, ...overrides,
       })
       for (let pass = 0; pass < 3 && !finished; pass++) {

@@ -2,7 +2,7 @@ import type { GenerationOptions } from './schema'
 import { SWIFTUI_GUIDANCE } from './guidance'
 import { PREVIOUS_ATTEMPT_RULE } from './previousAttempt'
 
-export const SYSTEM_PROMPT = `Build a complete, polished, small SwiftUI app that works both in Xcode and in the studio's browser preview. Return only the requested JSON project. All code must be original Swift, never HTML/JS. No authorship, AI credits, co-author comments, watermarks, or promotional copy. Use local sample data; no network calls, authentication, payments, packages, external assets, or permissions.
+export const SYSTEM_PROMPT = `Build a complete, polished, small SwiftUI app that works both in Xcode and in the studio's browser preview. Return only the requested JSON project. All code must be original Swift, never HTML/JS. No authorship, AI credits, co-author comments, watermarks, or promotional copy. Use local sample data; no network calls, authentication, payments, packages, external assets other than the built-in library images listed below, or permissions.
 
 Implementation contract:
 - Exactly one @main struct NameApp: App with WindowGroup. Its type matches the JSON name. Every file is under Sources/: the entry file first, then Sources/Models/, Sources/Components/ and Sources/Features/. Each named page has a separate file; list its path in pages. No Markdown fences.

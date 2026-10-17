@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { imageDataURL, type ColorAsset, type FontAsset, type ImageAsset, type ImageVariant, type TreeNode } from '@studio/project-model'
 import type { FileId } from '@studio/shared'
 import { fontLabel } from '../lib/fonts'
 import { ASSET_DRAG_TYPE, draggingFiles } from '../lib/images'
+import { libraryRows, type LibraryRow } from '../lib/library'
 import { Icon } from './ui/Icon'
 import { MenuButton } from './ui/Menu'
 import styles from './ProjectFiles.module.css'
@@ -41,6 +42,19 @@ function thumbnail(variant: ImageVariant): string {
 
 /** The Swift that shows an asset, which is also what a row carries when dropped into code. */
 export const imageReference = (name: string) => `Image(${JSON.stringify(name)})`
+/** What an image row carries when dragged: its name for the canvas, its Swift for the code editor. */
+function dragImage(event: React.DragEvent, name: string) {
+  event.dataTransfer.setData(ASSET_DRAG_TYPE, name)
+  event.dataTransfer.setData('text/plain', imageReference(name))
+  event.dataTransfer.effectAllowed = 'copy'
+}
+
+/** An image as the preview sheet shows it: an own image's variants, or a library image's file. */
+interface PreviewSource { name: string; scale: number; light: { url: string; width: number; height: number }; dark?: { url: string; width: number; height: number } }
+const ownSource = (asset: ImageAsset): PreviewSource => ({ name: asset.name, scale: asset.scale, light: { url: thumbnail(asset.light), width: asset.light.width, height: asset.light.height }, dark: asset.dark && { url: thumbnail(asset.dark), width: asset.dark.width, height: asset.dark.height } })
+const librarySource = ({ name, url, image }: LibraryRow): PreviewSource => ({ name, scale: image.scale, light: { url, width: image.width, height: image.height } })
+/** What the preview sheet was opened on: an own image, followed by its id as it changes, or a Library row. */
+type Previewing = { kind: 'own'; asset: ImageAsset } | { kind: 'library'; row: LibraryRow }
 /** The Swift that sets a project font, for its row's Copy. */
 const fontReference = (postScriptName: string) => `.font(.custom(${JSON.stringify(postScriptName)}, size: 17, relativeTo: .body))`
 
@@ -53,13 +67,24 @@ const fontReference = (postScriptName: string) => `.font(.custom(${JSON.stringif
  * on the canvas to place it, or into the code editor, where it lands as `Image("…")`.
  * Font files are listed by face, with their file's name, and removed from their row.
  * Colours are listed for completeness; they are edited in the App's settings.
+ *
+ * Below them, the built-in Library (Wave 7b): photos every project can use by name, which
+ * are never project files. Its rows drag, preview, insert and copy as an own image does, but
+ * can't be renamed or deleted, and the badge counts only the project's own assets. An own
+ * image that shadows a library image (`shadowedLibraryNames`) replaces it, so that row is
+ * dimmed and says so.
  */
 export function AssetsFolder({ images, colors, fonts, busy, onImport, onInsert, onManage, onRemoveFont }: AssetsFolderProps) {
   const [open, setOpen] = useState(true)
   const [over, setOver] = useState(false)
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null)
   const [working, setWorking] = useState<string | null>(null)
-  const [previewing, setPreviewing] = useState<ImageAsset | null>(null)
+  const [previewing, setPreviewing] = useState<Previewing | null>(null)
+  // Open from the start, so the photos are easy to find.
+  const [libraryOpen, setLibraryOpen] = useState(true)
+  const library = libraryRows(images)
+  // An own image's preview follows it as it changes; a library row shows the Library's file.
+  const previewed = useMemo(() => !previewing ? null : previewing.kind === 'library' ? librarySource(previewing.row) : ownSource(images.find(asset => asset.id === previewing.asset.id) ?? previewing.asset), [previewing, images])
   const disabled = busy || !!working
   async function run(task: () => Promise<string | null>, success: string | null = null, doing = 'Adding…') {
     if (disabled) return
@@ -94,13 +119,9 @@ export function AssetsFolder({ images, colors, fonts, busy, onImport, onInsert, 
       {images.map(asset => <li key={asset.id} className={styles.row} style={{ paddingLeft: BASE + INDENT + LEAF }} data-testid="asset-image"
         draggable={!disabled} tabIndex={0} aria-label={`${asset.name}, image`}
         title={`Double-click to look closer. Drag onto a view to place it, or into code for ${imageReference(asset.name)}`}
-        onDoubleClick={() => setPreviewing(asset)}
-        onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setPreviewing(asset) } }}
-        onDragStart={event => {
-          event.dataTransfer.setData(ASSET_DRAG_TYPE, asset.name)
-          event.dataTransfer.setData('text/plain', imageReference(asset.name))
-          event.dataTransfer.effectAllowed = 'copy'
-        }}>
+        onDoubleClick={() => setPreviewing({ kind: 'own', asset })}
+        onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setPreviewing({ kind: 'own', asset }) } }}
+        onDragStart={event => dragImage(event, asset.name)}>
         <img src={thumbnail(asset.light)} alt="" width={16} height={16} className={styles.thumb} draggable={false} />
         <span className={styles.name}>{asset.name}</span>
         <small>{asset.light.width / asset.scale} × {asset.light.height / asset.scale}</small>
@@ -110,7 +131,7 @@ export function AssetsFolder({ images, colors, fonts, busy, onImport, onInsert, 
           { value: 'copy', label: `Copy ${imageReference(asset.name)}` },
           { value: 'manage', label: 'Rename, dark version or delete…', separated: true },
         ]} onSelect={value => {
-          if (value === 'preview') setPreviewing(asset)
+          if (value === 'preview') setPreviewing({ kind: 'own', asset })
           else if (value === 'insert') void run(() => onInsert(asset.name), `Added ${asset.name} to the selection.`)
           else if (value === 'copy') void navigator.clipboard?.writeText(imageReference(asset.name))
           else onManage()
@@ -134,9 +155,39 @@ export function AssetsFolder({ images, colors, fonts, busy, onImport, onInsert, 
         <span className={styles.name}>{color.name}</span><small>Colour</small>
       </li>)}
       {!count && <li className={styles.empty} style={{ paddingLeft: BASE + INDENT + LEAF }}>Drop PNG or JPEG images here, or TTF or OTF font files, or use +.</li>}
+      <li data-testid="asset-library">
+        <div className={styles.row} style={{ paddingLeft: BASE + INDENT }}>
+          <button type="button" className={styles.label} aria-expanded={libraryOpen} onClick={() => setLibraryOpen(value => !value)} title="Photos every project can use by name. Exported only when the code uses them.">
+            <span className={styles.disclosure}><Icon name="chevron-right" size={12} /></span>
+            <Icon name="folder" size={14} /><span>Library</span><small>{library.length}</small>
+          </button>
+        </div>
+        {libraryOpen && <ul className={styles.items} role="group" aria-label="Library">
+          {library.map(row => <li key={row.name} className={styles.row} style={{ paddingLeft: BASE + 2 * INDENT + LEAF }} data-testid="asset-library-image" data-replaced={row.replaced || undefined}
+            draggable={!disabled && !row.replaced} tabIndex={0} aria-label={`${row.name}, library image${row.replaced ? ', replaced by your image' : ''}`}
+            title={row.replaced ? `Replaced by your image named ${row.name}. Double-click to look at the library's.` : `${row.alt} Double-click to look closer. Drag onto a view to place it, or into code for ${imageReference(row.name)}`}
+            onDoubleClick={() => setPreviewing({ kind: 'library', row })}
+            onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setPreviewing({ kind: 'library', row }) } }}
+            onDragStart={event => dragImage(event, row.name)}>
+            <img src={row.thumb} alt="" width={16} height={16} loading="lazy" className={styles.thumb} draggable={false} />
+            <span className={styles.name}>{row.name}</span>
+            {row.replaced ? <small>Replaced by your image</small> : <small>{Math.round(row.width)} × {Math.round(row.height)}</small>}
+            <span className={styles.tag}>Library</span>
+            <span className={styles.actions}><MenuButton label={`Actions for ${row.name}`} items={[
+              { value: 'preview', label: 'Preview' },
+              { value: 'insert', label: 'Insert into selection', disabled: disabled || row.replaced },
+              { value: 'copy', label: `Copy ${imageReference(row.name)}` },
+            ]} onSelect={value => {
+              if (value === 'preview') setPreviewing({ kind: 'library', row })
+              else if (value === 'insert') void run(() => onInsert(row.name), `Added ${row.name} to the selection.`)
+              else void navigator.clipboard?.writeText(imageReference(row.name))
+            }}><Icon name="ellipsis" size={14} /></MenuButton></span>
+          </li>)}
+        </ul>}
+      </li>
     </ul>}
     {(working || message) && <p className={message?.error ? styles.error : styles.status} role={message?.error ? 'alert' : 'status'}>{working ?? message?.text}</p>}
-    {previewing && <AssetPreview key={previewing.id} asset={images.find(asset => asset.id === previewing.id) ?? previewing} onClose={() => setPreviewing(null)} />}
+    {previewing && previewed && <AssetPreview key={previewing.kind === 'library' ? `library:${previewing.row.name}` : previewing.asset.id} asset={previewed} onClose={() => setPreviewing(null)} />}
   </section>
 }
 
@@ -150,7 +201,7 @@ const ZOOMS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4] as const
  * scrolling when it is larger than the window. A transparent PNG sits on a checker
  * so its edges show, and an image with a dark version can be flipped to it.
  */
-function AssetPreview({ asset, onClose }: { asset: ImageAsset; onClose: () => void }) {
+function AssetPreview({ asset, onClose }: { asset: PreviewSource; onClose: () => void }) {
   const [zoom, setZoom] = useState<number | 'fit'>('fit')
   const [dark, setDark] = useState(false)
   const closeRef = useRef<HTMLButtonElement>(null), imageRef = useRef<HTMLImageElement>(null)
@@ -207,7 +258,7 @@ function AssetPreview({ asset, onClose }: { asset: ImageAsset; onClose: () => vo
       <button ref={closeRef} type="button" className={styles.previewClose} aria-label="Close preview" title="Close (Esc)" onClick={onClose}><Icon name="xmark" size={14} /></button>
     </header>
     <div className={styles.previewStage} data-fit={zoom === 'fit' || undefined} onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
-      <img ref={imageRef} src={thumbnail(variant)} alt={asset.name} draggable={false} data-testid="asset-preview-image"
+      <img ref={imageRef} src={variant.url} alt={asset.name} draggable={false} data-testid="asset-preview-image"
         style={zoom === 'fit' ? undefined : { width: variant.width * zoom, height: variant.height * zoom }}
         onClick={() => setZoom(current => current === 'fit' ? 1 : 'fit')} />
     </div>

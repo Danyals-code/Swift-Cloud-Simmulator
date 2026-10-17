@@ -1,9 +1,10 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { imageDataURL, ASSET_LIMITS, type ImageAsset, type Project } from '@studio/project-model'
+import { imageDataURL, ASSET_LIMITS, libraryImage, type ImageAsset, type Project } from '@studio/project-model'
 import type { ResourceOperation } from '@studio/shared'
 import { decodeImportedImage, importedImageName } from '../lib/images'
+import { libraryChoices, libraryNameProblem, removalOperation, replacesLibrary } from '../lib/library'
 import { Icon } from './ui/Icon'
 import styles from './settings/Settings.module.css'
 
@@ -48,6 +49,7 @@ export function ImageResources({ project, stale, onAssets }: ImageResourcesProps
 function AssetEditor({ asset, assets, open, onToggle, disabled, onEdit, onFile }: { asset: ImageAsset; assets: readonly ImageAsset[]; open: boolean; onToggle: () => void; disabled: boolean; onEdit: (assets: readonly ImageAsset[], op?: ResourceOperation) => Promise<void>; onFile: (file: File, dark: boolean) => Promise<void> }) {
   const previews = useMemo(() => ({ light: imageDataURL(asset.light), dark: asset.dark ? imageDataURL(asset.dark) : undefined }), [asset.light, asset.dark])
   const [name, setName] = useState(asset.name), [replacement, setReplacement] = useState('')
+  const problem = name === asset.name ? undefined : libraryNameProblem(name)
   const replace = (updated: ImageAsset) => assets.map(a => a.id === asset.id ? updated : a)
   return <div className={styles.tokenRow} data-open={open || undefined}>
     <button type="button" className={styles.tokenSummary} aria-expanded={open} onClick={onToggle}>
@@ -55,16 +57,17 @@ function AssetEditor({ asset, assets, open, onToggle, disabled, onEdit, onFile }
       <strong>{asset.name}</strong><small>{asset.light.width / asset.scale} × {asset.light.height / asset.scale} pt{asset.dark ? ' · dark' : ''}</small>
     </button>
     {open && <>
-      <div className={styles.row}><span>Name</span><span className={styles.inline}><input aria-label={`${asset.name} asset name`} value={name} onChange={e => setName(e.target.value)} /><button type="button" className={styles.button} disabled={disabled || name === asset.name} onClick={() => void onEdit(replace({ ...asset, name }), { kind: 'asset-references', from: asset.name, to: name })}>Rename</button></span></div>
-      <p className={styles.note}>Renaming updates every Image that uses it.</p>
+      <div className={styles.row}><span>Name</span><span className={styles.inline}><input aria-label={`${asset.name} asset name`} value={name} onChange={e => setName(e.target.value)} /><button type="button" className={styles.button} disabled={disabled || name === asset.name || !!problem} onClick={() => void onEdit(replace({ ...asset, name }), { kind: 'asset-references', from: asset.name, to: name })}>Rename</button></span></div>
+      {/* Renaming onto a library image's exact name is the deliberate way to replace it; other letter case is refused (Wave 7b). */}
+      {problem ? <p className={styles.error} role="alert">{problem}</p> : <p className={styles.note}>{name !== asset.name && replacesLibrary(name) ? 'Replaces the library image of that name in this project.' : 'Renaming updates every Image that uses it.'}</p>}
       <div className={styles.row}><span>Pixel scale</span><select aria-label={`${asset.name} pixel scale`} value={asset.scale} disabled={disabled} onChange={e => void onEdit(replace({ ...asset, scale: Number(e.target.value) as 1 | 2 | 3 }))}>{[1, 2, 3].map(scale => <option key={scale} value={scale}>{scale}×</option>)}</select></div>
       {(['light', 'dark'] as const).map(scheme => <label key={scheme} className={styles.fileInput}>{scheme === 'light' ? 'Replace image' : asset.dark ? 'Replace dark image' : 'Add a dark mode image'}<input aria-label={`${asset.name} ${scheme} image`} type="file" accept="image/png,image/jpeg" disabled={disabled} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void onFile(file, scheme === 'dark') }} /></label>)}
       <div className={styles.actions}>
         {asset.dark && <button type="button" className={styles.button} disabled={disabled} onClick={() => void onEdit(replace({ ...asset, dark: undefined }))}>Remove dark image</button>}
         <button type="button" className={styles.button} disabled={disabled} onClick={() => void onEdit([...assets, { ...asset, id: crypto.randomUUID(), name: unusedAssetName(assets, asset.name) }])}>Duplicate</button>
       </div>
-      <div className={styles.row}><span>When deleting</span><select aria-label={`${asset.name} replacement`} value={replacement} onChange={e => setReplacement(e.target.value)}><option value="">Only if unused</option>{assets.filter(a => a.id !== asset.id).map(a => <option key={a.id} value={a.name}>Use {a.name} instead</option>)}</select></div>
-      <div className={styles.actions}><button type="button" className={styles.destructive} disabled={disabled} onClick={() => void onEdit(assets.filter(a => a.id !== asset.id), { kind: 'asset-references', from: asset.name, to: replacement || null })}>Delete image</button></div>
+      <div className={styles.row}><span>When deleting</span><select aria-label={`${asset.name} replacement`} value={replacement} onChange={e => setReplacement(e.target.value)}><option value="">{libraryImage(asset.name) ? 'Go back to the Library’s image' : 'Only if unused'}</option>{assets.filter(a => a.id !== asset.id).map(a => <option key={a.id} value={a.name}>Use {a.name} instead</option>)}{libraryChoices(assets.filter(a => a.id !== asset.id)).filter(n => n !== asset.name).map(n => <option key={`library:${n}`} value={n}>Use the Library’s {n} instead</option>)}</select></div>
+      <div className={styles.actions}><button type="button" className={styles.destructive} disabled={disabled} onClick={() => void onEdit(assets.filter(a => a.id !== asset.id), removalOperation(asset.name, replacement))}>Delete image</button></div>
     </>}
   </div>
 }

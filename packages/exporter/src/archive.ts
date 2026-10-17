@@ -3,6 +3,7 @@ import { projectBackup } from '@studio/project-model/backup'
 import { EXPORT_FORMATS, type ArchiveFormat, type ExportFormat } from '@studio/shared'
 import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
 import { encodeText } from './bundle'
+import { isLibraryAsset } from './library'
 import { MAX_BUNDLE_BYTES, MAX_SCREEN_BYTES, type ExportReview } from './handoff-report'
 import { EVENT_LOG, type HandoffExtras } from './portable'
 import { exportEditableZip, exportProjectZip, zipBundle, type ExportOptions } from './zip'
@@ -117,7 +118,8 @@ function sourcesOnly(project: Project, reason: string, { build, events }: Handof
   const taken = new Set(['known-issues.md', 'project-backup.json', EVENT_LOG])
   const files = new Map<string, Uint8Array>()
   for (const file of project.files) files.set(`${root}/${unusedPath(plainSegments(file.id) || 'Untitled.swift', taken)}`, encodeText(native ? withoutStudioMarkers(file.text) : file.text))
-  files.set(`${root}/project-backup.json`, encodeText(projectBackup(project, build)))
+  // The backup is the project as the studio holds it, so library images stay references (Wave 7b).
+  files.set(`${root}/project-backup.json`, encodeText(projectBackup({ ...project, assets: project.assets?.filter(asset => !isLibraryAsset(asset)) }, build)))
   if (events !== undefined) files.set(`${root}/${EVENT_LOG}`, encodeText(events))
   files.set(`${root}/KNOWN-ISSUES.md`, encodeText(`# What this export leaves out\n\nThe project could not be built into the format you chose, so this archive holds its Swift files exactly as they were written. project-backup.json holds everything else it had: images, ${Array.isArray(project.fonts) && project.fonts.length ? 'fonts, ' : ''}colour sets, designer settings and the AI conversation.\n\nWhy: ${reason}\n`))
   return zipBundle(files)

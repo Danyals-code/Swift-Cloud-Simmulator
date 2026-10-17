@@ -3,6 +3,7 @@ import type { CompileRequest } from '@studio/shared'
 import { TEMPLATES } from '@studio/project-model/templates'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
 import { DEVICES } from '@studio/sim-shell'
+import { libraryPreviewImages } from './helpers/library'
 
 /**
  * Every template compiles inside the 120 ms interaction budget.
@@ -22,6 +23,7 @@ function requestFor(files: readonly { id: string; text: string }[]): CompileRequ
     safeArea: device.safeArea,
     colorScheme: 'light',
     revision: 1,
+    images: libraryPreviewImages(),
   }
 }
 

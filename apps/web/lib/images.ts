@@ -1,4 +1,5 @@
-import { ASSET_LIMITS, assetName, readImage, type ImageAsset, type ImageVariant } from '@studio/project-model'
+import { ASSET_LIMITS, assetName, LIBRARY_IMAGES, readImage, type ImageAsset, type ImageVariant } from '@studio/project-model'
+import { catalogKey } from './library'
 
 /** What an Assets row carries when it is dragged: the image's name. */
 export const ASSET_DRAG_TYPE = 'application/x-studio-asset'
@@ -29,15 +30,20 @@ export async function importImageFiles(files: readonly File[], existing: readonl
   return { added, problems }
 }
 
-/** Keep filenames friendly while avoiding reserved names and catalog collisions. */
+/**
+ * Keep filenames friendly while avoiding reserved names and catalog collisions. A library
+ * image's name counts as taken in any letter case (Wave 7b), so a dropped `snowy-peak.jpg` never
+ * replaces the library image by accident, and `Snowy-Peak.png` never makes a name the asset
+ * catalog can't hold beside it; renaming one to the exact name is the deliberate way.
+ */
 export function importedImageName(filename: string, assets: readonly Pick<ImageAsset, 'name'>[]): string {
   // Strip control bytes as well as characters forbidden by Xcode asset catalogs.
   // eslint-disable-next-line no-control-regex
   let base = filename.replace(/\.[^.]+$/, '').normalize('NFC').replace(/[./\\<>:"|?*\u0000-\u001f\u007f]/gu, '-').trim().slice(0, 70) || 'Image'
   if (['appicon', 'accentcolor'].includes(base.toLowerCase())) base += ' Image'
-  const names = new Set(assets.map(asset => asset.name.normalize('NFC').toLowerCase()))
+  const names = new Set([...assets, ...LIBRARY_IMAGES].map(asset => catalogKey(asset.name)))
   let name = base, suffix = 2
-  while (names.has(name.toLowerCase())) name = `${base} ${suffix++}`
+  while (names.has(catalogKey(name))) name = `${base} ${suffix++}`
   return assetName(name)
 }
 

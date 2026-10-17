@@ -1,12 +1,16 @@
 import { colorSetContents, validateAssets, validateColors, type Project } from '@studio/project-model'
 import { encodeText } from './bundle'
+import { isLibraryAsset } from './library'
 
 export function assetCatalog(project: Project, path: string): Map<string, Uint8Array> {
-  validateAssets(project.assets ?? [])
+  // Library images the code uses count apart from the designer's own, as they do in the studio.
+  const assets = project.assets ?? []
+  validateAssets(assets.filter(asset => !isLibraryAsset(asset)))
+  validateAssets(assets.filter(isLibraryAsset))
   validateColors(project.colors ?? [])
   const files = new Map<string, Uint8Array>()
   files.set(`${path}/Contents.json`, encodeText(JSON.stringify({ info: { author: 'xcode', version: 1 } })))
-  for (const asset of project.assets ?? []) {
+  for (const asset of assets) {
     const images = []
     for (const appearance of ['light', 'dark'] as const) {
       const variant = asset[appearance]
