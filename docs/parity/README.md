@@ -153,6 +153,31 @@ and in iOS 27's bars. Each screen prints the frames of what it measures, kept by
 
 `tests/chrome-runtime.test.ts` cites these.
 
+24 more in [native/iphone18pro-controls](native/iphone18pro-controls/measurements-6d.json),
+paired with `tests/fixtures/ios27-controls-6d.swift`, measure what Wave 6d draws. They are 20
+light images and 4 dark ones (the files ending `-dark`). Each screen prints the frames of what
+it measures. They cover:
+- compact DatePickers in a Form and outside one, for the date, the time and both: grey
+  capsules in `tertiarySystemFill`, 12 pt either side of the value, 4 apart, 34.33 tall for a
+  date alone and 36 otherwise, with no chevron;
+- a graphical DatePicker, 370 x 354 whatever the month, or 416.67 with its time row; its
+  title isn't drawn, and the chosen day sits on a 43.67 pt disc in the label colour;
+- wheels, 216 tall and 320 wide: beside the title, or under it in a Form, with the chosen
+  row on a band;
+- the ColorPicker swatch: an 18 pt disc, 2 pt inside a 3 pt ring of hues, 28 pt across;
+- `.contentMargins` for each placement, on horizontal and vertical ScrollViews and on a List
+  with and without a section header, plus a margin for `.scrollContent` written around an
+  automatic one, which replaces it;
+- `.safeAreaPadding` on a ScrollView and on a Text;
+- a 3 x 3 MeshGradient, smooth and not, sampled on a 9 x 9 grid.
+
+The `aligned-probe` screen calls each scroll view's delegate the way UIKit does at the end of a
+drag, and prints where a view-aligned ScrollView settles: on the nearest view's start. The
+`aligned-variants` screen does the same for three more: one whose stack isn't marked
+`.scrollTargetLayout()`, which scrolls freely, a marked LazyHStack, and a marked HStack inside
+a VStack, which both settle. Their screenshots aren't kept. `tests/controls-runtime.test.ts` and the render-dom `mesh` test cite
+these.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh

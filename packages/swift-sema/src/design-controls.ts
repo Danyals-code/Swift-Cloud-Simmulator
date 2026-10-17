@@ -3,6 +3,7 @@ import { advancedControls } from './design-advanced-controls'
 import { toolbarItemControls } from './design-object-controls'
 import { sheetControls } from './design-sheet-controls'
 import { pagerControls, safeAreaControl, setAround } from './design-content-controls'
+import { datePickerStyleControl, peekControl, scrollsSideways } from './design-date-scroll-controls'
 import { authoringViewMinimum } from './authoring-view'
 import { Lexer, type CallExpr, type EnumDecl, type Expr, type Stmt, type StringLiteralExpr, type StructDecl, type VarDecl } from '@studio/swift-syntax'
 import { BORDER_POSITIONS, borderOf, cornersOf, modifierName, rewriteBorder, type BorderPosition } from './authoring-border'
@@ -756,6 +757,9 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   if (!node.textRun) safeAreaControl(expr, base, modifiers, text, targetVersion, !ownModifier, add)
   // A carousel takes a Dots background set on a view around it (Wave 4c).
   if (node.kind === 'view' && node.name === 'TabView') pagerControls(expr, modifiers, text, targetVersion, add, byId && setAround(node, byId, 'indexViewStyle'))
+  // A DatePicker's Style and a sideways ScrollView's Peek, each of which a view around it may set (Wave 6d).
+  if (node.kind === 'view' && node.name === 'DatePicker') datePickerStyleControl(expr, base, modifiers, text, targetVersion, !ownModifier, add, byId && setAround(node, byId, 'datePickerStyle'))
+  if (node.kind === 'view' && node.name === 'ScrollView' && scrollsSideways(base)) peekControl(expr, base, modifiers, text, targetVersion, !ownModifier, add, byId && setAround(node, byId, 'contentMargins'))
   const has = (name: string) => modifiers.some(m => modifierName(m) === name)
   if (!has('font')) append('add:font', 'Font size', 'pt', '', v => `.font(.system(size: ${Number(v)}))`, undefined, 1, 1000)
   if (!has('foregroundColor') && !has('foregroundStyle')) append('add:foreground', 'Text color', 'select', '', v => `.${targetVersion >= 15 ? 'foregroundStyle' : 'foregroundColor'}(${SYSTEM_COLORS.includes(v) ? `Color(.${v})` : `Color.${v}`})`, colors)

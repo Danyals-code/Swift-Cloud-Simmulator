@@ -47,6 +47,7 @@ import {
 } from './builtins'
 import { Scope, type PropertyInfo, type SemanticModel, type TypeInfo } from './model'
 import { literalText, memberChain } from './design-controls'
+import { isMesh, meshWarnings, modifierPaintWarning } from './paint-scroll-checks'
 
 /**
  * Semantic analysis for the supported subset.
@@ -858,10 +859,15 @@ export class Checker {
             if (expr.callee.member === 'symbolEffect' && memberChain(expr.args[0]?.value)?.[0] === 'scale' && !expr.args.some(arg => arg.label === 'isActive' && arg.value.kind === 'booleanLiteral' && !arg.value.value)) {
               this.report(expr.args[0]!.span, 'warning', 'unsupported_swiftui_modifier', 'The preview draws this symbol at its own size. The app scales it while the effect is active.', '.symbolEffect')
             }
+            // A mesh painted in one colour, a view-aligned limit, a nil margin (Wave 6d).
+            const drawn = modifierPaintWarning(expr.callee.member, expr.args, expr.callee.base!)
+            if (drawn) this.report(drawn.span, 'warning', 'unsupported_swiftui_modifier', drawn.message, drawn.feature)
           }
           // A colour is a view too, `Color.blue.mask(Circle())`, though its chain starts at no view's name.
           if (expr.callee.member === 'mask' && expr.callee.base) this.checkMask(expr.callee.base, expr.args, expr.trailingClosure)
         }
+        // A mesh's forms the preview draws nothing for, or leaves part of out (Wave 6d).
+        if (isMesh(expr) && !scope.has('MeshGradient') && !this.types.has('MeshGradient')) for (const warning of meshWarnings(expr)) this.report(warning.span, 'warning', 'unsupported_swiftui_view', warning.message, warning.feature)
         // `Color(.systemGray6)` and `Color(uiColor: .systemGray6)`, UIKit's colour by name.
         const only = expr.args.length === 1 ? expr.args[0]! : null
         if (

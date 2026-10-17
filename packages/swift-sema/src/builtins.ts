@@ -44,8 +44,8 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   'Rectangle', 'RoundedRectangle', 'Circle', 'Ellipse', 'Capsule', 'Path', 'Canvas',
   // each corner with its own radius
   'UnevenRoundedRectangle',
-  // styles
-  'LinearGradient', 'RadialGradient', 'AngularGradient', 'GridItem',
+  // styles, and iOS 18's mesh of colours (Wave 6d)
+  'LinearGradient', 'RadialGradient', 'AngularGradient', 'GridItem', 'MeshGradient',
   // gestures
   'DragGesture', 'LongPressGesture', 'TapGesture', 'SpatialTapGesture',
   'MagnificationGesture', 'MagnifyGesture', 'RotationGesture', 'RotateGesture',
@@ -106,8 +106,10 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'searchable', 'onDelete', 'contextMenu', 'badge', 'presentationBackgroundInteraction', 'inspector',
   'keyboardType', 'submitLabel', 'onSubmit', 'textInputAutocapitalization', 'autocorrectionDisabled',
   'listRowSeparator', 'listRowSeparatorTint', 'listRowInsets', 'scrollIndicators', 'swipeActions', 'scrollTargetBehavior',
+  // scroll content inset, and the marker of the views a scroll aligns to (Wave 6d)
+  'contentMargins', 'safeAreaPadding', 'scrollTargetLayout',
   // control styles, each of which changes what is drawn
-  'toggleStyle', 'pickerStyle', 'labelStyle', 'progressViewStyle', 'gaugeStyle',
+  'toggleStyle', 'pickerStyle', 'labelStyle', 'progressViewStyle', 'gaugeStyle', 'datePickerStyle',
   'controlSize', 'buttonBorderShape', 'monospaced',
   // device edges
   'ignoresSafeArea', 'id',
@@ -223,8 +225,6 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   // it.
   'EditButton', 'PasteButton', 'RenameButton',
   'AnyShape',
-  // iOS 18
-  'MeshGradient',
 ])
 
 /**
@@ -241,7 +241,7 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
  */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   // layout
-  'safeAreaPadding', 'gridCellColumns', 'coordinateSpace',
+  'gridCellColumns', 'coordinateSpace',
   // painting and effects
   'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect',
   // a width of the system font, which the preview's text measurement cannot stretch
@@ -260,7 +260,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'searchScopes', 'searchSuggestions', 'onMove',
   'fileImporter', 'fileExporter',
   // controls
-  'menuStyle', 'datePickerStyle',
+  'menuStyle',
   // text entry
   'focused',
   // environment set on the view rather than by the preview's own controls
@@ -450,8 +450,10 @@ export const STYLE_TOKENS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['buttonStyle', new Set(['automatic', 'plain', 'borderless', 'bordered', 'borderedProminent', 'glass', 'glassProminent'])],
   ['tabViewStyle', new Set(['automatic', 'page'])],
   ['indexViewStyle', new Set(['page'])],
-  // A ScrollView that pages snaps by its size (Wave 4c); one aligned to its views scrolls freely.
-  ['scrollTargetBehavior', new Set(['paging'])],
+  // A ScrollView that pages snaps by its size (Wave 4c); one aligned to its views snaps to their starts (Wave 6d).
+  ['scrollTargetBehavior', new Set(['paging', 'viewAligned'])],
+  // Compact, the default on iOS, as pills; a calendar; spinning columns (Wave 6d).
+  ['datePickerStyle', new Set(['automatic', 'compact', 'graphical', 'wheel'])],
   ['pickerStyle', new Set(['automatic', 'menu', 'segmented', 'inline', 'wheel'])],
   ['toggleStyle', new Set(['automatic', 'switch', 'button', 'checkbox'])],
   ['labelStyle', new Set(['automatic', 'titleAndIcon', 'titleOnly', 'iconOnly'])],
@@ -544,6 +546,8 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   // `let namespace: Namespace.ID`, a `@Namespace` handed to the view that matches with it (Wave 5a).
   'Namespace',
   'Material', 'StrokeStyle', 'GeometryProxy', 'ScrollViewProxy', 'Gradient', 'AnyShapeStyle', 'Glass',
+  // A mesh's point, `SIMD2<Float>(0.5, 0)`, which the preview reads as a pair (Wave 6d).
+  'SIMD2',
   'RectangleCornerRadii',
   'ToolbarItemPlacement', 'ToolbarContent', 'Binding', 'NavigationPath', 'Alert', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet', 'Scanner', 'CharacterSet',
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',

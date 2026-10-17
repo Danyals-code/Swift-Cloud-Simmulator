@@ -143,6 +143,30 @@ describe('design edits in the event log', () => {
     expect(designEvent({ kind: 'component-differs', control: control('padding'), property: S }, text)).toEqual({ type: 'design', op: 'component-differs', layer: 'Text', control: 'modifier' })
   })
 
+  it('log a DatePicker’s Style and a carousel’s Peek by their family, never the style or the length chosen (Wave 6d)', () => {
+    const controls = buildAuthoringModel({ projectId: 'p', revision: 1, files: [{ id: 'App.swift', text: `import SwiftUI
+@main struct PlanApp: App { var body: some Scene { WindowGroup { PlanScreen() } } }
+struct PlanScreen: View {
+  @State private var date = Date()
+  var body: some View {
+    VStack {
+      DatePicker("Starts", selection: $date)
+      ScrollView(.horizontal) {
+        HStack { Text("One"); Text("Two") }
+      }
+      .scrollTargetBehavior(.paging)
+    }
+  }
+}` }] })
+    const picker = controls.nodes.find(node => node.name === 'DatePicker')!
+    const scroll = controls.nodes.find(node => node.name === 'ScrollView')!
+    const style = picker.controls!.find(control => control.label === 'Style')!.id
+    const peek = scroll.controls!.find(control => control.label === 'Peek')!.id
+
+    expect(designEvent({ kind: 'property', control: style, value: 'Graphical' }, picker)).toEqual({ type: 'design', op: 'property', layer: 'DatePicker', control: 'date' })
+    expect(designEvent({ kind: 'property', control: peek, value: '24' }, scroll)).toEqual({ type: 'design', op: 'property', layer: 'ScrollView', control: 'scroll' })
+  })
+
   it('log a refused copy or paste as a refused edit is, on what kind of layer and nothing more (C7)', () => {
     expect(refusedClipboard('copy', text)).toEqual({ type: 'design', op: 'copy', layer: 'Text', refused: true })
     expect(refusedClipboard('paste')).toEqual({ type: 'design', op: 'paste', refused: true })

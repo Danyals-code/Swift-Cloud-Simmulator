@@ -251,6 +251,8 @@ function toRenderNode(node: PlacedNode, keyOf?: KeyOf): RenderNode | null {
       }
       // Only a ScrollView that pages carries `paging` (Wave 4c).
       if (node.paint.paging) scroll.paging = true
+      // Only one aligned to its views carries `snaps` (Wave 6d).
+      if (node.paint.snaps) scroll.snaps = node.paint.snaps
       return { ...base, kind: 'layer', clip: true, scroll }
     }
 

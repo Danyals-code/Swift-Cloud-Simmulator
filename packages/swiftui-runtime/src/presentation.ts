@@ -26,6 +26,7 @@ import { HIDDEN_BARS } from '@studio/swift-sema'
 import {
   asSwiftValue,
   asView,
+  datePickerParts,
   handlerIdFor,
   payloadOf,
   ANIMATION_TYPE,
@@ -89,6 +90,22 @@ export const DATE_CELL = '_DateCell'
 /** A `ColorPicker`'s palette, and one colour of it. */
 export const COLOUR_EDITOR = '_ColourEditor'
 export const COLOUR_SWATCH = '_ColourSwatch'
+
+/**
+ * A `DatePicker`'s selection, its value in seconds (now when it has none), and the range
+ * `in:` allows, for its popup and its graphical month alike.
+ */
+function dateSelection(control: ViewValue) {
+  const selection = labelled(control.args, 'selection')
+  const binding = asProjection(selection)
+  const range = labelled(control.args, 'in')
+  return {
+    selection, binding,
+    seconds: asDate(binding?.get() ?? { kind: 'nil' })?.epochSeconds ?? Date.now() / 1000,
+    lower: range?.kind === 'range' ? range.lower : -Infinity,
+    upper: range?.kind === 'range' ? range.upper : Infinity,
+  }
+}
 
 /** Month names for the calendar header. Not localised; neither is the rest of the chrome. */
 const MONTHS = [
@@ -1434,7 +1451,11 @@ class Resolver {
       // surface - so they share the menu's *mechanism* and none of its content.
       const intent: ViewIntent = { kind: 'openMenu', menu: path }
       this.handlers.set(handlerIdFor(path), intent)
-      return { ...view, intent }
+      // A graphical DatePicker draws its month in place (Wave 6d). Its style is written on it
+      // or inherited from around it, so the month is built only for one that is graphical.
+      const graphical = view.name === 'DatePicker' && tokenName(view.modifiers.find(m => m.name === 'datePickerStyle')?.args[0]?.value) === 'graphical'
+      const calendar = graphical ? this.calendar(view, path, dateSelection(view)) : null
+      return calendar ? { ...view, intent, args: [...view.args, { label: '_calendar', value: opaque('View', calendar) }] } : { ...view, intent }
     }
 
     if (view.name === 'Picker' || view.name === 'Menu') {
@@ -1533,49 +1554,13 @@ class Resolver {
     dismiss: ViewIntent,
     dismissId: string,
   ): Overlay {
-    const selection = labelled(control.args, 'selection')
-    const binding = asProjection(selection)
-    const seconds = asDate(binding?.get() ?? { kind: 'nil' })?.epochSeconds ?? Date.now() / 1000
-    const chosen = new Date(seconds * 1000)
-    const range = labelled(control.args, 'in')
-    const lower = range?.kind === 'range' ? range.lower : -Infinity
-    const upper = range?.kind === 'range' ? range.upper : Infinity
+    const picked = dateSelection(control)
+    const { binding, seconds, lower, upper } = picked
     const valid = (date: Date) => date.getTime() / 1000 >= lower && date.getTime() / 1000 <= upper
-    const components = labelled(control.args, 'displayedComponents')
-    const names = components ? (components.kind === 'array' ? components.elements : [components]).map(tokenName) : ['date', 'hourAndMinute']
-    const dateVisible = names.includes('date'), timeVisible = names.includes('hourAndMinute')
+    const timeVisible = datePickerParts(control) !== 'date'
     const views: ViewValue[] = []
-
-    if (dateVisible) {
-      // Calendar and time editor use the same local timezone as the collapsed label.
-      const shown = new Date(Math.max(lower, Math.min(upper, seconds)) * 1000)
-      shown.setDate(1)
-      shown.setMonth(shown.getMonth() + this.ctx.state.monthOffset(open))
-      const year = shown.getFullYear(), month = shown.getMonth()
-      const daysInMonth = new Date(year, month + 1, 0).getDate()
-      const leading = new Date(year, month, 1).getDay()
-      const cells: ViewValue[] = []
-      for (let i = 0; i < leading; i++) cells.push(this.editorCell(`${open}/pad-${i}`, '', false, null))
-      for (let day = 1; day <= daysInMonth; day++) {
-        const path = `${open}/day-${day}`, value = new Date(chosen)
-        value.setFullYear(year, month, day)
-        const selected = chosen.getFullYear() === year && chosen.getMonth() === month && chosen.getDate() === day
-        const bounded = new Date(Math.max(lower, Math.min(upper, value.getTime() / 1000)) * 1000)
-        const allowed = bounded.getFullYear() === year && bounded.getMonth() === month && bounded.getDate() === day
-        const write: ViewIntent | null = selection && allowed ? { kind: 'choose', binding: selection, value: dateValue(bounded.getTime() / 1000) } : null
-        if (write) this.register(path, write)
-        cells.push(this.editorCell(path, String(day), selected, write))
-      }
-      const step = (delta: number, label: string): ViewValue => {
-        const path = `${open}/month-${delta}`
-        const start = new Date(year, month + delta, 1).getTime() / 1000
-        const end = new Date(year, month + delta + 1, 1).getTime() / 1000
-        const intent: ViewIntent | null = end > lower && start <= upper ? { kind: 'stepMonth', control: open, by: delta } : null
-        if (intent) this.register(path, intent)
-        return this.editorCell(path, label, false, intent)
-      }
-      views.push({ name: DATE_EDITOR, args: [{ label: 'title', value: str(MONTHS[month]! + ' ' + year) }], children: [step(-1, '‹'), step(1, '›'), ...cells], modifiers: [], action: null, span: control.span, path: `${open}/editor` })
-    }
+    const calendar = this.calendar(control, open, picked)
+    if (calendar) views.push(calendar)
     if (timeVisible) {
       const path = `${open}/time`
       const timeText = () => {
@@ -1597,6 +1582,44 @@ class Resolver {
       views.push({ name: 'TextField', args: [{ label: null, value: str('Time') }, { label: 'text', value: timeBinding }, { label: '_inputType', value: str('time') }], children: [], modifiers: [], action: null, span: control.span, path, intent })
     }
     return { kind: 'menu', views, detent: 0, title: stringArg(control.args.find(a => a.label === null)?.value) ?? '', message: '', dismiss, dismissId }
+  }
+
+  /**
+   * The month a `DatePicker`'s value falls in, as a grid of days that each choose that day,
+   * with arrows that page the month: its popup's calendar and a graphical one's (Wave 6d).
+   * Null when it shows no date. Calendar and time editor use the same local timezone as
+   * the collapsed label.
+   */
+  private calendar(control: ViewValue, open: string, { selection, seconds, lower, upper }: ReturnType<typeof dateSelection>): ViewValue | null {
+    if (datePickerParts(control) === 'time') return null
+    const chosen = new Date(seconds * 1000)
+    const shown = new Date(Math.max(lower, Math.min(upper, seconds)) * 1000)
+    shown.setDate(1)
+    shown.setMonth(shown.getMonth() + this.ctx.state.monthOffset(open))
+    const year = shown.getFullYear(), month = shown.getMonth()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const leading = new Date(year, month, 1).getDay()
+    const cells: ViewValue[] = []
+    for (let i = 0; i < leading; i++) cells.push(this.editorCell(`${open}/pad-${i}`, '', false, null))
+    for (let day = 1; day <= daysInMonth; day++) {
+      const path = `${open}/day-${day}`, value = new Date(chosen)
+      value.setFullYear(year, month, day)
+      const selected = chosen.getFullYear() === year && chosen.getMonth() === month && chosen.getDate() === day
+      const bounded = new Date(Math.max(lower, Math.min(upper, value.getTime() / 1000)) * 1000)
+      const allowed = bounded.getFullYear() === year && bounded.getMonth() === month && bounded.getDate() === day
+      const write: ViewIntent | null = selection && allowed ? { kind: 'choose', binding: selection, value: dateValue(bounded.getTime() / 1000) } : null
+      if (write) this.register(path, write)
+      cells.push(this.editorCell(path, String(day), selected, write))
+    }
+    const step = (delta: number, label: string): ViewValue => {
+      const path = `${open}/month-${delta}`
+      const start = new Date(year, month + delta, 1).getTime() / 1000
+      const end = new Date(year, month + delta + 1, 1).getTime() / 1000
+      const intent: ViewIntent | null = end > lower && start <= upper ? { kind: 'stepMonth', control: open, by: delta } : null
+      if (intent) this.register(path, intent)
+      return this.editorCell(path, label, false, intent)
+    }
+    return { name: DATE_EDITOR, args: [{ label: 'title', value: str(MONTHS[month]! + ' ' + year) }], children: [step(-1, '‹'), step(1, '›'), ...cells], modifiers: [], action: null, span: control.span, path: `${open}/editor` }
   }
 
   /**

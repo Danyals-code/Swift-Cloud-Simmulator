@@ -19,7 +19,8 @@ export const visualCases: VisualCase[] = [
   test('toggle-button', 'Toggle("Favorite", isOn: $flag).toggleStyle(.button)', 'Favorite'),
   test('slider', 'Slider(value: $amount, in: 0...1)'),
   test('stepper', 'Stepper("Quantity", value: $count, in: 0...10)', 'Quantity'),
-  ...['compact', 'graphical', 'wheel'].map(style => test(`date-${style}`, `DatePicker("When", selection: $date).datePickerStyle(.${style})`, 'When', 'datePickerStyle')),
+  // iOS 27 draws no title beside a graphical calendar (Wave 6d).
+  ...['compact', 'graphical', 'wheel'].map(style => test(`date-${style}`, `DatePicker("When", selection: $date).datePickerStyle(.${style})`, style === 'graphical' ? undefined : 'When')),
   test('MultiDatePicker', 'MultiDatePicker("Dates", selection: .constant([]))', undefined, 'MultiDatePicker'),
   test('ColorPicker', 'ColorPicker("Tint", selection: $color)', 'Tint'),
   test('PhotosPicker', 'PhotosPicker(selection: Binding<PhotosPickerItem?>.constant(nil), matching: .images) { Text("Photos") }', undefined, 'PhotosPicker', 'import PhotosUI'),

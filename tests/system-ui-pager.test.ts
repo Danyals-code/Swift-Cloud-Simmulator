@@ -393,13 +393,13 @@ describe('a carousel on the Design canvas', () => {
 })
 
 describe('a ScrollView that pages', () => {
-  const scroll = (behavior: string) => run(`        ScrollView(.horizontal) {
+  const scroll = (behavior: string, marker = '') => run(`        ScrollView(.horizontal) {
             HStack(spacing: 0) {
                 ForEach(0..<3) { index in
                     Color.red
                         .containerRelativeFrame(.horizontal)
                 }
-            }
+            }${marker}
         }
         ${behavior}
         .frame(height: 200)`)
@@ -414,11 +414,19 @@ describe('a ScrollView that pages', () => {
     expect(scroller(r).scroll!.content.width).toBe(3 * 402)
   })
 
-  it('scrolls freely otherwise, and says so of a behaviour it doesn\'t draw', () => {
-    expect(scroller(scroll('')).scroll!.paging).toBeUndefined()
-    const aligned = scroll('.scrollTargetBehavior(.viewAligned)')
-    expect(scroller(aligned).scroll!.paging).toBeUndefined()
-    expect(warnings(aligned)).toEqual([expect.stringContaining('.scrollTargetBehavior(.viewAligned)')])
+  it('scrolls freely otherwise, and under .viewAligned unless its stack is marked .scrollTargetLayout(), as iOS 27 does (Wave 6d)', () => {
+    expect(scroller(scroll('')).scroll).not.toHaveProperty('paging')
+    expect(scroller(scroll('')).scroll).not.toHaveProperty('snaps')
+    const unmarked = scroll('.scrollTargetBehavior(.viewAligned)')
+    expect(scroller(unmarked).scroll).not.toHaveProperty('paging')
+    expect(scroller(unmarked).scroll).not.toHaveProperty('snaps')
+    expect(warnings(unmarked)).toEqual([])
+    // Marked, it rests at the start of each page-wide view, without a word.
+    const marked = scroll('.scrollTargetBehavior(.viewAligned)', '\n            .scrollTargetLayout()')
+    const page = native.scrollPaging.plain.swiped.x[1] - native.scrollPaging.plain.swiped.x[0]
+    expect(scroller(marked).scroll!.snaps).toEqual([0, page, 2 * page])
+    expect(scroller(marked).scroll).not.toHaveProperty('paging')
+    expect(warnings(marked)).toEqual([])
   })
 })
 

@@ -1,6 +1,9 @@
 import type { SourceSpan } from './source'
 import { symbolMetrics } from './symbol-map'
 import type { SymbolPaint } from './symbol-table'
+import type { MeshFill } from './mesh'
+
+export type { MeshFill } from './mesh'
 
 /**
  * The worker -> main-thread contract.
@@ -54,6 +57,7 @@ export interface InnerShadow {
 }
 
 export type Fill = (
+  | MeshFill
   | { readonly kind: 'radialGradient'; readonly stops: readonly GradientStop[]; readonly center: Point; readonly startRadius: number; readonly endRadius: number }
   | { readonly kind: 'angularGradient'; readonly stops: readonly GradientStop[]; readonly center: Point; readonly startAngle: number; readonly endAngle: number }
   | { readonly kind: 'solid'; readonly color: RGBA }
@@ -65,6 +69,11 @@ export type Fill = (
       readonly end: Point
     }
 ) & { readonly innerShadow?: InnerShadow }
+
+/** A gradient fill's stops, or null for a solid colour or a mesh, which have none (Wave 6d). */
+export function stopsOf(fill: Fill): readonly GradientStop[] | null {
+  return fill.kind === 'solid' || fill.kind === 'mesh' ? null : fill.stops
+}
 
 export interface ResolvedFont {
   readonly family: string
@@ -478,6 +487,8 @@ export interface ScrollPayload {
   readonly showsIndicators: boolean
   /** `.scrollTargetBehavior(.paging)` (iOS 17): the browser snaps the scroll by the scroller's own size (Wave 4c). */
   readonly paging?: boolean
+  /** `.scrollTargetBehavior(.viewAligned)` (iOS 17): the offsets a scroll comes to rest at, each view's start less the leading margin (Wave 6d). */
+  readonly snaps?: readonly number[]
 }
 
 export interface A11y {
@@ -641,6 +652,8 @@ export function cssColor(c: RGBA): string {
 
 export function cssFill(f: Fill, size?: Size): string {
   if (f.kind === 'solid') return cssColor(f.color)
+  // A mesh is painted on a canvas over its view; where CSS is all there is, its middle colour.
+  if (f.kind === 'mesh') return cssColor(f.colors[f.colors.length >> 1]!)
   const stops = f.stops.map((s) => `${cssColor(s.color)} ${(s.location * 100).toFixed(2)}%`).join(', ')
   if (f.kind === 'radialGradient') return `radial-gradient(circle ${f.endRadius}px at ${f.center.x * 100}% ${f.center.y * 100}%, ${f.stops.map(s => `${cssColor(s.color)} ${f.startRadius + s.location * (f.endRadius - f.startRadius)}px`).join(', ')})`
   if (f.kind === 'angularGradient') return `conic-gradient(from ${f.startAngle + 90}deg at ${f.center.x * 100}% ${f.center.y * 100}%, ${f.stops.map(s => `${cssColor(s.color)} ${s.location * (f.endAngle - f.startAngle)}deg`).join(', ')})`

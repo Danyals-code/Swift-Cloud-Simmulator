@@ -1,0 +1,1974 @@
+{
+ "source": "Built from tests/fixtures/ios27-controls-6d.swift with swiftc -parse-as-library -warnings-as-errors for arm64-apple-ios27.0-simulator (Xcode 27.0, 27A266a, SDK 27.0) and run on a scratch iPhone 18 Pro simulator (iOS 27.0, 24A434), Large text, status bar overridden to 9:41; one launch per screen with -screen <name>, on 2026-10-17, light, and dark for the files ending -dark. Frames are printed by the fixture (MEASURE lines, onGeometryChange in the global space, points) and read with simctl launch --console-pty. Fills, radii, ink and colours were read from the 3x screenshots. 1206x2622 pixels / 402x874 points at 3x. The date is 15 June 2026, 9:41.",
+ "fixtureSha256": "f5e45e226298794f89f37e09553ccdc0ac9be792719e0f11c43f2ca32806722f",
+ "captures": [
+  {
+   "file": "compact-form.png",
+   "sha256": "1785d00eb89d90dfb4519ce5c280e65336e21ab686d5c4cc11ef8cb49cc971f7",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "compact-plain.png",
+   "sha256": "1b996f250866e28135cbc87437080b916d4cd293b01bf9ddb3019e8f7c6fc5f5",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "compact-text.png",
+   "sha256": "41f1474cddc9d3b1139fa4134e141ec241f23777704daf90e24c994dab12ac22",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "graphical.png",
+   "sha256": "8e9423771959de553f0bf72d03698683a222f88ca01fddcedf3c4d5732bc3893",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "graphical-both.png",
+   "sha256": "554b80be3ddf8a9710772472b92f981e3c100b40221bff9b90fbfa86a66cb7d2",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "graphical-six.png",
+   "sha256": "a3202d3edecb64a6c2c5df962d51a82ed4f9ad7d5d18054288e0414c06f7101a",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "wheel.png",
+   "sha256": "f776e6228bd55d3492fd06c15d7cb6bb0b377466eb0daf0ec5346d3569c8d915",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "wheel-form.png",
+   "sha256": "7d2e9d9037d1ce8d1110f84930ad9cb81bf2f76a9caa9fa7a34b32a3396fcb42",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "color.png",
+   "sha256": "d878dd73beb12d6c5aee8cb7a54226910254e8a72c0e2f4e2852bf5d43e1ab77",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "margins.png",
+   "sha256": "acff5cfada02982a36108d4451ec7a7d5381bb9345133b2b87c1ff73b43ada12",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "margins-placement.png",
+   "sha256": "c45c7da21508483ac8b0ca96f4a403b64e9e44afc9d1c775b089f026ff536779",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "margins-vertical.png",
+   "sha256": "8a34174e19090b07923c8db7a7654ee39d9100cafd93ad15fcaf49d98ab2dfd1",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "margins-mixed.png",
+   "sha256": "8f3c9ecd7385391d53cc90eeb19a649b58a66ac0aecb22376da7981b15ed5997",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "margins-list.png",
+   "sha256": "41be7d7d388d12b477cc7485116c8ee3d74e5275c70354eee1bbe9d3d4aaf81a",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "list-plain.png",
+   "sha256": "e206ddc70f3fd21cac51a298326558e542197dacaab79427b88b54e3bce7b190",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "list-mixed.png",
+   "sha256": "707d2c73c05cac75ca23cf19894526af5051e725000384b16709018fc449d39f",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "list-header.png",
+   "sha256": "d811c305cd337331a0046444099cd16b363d29fdb970640d083a7e5660d90ade",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "list-header-top.png",
+   "sha256": "dab006985ed5b7bbbe62c2db636df71de5e6973f720538cb7637d9b01bfce476",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "safe-area.png",
+   "sha256": "91e40f3c3a4d73c2806d7c26ee0fc61ad3d0996b3a28a8e8322a135ad6bd77ce",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "mesh.png",
+   "sha256": "fb153394c901c339d2f34bcca7a1b828db0638e721235e6c7b63d79c9f45d71a",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "compact-plain-dark.png",
+   "sha256": "0dd8e07ca2cbc369a3f6cda8a66e3c09e76e1a2a32bfc2ea33499da6c37b4e16",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "wheel-dark.png",
+   "sha256": "8da7866e9f9404772f4e561ee456038d03f7dcaadeb55435c38aaed14d6871d2",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "graphical-dark.png",
+   "sha256": "c1855d3e706ab4262ee8fd23c559a8e84c77f613c203af6b2306d2f636d09d97",
+   "size": [
+    1206,
+    2622
+   ]
+  },
+  {
+   "file": "color-dark.png",
+   "sha256": "6aa1f3872976dca9d7dae285a9859b52ddd22ffe8cb6d8136663f6d657b7a56b",
+   "size": [
+    1206,
+    2622
+   ]
+  }
+ ],
+ "frames": {
+  "compact-form": {
+   "form-both": [
+    32,
+    242.67,
+    338,
+    36
+   ],
+   "form-compact": [
+    32,
+    308.67,
+    338,
+    36
+   ],
+   "form-date": [
+    32,
+    112.17,
+    338,
+    34.33
+   ],
+   "form-time": [
+    32,
+    176.67,
+    338,
+    36
+   ]
+  },
+  "compact-plain": {
+   "plain-both": [
+    16,
+    458.17,
+    370,
+    36
+   ],
+   "plain-closure": [
+    16,
+    510.17,
+    370,
+    36
+   ],
+   "plain-date": [
+    16,
+    355.83,
+    370,
+    34.33
+   ],
+   "plain-time": [
+    16,
+    406.17,
+    370,
+    36
+   ]
+  },
+  "compact-text": {
+   "text-date": [
+    151.83,
+    404.5,
+    98.33,
+    20.33
+   ],
+   "text-time": [
+    169.67,
+    440.83,
+    62.67,
+    20.33
+   ],
+   "text-time-mono": [
+    168.33,
+    477.17,
+    65.33,
+    20.33
+   ]
+  },
+  "graphical": {
+   "graphical": [
+    16,
+    274,
+    370,
+    354
+   ]
+  },
+  "graphical-both": {
+   "graphical": [
+    16,
+    242.67,
+    370,
+    416.67
+   ]
+  },
+  "graphical-six": {
+   "graphical": [
+    16,
+    274,
+    370,
+    354
+   ]
+  },
+  "wheel": {
+   "wheel-both": [
+    16,
+    119,
+    370,
+    216
+   ],
+   "wheel-date": [
+    16,
+    343,
+    370,
+    216
+   ],
+   "wheel-time": [
+    16,
+    567,
+    370,
+    216
+   ]
+  },
+  "wheel-form": {
+   "wheel-form-date": [
+    32,
+    112.17,
+    320,
+    240.33
+   ],
+   "wheel-form-time": [
+    32,
+    382.83,
+    320,
+    240.33
+   ]
+  },
+  "color": {
+   "form-color": [
+    32,
+    112,
+    338,
+    28
+   ],
+   "form-faded": [
+    32,
+    170,
+    338,
+    28
+   ],
+   "plain-color": [
+    16,
+    298,
+    370,
+    28
+   ],
+   "plain-opaque": [
+    16,
+    342,
+    370,
+    28
+   ]
+  },
+  "margins": {
+   "aligned-0": [
+    0,
+    286,
+    300,
+    120
+   ],
+   "aligned-1": [
+    312,
+    286,
+    300,
+    120
+   ],
+   "aligned-2": [
+    624,
+    286,
+    300,
+    120
+   ],
+   "aligned-3": [
+    936,
+    286,
+    300,
+    120
+   ],
+   "aligned-4": [
+    1248,
+    286,
+    300,
+    120
+   ],
+   "aligned-scroll": [
+    0,
+    286,
+    402,
+    120
+   ],
+   "content-0": [
+    24,
+    142,
+    300,
+    120
+   ],
+   "content-1": [
+    336,
+    142,
+    300,
+    120
+   ],
+   "content-2": [
+    648,
+    142,
+    300,
+    120
+   ],
+   "content-3": [
+    960,
+    142,
+    300,
+    120
+   ],
+   "content-4": [
+    1272,
+    142,
+    300,
+    120
+   ],
+   "content-scroll": [
+    0,
+    142,
+    402,
+    120
+   ]
+  },
+  "margins-placement": {
+   "all-0": [
+    10,
+    440,
+    300,
+    120
+   ],
+   "all-1": [
+    322,
+    440,
+    300,
+    120
+   ],
+   "all-2": [
+    634,
+    440,
+    300,
+    120
+   ],
+   "all-3": [
+    946,
+    440,
+    300,
+    120
+   ],
+   "all-4": [
+    1258,
+    440,
+    300,
+    120
+   ],
+   "all-scroll": [
+    0,
+    430,
+    402,
+    140
+   ],
+   "automatic-0": [
+    24,
+    286,
+    300,
+    120
+   ],
+   "automatic-1": [
+    336,
+    286,
+    300,
+    120
+   ],
+   "automatic-2": [
+    648,
+    286,
+    300,
+    120
+   ],
+   "automatic-3": [
+    960,
+    286,
+    300,
+    120
+   ],
+   "automatic-4": [
+    1272,
+    286,
+    300,
+    120
+   ],
+   "indicators-0": [
+    0,
+    142,
+    300,
+    120
+   ],
+   "indicators-1": [
+    312,
+    142,
+    300,
+    120
+   ],
+   "indicators-2": [
+    624,
+    142,
+    300,
+    120
+   ],
+   "indicators-3": [
+    936,
+    142,
+    300,
+    120
+   ],
+   "indicators-4": [
+    1248,
+    142,
+    300,
+    120
+   ]
+  },
+  "margins-vertical": {
+   "vertical-0": [
+    0,
+    102,
+    402,
+    80
+   ],
+   "vertical-1": [
+    0,
+    194,
+    402,
+    80
+   ],
+   "vertical-2": [
+    0,
+    286,
+    402,
+    80
+   ],
+   "vertical-scroll": [
+    0,
+    62,
+    402,
+    778
+   ]
+  },
+  "margins-mixed": {
+   "vertical-0": [
+    30,
+    62,
+    342,
+    80
+   ],
+   "vertical-1": [
+    30,
+    154,
+    342,
+    80
+   ],
+   "vertical-2": [
+    30,
+    246,
+    342,
+    80
+   ],
+   "vertical-scroll": [
+    0,
+    62,
+    402,
+    778
+   ]
+  },
+  "margins-list": {
+   "list-0": [
+    32,
+    117.83,
+    47.33,
+    20.33
+   ],
+   "list-1": [
+    32,
+    169.83,
+    44.33,
+    20.33
+   ],
+   "list-2": [
+    32,
+    221.83,
+    46.67,
+    20.33
+   ],
+   "list-scroll": [
+    0,
+    62,
+    402,
+    778
+   ]
+  },
+  "list-plain": {
+   "list-0": [
+    32,
+    112.83,
+    47.33,
+    20.33
+   ],
+   "list-1": [
+    32,
+    164.83,
+    44.33,
+    20.33
+   ],
+   "list-2": [
+    32,
+    216.83,
+    46.67,
+    20.33
+   ],
+   "list-scroll": [
+    0,
+    62,
+    402,
+    778
+   ]
+  },
+  "list-mixed": {
+   "list-0": [
+    56,
+    112.83,
+    47.33,
+    20.33
+   ],
+   "list-1": [
+    56,
+    164.83,
+    44.33,
+    20.33
+   ],
+   "list-2": [
+    56,
+    216.83,
+    46.67,
+    20.33
+   ],
+   "list-scroll": [
+    0,
+    62,
+    402,
+    778
+   ]
+  },
+  "list-header": {
+   "list-0": [
+    32,
+    118.17,
+    47.33,
+    20.33
+   ],
+   "list-1": [
+    32,
+    170.17,
+    44.33,
+    20.33
+   ],
+   "list-2": [
+    32,
+    222.17,
+    46.67,
+    20.33
+   ],
+   "list-scroll": [
+    0,
+    62,
+    402,
+    778
+   ]
+  },
+  "list-header-top": {
+   "list-0": [
+    32,
+    158.17,
+    47.33,
+    20.33
+   ],
+   "list-1": [
+    32,
+    210.17,
+    44.33,
+    20.33
+   ],
+   "list-2": [
+    32,
+    262.17,
+    46.67,
+    20.33
+   ],
+   "list-scroll": [
+    0,
+    62,
+    402,
+    778
+   ]
+  },
+  "safe-area": {
+   "safe-0": [
+    24,
+    142,
+    300,
+    120
+   ],
+   "safe-1": [
+    336,
+    142,
+    300,
+    120
+   ],
+   "safe-2": [
+    648,
+    142,
+    300,
+    120
+   ],
+   "safe-3": [
+    960,
+    142,
+    300,
+    120
+   ],
+   "safe-4": [
+    1272,
+    142,
+    300,
+    120
+   ],
+   "safe-outer": [
+    162.33,
+    286,
+    77.33,
+    60.33
+   ],
+   "safe-scroll": [
+    0,
+    142,
+    402,
+    120
+   ],
+   "safe-text": [
+    182.33,
+    306,
+    37.33,
+    20.33
+   ]
+  },
+  "mesh": {
+   "mesh-linear": [
+    16,
+    461,
+    370,
+    300
+   ],
+   "mesh-smooth": [
+    16,
+    141,
+    370,
+    300
+   ]
+  }
+ },
+ "compact": {
+  "pillFill": {
+   "light": [
+    239,
+    239,
+    240
+   ],
+   "dark": [
+    28,
+    28,
+    31
+   ],
+   "token": "tertiarySystemFill"
+  },
+  "pillShape": "capsule: radius half the height (the time pill is 12.67 in at 1 pt down, 10 at 2, 6.67 at 4, 3 at 8)",
+  "pillPaddingX": 12,
+  "datePill": {
+   "text": "Jun 15, 2026",
+   "textWidth": 98.33,
+   "width": 122.33,
+   "height": 34.33
+  },
+  "timePill": {
+   "text": "9:41 AM",
+   "textWidth": 62.67,
+   "width": 87,
+   "height": 36
+  },
+  "pillGap": 4,
+  "textColour": "label",
+  "trailingInForm": 370,
+  "trailingOutside": 386
+ },
+ "graphical": {
+  "size": [
+   370,
+   354
+  ],
+  "withTime": [
+   370,
+   416.67
+  ],
+  "titleShown": false,
+  "headerCentreY": 35,
+  "monthTitle": {
+   "text": "June 2026",
+   "inkX": 20.67,
+   "weight": "semibold",
+   "capHeight": 12.67,
+   "disclosure": "chevron.right in the accent, ink 7 x 12.33, 7.33 after the title"
+  },
+  "monthArrows": {
+   "back": {
+    "centreX": 309.83,
+    "ink": [
+     10.33,
+     17.67
+    ]
+   },
+   "forward": {
+    "centreX": 355.5,
+    "ink": [
+     10.33,
+     17.67
+    ]
+   },
+   "colour": "accent"
+  },
+  "weekdays": {
+   "text": [
+    "SUN",
+    "MON",
+    "TUE",
+    "WED",
+    "THU",
+    "FRI",
+    "SAT"
+   ],
+   "centreY": 77.5,
+   "capHeight": 9.67,
+   "firstCentreX": 33.5,
+   "lastCentreX": 344.33,
+   "colour": "secondaryLabel"
+  },
+  "days": {
+   "rowsTop": 86.4,
+   "firstRowCentreY": 112.2,
+   "pitch": 51.6,
+   "rowsArea": 258.33,
+   "sixWeekPitch": 43.07,
+   "capHeight": 14.67,
+   "firstColumnCentreX": 33.5,
+   "columnPitch": 51.8
+  },
+  "selected": {
+   "diameter": 43.67,
+   "light": "black circle, white number",
+   "dark": "white circle, black number",
+   "weight": "semibold"
+  },
+  "timeRow": {
+   "label": "Time, semibold",
+   "pillTop": 350,
+   "pillHeight": 36,
+   "pillTrailingInset": 16,
+   "labelInkX": 16.67
+  }
+ },
+ "wheel": {
+  "height": 216,
+  "width": 320,
+  "outsideForm": "the title leading, the wheel 320 wide at the trailing edge",
+  "inForm": "the title above and the wheel under it at the leading edge, 240.33 tall, 320 wide",
+  "band": {
+   "inset": 9,
+   "width": 302,
+   "height": 34,
+   "centreY": 108,
+   "light": [
+    244,
+    244,
+    245
+   ],
+   "dark": [
+    21,
+    21,
+    23
+   ],
+   "fill": "rgba(118, 118, 128, 0.08) light, 0.18 dark",
+   "shape": "capsule"
+  },
+  "rowOffsets": [
+   0,
+   31.33,
+   58.33,
+   77.33
+  ],
+  "rowInkHeights": {
+   "selected": 16.67,
+   "first": 14.17,
+   "second": 11,
+   "third": 2
+  },
+  "font": "about 23.5 pt regular; every row the same width, squashed in height as on a cylinder (cos 21.4, 42.8 and 64.2 degrees)",
+  "rowColour": {
+   "selected": "label",
+   "others": "grey, darkest ink 165 at one and two rows away, 206 at three"
+  },
+  "columns": {
+   "both": {
+    "text": [
+     "Mon Jun 15",
+     "9",
+     "41",
+     "AM"
+    ],
+    "trailingEdges": {
+     "date": 133,
+     "hour": 178
+    },
+    "leadingEdges": {
+     "minute": 214,
+     "period": 265
+    }
+   },
+   "date": {
+    "text": [
+     "June",
+     "15",
+     "2026"
+    ],
+    "monthLeading": 28,
+    "dayCentre": 181,
+    "yearCentre": 257
+   },
+   "time": {
+    "text": [
+     "9",
+     "41",
+     "AM"
+    ],
+    "hourTrailing": 98,
+    "minuteLeading": 141,
+    "periodLeading": 200.5
+   }
+  }
+ },
+ "colorPicker": {
+  "height": 28,
+  "swatch": {
+   "diameter": 28,
+   "ring": 3,
+   "gap": 2,
+   "inner": 18,
+   "trailingInForm": 370,
+   "trailingOutside": 386
+  },
+  "ring": {
+   "from": "top, clockwise",
+   "stops": [
+    [
+     227,
+     226,
+     76
+    ],
+    [
+     232,
+     186,
+     75
+    ],
+    [
+     232,
+     138,
+     74
+    ],
+    [
+     232,
+     71,
+     70
+    ],
+    [
+     201,
+     72,
+     165
+    ],
+    [
+     163,
+     71,
+     217
+    ],
+    [
+     109,
+     72,
+     231
+    ],
+    [
+     86,
+     159,
+     231
+    ],
+    [
+     75,
+     208,
+     203
+    ],
+    [
+     77,
+     231,
+     142
+    ],
+    [
+     122,
+     233,
+     95
+    ],
+    [
+     170,
+     229,
+     78
+    ]
+   ]
+  },
+  "translucent": "Color.blue.opacity(0.5) is drawn as it is, (128, 128, 255) over white, with no checkerboard"
+ },
+ "scroll": {
+  "contentMargins": [
+   ".contentMargins(.horizontal, 24, for: .scrollContent) on a horizontal ScrollView puts the first card at x 24; the scroll view stays 402 x 120.",
+   ".contentMargins(.horizontal, 24) (automatic) does the same; for: .scrollIndicators leaves the first card at 0.",
+   ".contentMargins(10) on a horizontal ScrollView of 120 pt cards makes it 140 tall, the cards at 10, 10.",
+   ".contentMargins(.vertical, 40) on a vertical ScrollView puts the first card 40 below the safe area (y 102); the cards stay full width.",
+   "A margin for .scrollContent written around an automatic one replaces it: .contentMargins(.vertical, 40).contentMargins(.horizontal, 30, for: .scrollContent) insets 30 at the sides and nothing at the top.",
+   "On an inset grouped List, .contentMargins(.top, 40) is a floor on the gap above an unheaded first section (35 becomes 40, rows 5 lower) and adds 40 above a section header (rows 40 lower).",
+   "On a List, .contentMargins(.horizontal, 40, for: .scrollContent) replaces the 16 pt card inset (rows at x 56)."
+  ],
+  "safeAreaPadding": [
+   ".safeAreaPadding(.horizontal, 24) on a horizontal ScrollView insets its content as a content margin does: the first card at 24, the scroll view 402 x 120.",
+   "On any other view it pads: Text(\"Inset\") 37.33 x 20.33 with .safeAreaPadding(20) is 77.33 x 60.33."
+  ],
+  "viewAligned": "Released at rest, a view-aligned ScrollView of 300 pt cards 12 apart settles on the nearest card start (offsets 0, 312, 624): 150 settles at 0, 200 at 312, 400 at 312, 700 at 624. With a 24 pt content margin the offsets are the same, so a card comes to rest 24 from the edge. Read by calling the scroll view's delegate scrollViewWillEndDragging with no velocity, on the aligned-probe screen.",
+  "viewAlignedMarker": "Only the views of a stack marked .scrollTargetLayout() are targets. On the aligned-variants screen, a view-aligned ScrollView whose HStack has no marker keeps every proposed offset (it scrolls freely); a marked LazyHStack, and a marked HStack inside a VStack, settle as the aligned carousel does.",
+  "viewAlignedSettles": {
+   "proposed": [
+    30,
+    100,
+    150,
+    200,
+    400,
+    700
+   ],
+   "marked": [
+    0,
+    0,
+    0,
+    312,
+    312,
+    624
+   ],
+   "markedWithMargin24": [
+    0,
+    0,
+    0,
+    312,
+    312,
+    624
+   ],
+   "unmarked": [
+    30,
+    100,
+    150,
+    200,
+    400,
+    700
+   ],
+   "lazyMarked": [
+    0,
+    0,
+    0,
+    312,
+    312,
+    624
+   ],
+   "nestedMarked": [
+    0,
+    0,
+    0,
+    312,
+    312,
+    624
+   ]
+  }
+ },
+ "mesh": {
+  "frames": {
+   "smooth": [
+    16,
+    141,
+    370,
+    300
+   ],
+   "linear": [
+    16,
+    461,
+    370,
+    300
+   ]
+  },
+  "model": "A 3 x 3 mesh with its middle point at (0.8, 0.3). Positions are bilinear within each patch. With smoothsColors (the default) colours follow a cubic Hermite across the grid with zero tangents at the edges and centred differences inside (the top row red, purple, blue reads 241, 208, 166, 128 red at a quarter steps, as that curve gives), within about 12 per channel on average; without it they are bilinear in each patch, within about 7.",
+  "samples": {
+   "smooth": [
+    [
+     [
+      255,
+      0,
+      1
+     ],
+     [
+      241,
+      0,
+      15
+     ],
+     [
+      208,
+      0,
+      48
+     ],
+     [
+      166,
+      0,
+      90
+     ],
+     [
+      128,
+      0,
+      128
+     ],
+     [
+      91,
+      0,
+      165
+     ],
+     [
+      48,
+      0,
+      207
+     ],
+     [
+      13,
+      0,
+      241
+     ],
+     [
+      0,
+      1,
+      255
+     ]
+    ],
+    [
+     [
+      255,
+      14,
+      0
+     ],
+     [
+      246,
+      22,
+      13
+     ],
+     [
+      230,
+      41,
+      49
+     ],
+     [
+      216,
+      71,
+      97
+     ],
+     [
+      206,
+      104,
+      147
+     ],
+     [
+      193,
+      119,
+      181
+     ],
+     [
+      123,
+      74,
+      201
+     ],
+     [
+      30,
+      28,
+      236
+     ],
+     [
+      0,
+      14,
+      255
+     ]
+    ],
+    [
+     [
+      254,
+      48,
+      0
+     ],
+     [
+      253,
+      67,
+      16
+     ],
+     [
+      249,
+      104,
+      58
+     ],
+     [
+      249,
+      150,
+      112
+     ],
+     [
+      251,
+      197,
+      170
+     ],
+     [
+      253,
+      231,
+      222
+     ],
+     [
+      251,
+      244,
+      248
+     ],
+     [
+      103,
+      131,
+      244
+     ],
+     [
+      0,
+      48,
+      254
+     ]
+    ],
+    [
+     [
+      254,
+      90,
+      0
+     ],
+     [
+      255,
+      114,
+      18
+     ],
+     [
+      255,
+      151,
+      60
+     ],
+     [
+      255,
+      187,
+      115
+     ],
+     [
+      250,
+      217,
+      168
+     ],
+     [
+      244,
+      242,
+      211
+     ],
+     [
+      245,
+      253,
+      242
+     ],
+     [
+      194,
+      226,
+      253
+     ],
+     [
+      0,
+      90,
+      254
+     ]
+    ],
+    [
+     [
+      255,
+      128,
+      1
+     ],
+     [
+      255,
+      145,
+      18
+     ],
+     [
+      254,
+      173,
+      57
+     ],
+     [
+      241,
+      203,
+      103
+     ],
+     [
+      221,
+      229,
+      146
+     ],
+     [
+      206,
+      247,
+      180
+     ],
+     [
+      205,
+      255,
+      204
+     ],
+     [
+      156,
+      227,
+      232
+     ],
+     [
+      0,
+      129,
+      255
+     ]
+    ],
+    [
+     [
+      255,
+      166,
+      0
+     ],
+     [
+      253,
+      180,
+      16
+     ],
+     [
+      236,
+      202,
+      46
+     ],
+     [
+      204,
+      226,
+      80
+     ],
+     [
+      168,
+      244,
+      110
+     ],
+     [
+      144,
+      253,
+      132
+     ],
+     [
+      143,
+      254,
+      148
+     ],
+     [
+      88,
+      224,
+      210
+     ],
+     [
+      0,
+      166,
+      255
+     ]
+    ],
+    [
+     [
+      255,
+      208,
+      0
+     ],
+     [
+      242,
+      216,
+      9
+     ],
+     [
+      202,
+      230,
+      29
+     ],
+     [
+      149,
+      245,
+      49
+     ],
+     [
+      98,
+      254,
+      66
+     ],
+     [
+      75,
+      255,
+      75
+     ],
+     [
+      69,
+      252,
+      115
+     ],
+     [
+      33,
+      230,
+      201
+     ],
+     [
+      0,
+      207,
+      255
+     ]
+    ],
+    [
+     [
+      255,
+      241,
+      0
+     ],
+     [
+      226,
+      243,
+      1
+     ],
+     [
+      161,
+      250,
+      10
+     ],
+     [
+      85,
+      254,
+      18
+     ],
+     [
+      31,
+      255,
+      21
+     ],
+     [
+      24,
+      255,
+      36
+     ],
+     [
+      17,
+      252,
+      112
+     ],
+     [
+      5,
+      245,
+      204
+     ],
+     [
+      0,
+      241,
+      255
+     ]
+    ],
+    [
+     [
+      255,
+      255,
+      0
+     ],
+     [
+      215,
+      255,
+      0
+     ],
+     [
+      126,
+      255,
+      0
+     ],
+     [
+      40,
+      255,
+      0
+     ],
+     [
+      0,
+      255,
+      0
+     ],
+     [
+      0,
+      255,
+      40
+     ],
+     [
+      0,
+      255,
+      128
+     ],
+     [
+      0,
+      255,
+      215
+     ],
+     [
+      0,
+      255,
+      255
+     ]
+    ]
+   ],
+   "linear": [
+    [
+     [
+      255,
+      1,
+      1
+     ],
+     [
+      223,
+      1,
+      33
+     ],
+     [
+      192,
+      1,
+      64
+     ],
+     [
+      161,
+      1,
+      96
+     ],
+     [
+      129,
+      2,
+      129
+     ],
+     [
+      97,
+      1,
+      160
+     ],
+     [
+      65,
+      2,
+      192
+     ],
+     [
+      32,
+      1,
+      224
+     ],
+     [
+      0,
+      1,
+      255
+     ]
+    ],
+    [
+     [
+      255,
+      32,
+      0
+     ],
+     [
+      236,
+      45,
+      34
+     ],
+     [
+      222,
+      62,
+      69
+     ],
+     [
+      212,
+      83,
+      104
+     ],
+     [
+      204,
+      105,
+      140
+     ],
+     [
+      194,
+      119,
+      176
+     ],
+     [
+      124,
+      85,
+      201
+     ],
+     [
+      53,
+      51,
+      226
+     ],
+     [
+      0,
+      32,
+      255
+     ]
+    ],
+    [
+     [
+      254,
+      64,
+      0
+     ],
+     [
+      245,
+      84,
+      35
+     ],
+     [
+      240,
+      110,
+      73
+     ],
+     [
+      239,
+      142,
+      110
+     ],
+     [
+      242,
+      176,
+      150
+     ],
+     [
+      245,
+      205,
+      193
+     ],
+     [
+      242,
+      221,
+      230
+     ],
+     [
+      104,
+      127,
+      234
+     ],
+     [
+      0,
+      64,
+      254
+     ]
+    ],
+    [
+     [
+      254,
+      96,
+      1
+     ],
+     [
+      251,
+      122,
+      38
+     ],
+     [
+      252,
+      157,
+      77
+     ],
+     [
+      252,
+      189,
+      116
+     ],
+     [
+      241,
+      210,
+      144
+     ],
+     [
+      232,
+      231,
+      174
+     ],
+     [
+      227,
+      247,
+      211
+     ],
+     [
+      167,
+      217,
+      247
+     ],
+     [
+      1,
+      96,
+      254
+     ]
+    ],
+    [
+     [
+      255,
+      128,
+      1
+     ],
+     [
+      252,
+      155,
+      37
+     ],
+     [
+      243,
+      180,
+      68
+     ],
+     [
+      229,
+      202,
+      94
+     ],
+     [
+      211,
+      221,
+      120
+     ],
+     [
+      195,
+      237,
+      145
+     ],
+     [
+      186,
+      252,
+      176
+     ],
+     [
+      127,
+      219,
+      219
+     ],
+     [
+      0,
+      129,
+      255
+     ]
+    ],
+    [
+     [
+      255,
+      161,
+      0
+     ],
+     [
+      242,
+      181,
+      29
+     ],
+     [
+      224,
+      201,
+      53
+     ],
+     [
+      200,
+      220,
+      74
+     ],
+     [
+      174,
+      234,
+      96
+     ],
+     [
+      151,
+      245,
+      118
+     ],
+     [
+      128,
+      249,
+      150
+     ],
+     [
+      80,
+      217,
+      204
+     ],
+     [
+      0,
+      160,
+      255
+     ]
+    ],
+    [
+     [
+      255,
+      192,
+      1
+     ],
+     [
+      230,
+      207,
+      21
+     ],
+     [
+      198,
+      222,
+      39
+     ],
+     [
+      163,
+      235,
+      55
+     ],
+     [
+      127,
+      245,
+      70
+     ],
+     [
+      96,
+      254,
+      89
+     ],
+     [
+      70,
+      243,
+      140
+     ],
+     [
+      43,
+      222,
+      197
+     ],
+     [
+      0,
+      192,
+      255
+     ]
+    ],
+    [
+     [
+      254,
+      223,
+      0
+     ],
+     [
+      213,
+      232,
+      12
+     ],
+     [
+      166,
+      241,
+      22
+     ],
+     [
+      117,
+      247,
+      31
+     ],
+     [
+      69,
+      252,
+      39
+     ],
+     [
+      41,
+      252,
+      74
+     ],
+     [
+      30,
+      245,
+      135
+     ],
+     [
+      17,
+      235,
+      194
+     ],
+     [
+      0,
+      224,
+      254
+     ]
+    ],
+    [
+     [
+      254,
+      255,
+      0
+     ],
+     [
+      191,
+      255,
+      0
+     ],
+     [
+      127,
+      255,
+      0
+     ],
+     [
+      64,
+      255,
+      0
+     ],
+     [
+      0,
+      255,
+      0
+     ],
+     [
+      0,
+      255,
+      64
+     ],
+     [
+      0,
+      255,
+      128
+     ],
+     [
+      0,
+      255,
+      191
+     ],
+     [
+      0,
+      255,
+      255
+     ]
+    ]
+   ]
+  }
+ }
+}

@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import { cssColor, cssFill, shapePath, type Fill, type InnerShadow, type ShapePayload, type ShapeTrim, type PathPayload } from '@studio/shared'
+import { MeshCanvas } from './mesh'
 
 /** SVG preserves centered strokes, inset strokes, circles and true capsules. */
 export function ShapeView({ shape, width, height }: { shape: ShapePayload; width: number; height: number }) {
@@ -75,7 +76,7 @@ export function VectorPathView({ path, width, height, trim }: { path: PathPayloa
     {inner ? <defs>{innerShadowFilter(`${id}-inner`, inner)}</defs> : null}
     {fill && fill.kind !== 'solid' && fill.kind !== 'linearGradient' ? <g filter={inner ? `url(#${id}-inner)` : undefined}>
       <defs><clipPath id={`${id}-clip`}><path d={path.d} clipRule={path.fillRule ?? 'nonzero'} /></clipPath></defs>
-      <foreignObject width={width} height={height} clipPath={`url(#${id}-clip)`}><div style={{ width: '100%', height: '100%', background: cssFill(fill, {width, height}) }} /></foreignObject>
+      <foreignObject width={width} height={height} clipPath={`url(#${id}-clip)`}>{fill.kind === 'mesh' ? <MeshCanvas mesh={fill} /> : <div style={{ width: '100%', height: '100%', background: cssFill(fill, {width, height}) }} />}</foreignObject>
     </g> : null}
     {gradient ? <defs><linearGradient id={id} gradientUnits="userSpaceOnUse" x1={gradient.start.x * width} y1={gradient.start.y * height} x2={gradient.end.x * width} y2={gradient.end.y * height}>
       {gradient.stops.map((stop, i) => <stop key={i} offset={stop.location} stopColor={cssColor(stop.color)} />)}

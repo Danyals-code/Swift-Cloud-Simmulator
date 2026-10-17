@@ -5,6 +5,7 @@ import { SURFACES, listAppearance } from '../appearance/surfaces'
 import { asView, payloadOf, EDGE_INSETS_TYPE, TOKEN_TYPE, type TokenPayload, type ViewValue } from '../view-value'
 import { numberArg, resolveColorArg, resolveFillArg, stringArg, type ColorScheme } from '../style'
 import { inheritVisualStyle, visualModifiers } from '../inherited-style'
+import type { Margins } from '../to-layout'
 
 interface Context {
   readonly showsIndicators?: boolean
@@ -14,6 +15,9 @@ interface Context {
   readonly captionFont: ResolvedFont
   readonly headerFont: ResolvedFont
   readonly separatorHeight: number
+  /** `.contentMargins` for the list's content, each edge given or not, and its `.safeAreaPadding` (Wave 6d). */
+  readonly margins?: Margins
+  readonly padding?: EdgeInsets
   convert(view: ViewValue, path: string): LayoutElement
   swipe(view: ViewValue, content: LayoutElement, path: string): LayoutElement
   text(id: string, value: string, style: string, color: string, weight?: number): LayoutElement
@@ -31,7 +35,10 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
   const m = SURFACES.list
   const style = listAppearance(token(arg(view, 'listStyle')), view.name === 'Form', c.width)
   const grouped = style === 'grouped' || style === 'insetGrouped'
+  const margins = c.margins
   const inset = style === 'insetGrouped' ? Math.max(m.inset, (c.width - m.regularMaxWidth) / 2) : style === 'sidebar' || style === 'inset' ? m.inset : 0
+  // A side margin is the card's inset on that side, in place of the list's own (Wave 6d).
+  const leading = margins?.leading ?? inset, trailing = margins?.trailing ?? inset
   const spacing = numberArg(arg(view, 'listRowSpacing')) ?? 0
   const sectionGap = numberArg(arg(view, 'listSectionSpacing')) ?? (style === 'plain' ? m.plainSectionGap : m.sectionGap)
   const flatten = (children: readonly ViewValue[]): ViewValue[] => children.flatMap(child =>
@@ -82,10 +89,11 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
         ? column(`${id}${name}custom`, custom.map((v, i) => c.convert(inheritVisualStyle(v, visualModifiers(section.view!)), `${id}${name}${i}`)))
         : c.text(`${id}${name === 'header' ? 'hdr' : 'ftr'}`, title!, name === 'header' ? 'headline' : 'footnote', 'secondaryLabel', name === 'header' ? 600 : undefined)
       if (custom.length) content = { kind: 'modified', id: `${id}${name}font`, modifier: { kind: 'font', font: name === 'header' ? c.headerFont : c.captionFont }, child: { kind: 'modified', id: `${id}${name}color`, modifier: { kind: 'foregroundStyle', color: c.color('secondaryLabel') }, child: content } }
-      return pad(`${id}${name}`, frame(`${id}${name}frame`, content), insets(name === 'header' ? m.headerTop : m.footerTop, inset + m.rowX, name === 'header' ? m.headerBottom : 0, inset + m.rowX))
+      return pad(`${id}${name}`, frame(`${id}${name}frame`, content), insets(name === 'header' ? m.headerTop : m.footerTop, leading + m.rowX, name === 'header' ? m.headerBottom : 0, trailing + m.rowX))
     }
     const header = accessory('header'), footer = accessory('footer')
-    const gap = index === 0 ? (grouped && !header ? m.unheadedGap : 0)
+    // A top margin is the least gap above an unheaded first section, and space above a header (Wave 6d).
+    const gap = index === 0 ? (grouped && !header ? Math.max(0, m.unheadedGap - (margins?.top ?? 0)) : 0)
       : arg(view, 'listSectionSpacing') ? sectionGap
       : previousHadFooter ? (header ? m.afterFooterHeaderGap : m.afterFooterGap)
       : header ? sectionGap : m.unheadedGap
@@ -130,11 +138,13 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
     })
     let card = c.background(column(id, rows), `${id}bg`, c.color(grouped ? 'secondarySystemGroupedBackground' : style === 'sidebar' ? 'systemGroupedBackground' : 'systemBackground'), style === 'insetGrouped' ? m.corner : 0)
     if (style === 'insetGrouped') card = { kind: 'modified', id: `${id}clip`, modifier: { kind: 'clip', shape: 'roundedRectangle', cornerRadius: m.corner, style: 'continuous' }, child: card }
-    blocks.push(pad(`${id}inset`, card, insets(0, inset, 0, inset)))
+    blocks.push(pad(`${id}inset`, card, insets(0, leading, 0, trailing)))
     if (footer) blocks.push(footer)
     previousHadFooter = !!footer
   })
-  const content = pad(`${path}margins`, column(`${path}rows`, blocks), insets(style === 'sidebar' ? m.sidebarTop : 0, 0, m.bottom, 0))
+  const safe = c.padding
+  const content = pad(`${path}margins`, column(`${path}rows`, blocks), insets((style === 'sidebar' ? m.sidebarTop : 0) + (margins?.top ?? 0) + (safe?.top ?? 0),
+    safe?.leading ?? 0, (margins?.bottom ?? m.bottom) + (safe?.bottom ?? 0), safe?.trailing ?? 0))
   const scroll: LayoutElement = { kind: 'scroll', id: path, axis: 'vertical', showsIndicators: c.showsIndicators ?? token(arg(view, 'scrollIndicators')) !== 'hidden', content, ...origin }
   return token(arg(view, 'scrollContentBackground')) === 'hidden' ? scroll : c.background(scroll, `${path}bg`, c.color(grouped || style === 'sidebar' ? 'systemGroupedBackground' : 'systemBackground'))
 }

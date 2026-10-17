@@ -11,9 +11,9 @@ import { isPageStyle } from './page-style'
  */
 
 /** A modifier's own text, from its name to its end, rather than the chain it ends. */
-const ownSpan = (call: CallExpr): SourceSpan => ({ file: call.span.file, start: call.callee.kind === 'memberAccess' ? call.callee.memberSpan.start : call.span.start, end: call.span.end })
+export const ownSpan = (call: CallExpr): SourceSpan => ({ file: call.span.file, start: call.callee.kind === 'memberAccess' ? call.callee.memberSpan.start : call.span.start, end: call.span.end })
 /** Why a field is shown as the code writes it: a value Design reads but can't set as written. */
-const IN_CODE = 'Shown as the code writes it.'
+export const IN_CODE = 'Shown as the code writes it.'
 
 /** Each Safe area option but Respect, and the parentheses of `.ignoresSafeArea` that write it, regions `.all` and edges `.all` being its defaults. */
 const SAFE_AREAS: Readonly<Record<string, string>> = { 'Extend to top': '(edges: .top)', 'Extend to bottom': '(edges: .bottom)', 'Extend all': '()' }
@@ -84,6 +84,12 @@ export function setAround(node: AuthoringNode, byId: (id: string | undefined) =>
   return undefined
 }
 
+/** Why a field shows what a view around it sets, read only, naming it as Layers does: a VStack is a Column. */
+export function setThere(view: AuthoringNode): string {
+  const name = stackLayoutOf(view.name) ?? view.name
+  return `Set on the ${isContainerLayout(name) ? CONTAINER_WORDS[name] : name} around it. Change it there.`
+}
+
 /**
  * A carousel's Page dots and Dots background (Wave 4c), on a TabView whose pages are swiped
  * through: `.tabViewStyle(.page)`, with `indexDisplayMode:` saying when its dots show, and
@@ -104,8 +110,7 @@ export function pagerControls(expr: Expr, modifiers: readonly CallExpr[], text: 
   const description = 'A rounded backing behind the dots, so they show over any page.', none = () => ({ start: style.span.end, end: style.span.end, text: '' })
   if (!background && around) {
     const inherited = around.modifier.expression.replace(/^\./, '').replace(/\s/g, '') === BACKGROUND_WRITTEN
-    // Named as Layers names it: a VStack is a Column.
-    const name = stackLayoutOf(around.view.name) ?? around.view.name, reason = `Set on the ${isContainerLayout(name) ? CONTAINER_WORDS[name] : name} around it. Change it there.`
+    const reason = setThere(around.view)
     return add('pager:background', 'Dots background', inherited ? 'toggle' : 'text', inherited ? 'true' : around.modifier.expression, none, undefined, undefined, undefined, inherited ? description : IN_CODE, around.modifier.source, reason)
   }
   const at = background && ownSpan(background), own = at ? text.slice(at.start, at.end) : ''
