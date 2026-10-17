@@ -191,9 +191,9 @@ export function TemplateGallery({
       setCreateError(null)
       void switching(options => onChoose(item.id, options))
         .then((made) => {
-          if (made === 'failed') setCreateError(`${item.name} could not be loaded. Please try again.`)
+          if (made === 'failed') setCreateError(`${item.name} couldn’t be loaded. Check your connection and try again.`)
         })
-        .catch(() => setCreateError(`${item.name} could not be loaded. Please try again.`))
+        .catch(() => setCreateError(`${item.name} couldn’t be loaded. Check your connection and try again.`))
         .finally(() => {
           creatingRef.current = false
           setCreating(false)

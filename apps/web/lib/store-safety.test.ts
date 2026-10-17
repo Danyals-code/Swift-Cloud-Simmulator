@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createProjectStore, StaleProjectError } from '@studio/project-model'
 import { useStudio } from './store'
 
+// Templates come from disk here: the same files the studio fetches from public/templates.
+vi.mock('./templateSources', () => import('../../../tests/helpers/template-sources'))
+
 /**
  * What the store does when saving goes wrong (B1, B2, B3).
  *

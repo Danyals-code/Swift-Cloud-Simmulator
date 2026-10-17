@@ -4,8 +4,9 @@
  * Everything the welcome sheet needs to *draw* a template - what it is called, which
  * of the two kinds it is, what it says about itself, and the files it would lay down -
  * and nothing it needs to *create* one. That split is the whole point of this file:
- * the sheet opens at launch, and the sources behind it are 31 KB gzipped that nobody
- * needs until they press Create.
+ * the sheet opens at launch, and the sources behind it are static files under
+ * `apps/web/public/templates/<id>/`, at the paths listed here, fetched only when
+ * somebody presses Create.
  *
  * This is also the single source of truth for the metadata. `templates.ts` pairs each
  * entry here with its files, and a test asserts the two lists still agree - so a
@@ -40,7 +41,10 @@ export interface TemplateInfo {
   readonly description: string
   /** Screen names for apps, or concepts taught by a focused example. */
   readonly highlights?: readonly string[]
-  /** The paths it lays down, in navigator order. The text lives in `templates.ts`. */
+  /**
+   * The paths it lays down, in navigator order. The text is at
+   * `public/templates/<id>/<path>`, except the blank screen's, inline in `starter.ts`.
+   */
   readonly files: readonly string[]
 }
 

@@ -6,8 +6,8 @@ import { TEMPLATES, templateById } from './templates'
  * The seam between the two halves of the gallery.
  *
  * The metadata lives in `catalog.ts` and is in the initial bundle; the Swift lives in
- * `templates.ts` and is loaded when somebody presses Create. That split is what keeps
- * 31 KB gzipped out of the first paint, and it is also a chance for the two lists to
+ * `apps/web/public/templates` and is fetched when somebody presses Create (Wave 7a). That
+ * split keeps the template sources out of the bundle, and it is also a chance for the two lists to
  * disagree - a template added to one and forgotten in the other would half-exist: a
  * card in the sheet that creates an empty project, or a project nobody can reach.
  *

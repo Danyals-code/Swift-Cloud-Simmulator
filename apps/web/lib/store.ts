@@ -11,6 +11,8 @@ import {
   type DocumentSelection,
   addFile,
   addFolder,
+  createDefaultProject,
+  createProjectFromTemplate,
   createProjectStore,
   decodeProject,
   dirname,
@@ -33,6 +35,7 @@ import {
   type OpenedFile,
   type Project,
   type ProjectStore,
+  type Template,
   StaleProjectError,
   type ProjectSummary,
   type PromptMessage,
@@ -43,20 +46,10 @@ import { STUDIO_BUILD } from './build'
 import { eventLog, type DesignEvent, type StudioEvent } from './eventLog'
 import { registerLiveWork, takeSafeStart } from './recovery'
 import { lastOpenedId, rememberLastOpened } from './lastOpened'
+import { fetchTemplate } from './templateSources'
 import type { FileId, SourceSpan } from '@studio/shared'
 
 const AUTOSAVE_MS = 500
-
-/**
- * Loading the templates.
- *
- * Dynamic on purpose: the corpus is about 31 KB gzipped and nothing needs it until
- * somebody presses Create or arrives with nothing saved. Everything the welcome sheet
- * draws comes from the catalog, which is in the initial bundle and is a kilobyte.
- */
-async function templates() {
-  return import('@studio/project-model/templates')
-}
 
 let store: ProjectStore | null = null
 function persistence(): ProjectStore {
@@ -536,18 +529,8 @@ export const useStudio = create<StudioState>((rawSet, get) => {
         : 'Could not open saved work from this browser’s storage.'
     }
 
-    // The starter project lives in the same chunk the templates do. If it cannot be
-    // fetched there is nothing to open, and the studio has to say that rather than
-    // sit on "Loading project…" for ever.
-    let project = existing
-    if (!project) {
-      try {
-        project = (await templates()).createDefaultProject()
-      } catch {
-        set({ loaded: true, origin: 'fresh', durable, loadError: 'Could not load the starter project. Check the connection and reload.' })
-        return
-      }
-    }
+    // The starter is the blank screen, which is inline: nothing to fetch.
+    const project = existing ?? createDefaultProject()
     const first = project.files[0]?.id ?? null
     // What was read is what is stored. After a failed read the starter is not written,
     // but nothing has been typed into it either, so leaving it loses nothing.
@@ -906,17 +889,17 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       const open = get().project
       if (open?.manifest.templateId === templateId && isPristine(open)) return 'opened'
 
-      let module: Awaited<ReturnType<typeof templates>>
+      // Fetched from `public/templates/`. Offline, the gallery says so and the open
+      // project stays as it was.
+      let template: Template | undefined
       try {
-        module = await templates()
+        template = await fetchTemplate(templateId)
       } catch {
         return 'failed'
       }
-
-      const template = module.templateById(templateId)
       if (!template) return 'failed'
 
-      return replace(withUnusedName(module.createProjectFromTemplate(template)), { type: 'project', action: 'created', template: templateId }, options)
+      return replace(withUnusedName(createProjectFromTemplate(template)), { type: 'project', action: 'created', template: templateId }, options)
     },
 
     async importProject(expected, incoming) {

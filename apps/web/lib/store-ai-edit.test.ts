@@ -3,6 +3,9 @@ import { createProjectStore } from '@studio/project-model'
 import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
 import { useStudio } from './store'
 
+// Templates come from disk here: the same files the studio fetches from public/templates.
+vi.mock('./templateSources', () => import('../../../tests/helpers/template-sources'))
+
 /**
  * An AI edit holds the project while it works (G12).
  *

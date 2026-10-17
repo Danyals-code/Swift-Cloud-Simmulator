@@ -1,6 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createProjectStore } from '@studio/project-model'
 import { useStudio } from './store'
+
+// Templates come from disk here: the same files the studio fetches from public/templates.
+vi.mock('./templateSources', () => import('../../../tests/helpers/template-sources'))
 
 /**
  * The store's one-per-browser invariants.
